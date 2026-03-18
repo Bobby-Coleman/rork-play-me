@@ -40,11 +40,15 @@ actor APIService {
     static let shared = APIService()
 
     private var baseURL: String {
-        let url = Config.EXPO_PUBLIC_RORK_API_BASE_URL
-        if url.isEmpty {
-            return ""
+        let backendURL = Config.EXPO_PUBLIC_BACKEND_URL
+        if !backendURL.isEmpty {
+            return backendURL.hasSuffix("/") ? String(backendURL.dropLast()) : backendURL
         }
-        return url + "/api/rest"
+        let rorkURL = Config.EXPO_PUBLIC_RORK_API_BASE_URL
+        if !rorkURL.isEmpty {
+            return rorkURL + "/api/rest"
+        }
+        return ""
     }
 
     private func request<T: Decodable & Sendable>(_ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> T {

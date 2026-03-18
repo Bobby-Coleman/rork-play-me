@@ -4,8 +4,8 @@ let supabaseInstance: ReturnType<typeof createClient> | null = null;
 
 function supabase() {
   if (!supabaseInstance) {
-    const url = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
-    const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
+    const url = process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
+    const key = process.env.SUPABASE_ANON_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
     supabaseInstance = createClient(url, key);
   }
   return supabaseInstance;
