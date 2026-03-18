@@ -1,12 +1,39 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-let supabaseInstance: ReturnType<typeof createClient> | null = null;
+interface Database {
+  public: {
+    Tables: {
+      users: {
+        Row: DbUser;
+        Insert: Omit<DbUser, "id" | "created_at">;
+        Update: Partial<Omit<DbUser, "id" | "created_at">>;
+      };
+      connections: {
+        Row: DbConnection;
+        Insert: Omit<DbConnection, "id" | "created_at">;
+        Update: Partial<Omit<DbConnection, "id" | "created_at">>;
+      };
+      shares: {
+        Row: DbShare;
+        Insert: Omit<DbShare, "id" | "created_at">;
+        Update: Partial<Omit<DbShare, "id" | "created_at">>;
+      };
+      songs: {
+        Row: DbSong;
+        Insert: Omit<DbSong, "id">;
+        Update: Partial<Omit<DbSong, "id">>;
+      };
+    };
+  };
+}
+
+let supabaseInstance: SupabaseClient<Database> | null = null;
 
 function supabase() {
   if (!supabaseInstance) {
     const url = process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
     const key = process.env.SUPABASE_ANON_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
-    supabaseInstance = createClient(url, key);
+    supabaseInstance = createClient<Database>(url, key);
   }
   return supabaseInstance;
 }
