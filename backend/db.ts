@@ -144,7 +144,7 @@ export const db = {
     create: async (input: { phone: string; firstName: string; username: string }) => {
       const { data, error } = await supabase()
         .from("users")
-        .insert({ phone: input.phone, first_name: input.firstName, username: input.username })
+        .insert({ phone: input.phone, first_name: input.firstName, username: input.username } as any)
         .select("*")
         .single();
       if (error) throw error;
@@ -178,7 +178,7 @@ export const db = {
     create: async (userAId: string, userBId: string) => {
       const { data, error } = await supabase()
         .from("connections")
-        .insert({ user_a_id: userAId, user_b_id: userBId })
+        .insert({ user_a_id: userAId, user_b_id: userBId } as any)
         .select("*")
         .single();
       if (error) throw error;
@@ -212,7 +212,7 @@ export const db = {
           recipient_id: input.recipientId,
           song_id: input.songId,
           note: input.note,
-        })
+        } as any)
         .select("*")
         .single();
       if (error) throw error;
