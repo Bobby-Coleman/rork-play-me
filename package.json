@@ -1,0 +1,20 @@
+{
+  "name": "rork-app",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@hono/trpc-server": "^0.4.2",
+    "@supabase/supabase-js": "^2.99.2",
+    "@trpc/server": "^11.13.4",
+    "hono": "^4.12.8",
+    "superjson": "^2.2.6",
+    "zod": "^4.3.6"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "apps": [
+    {
+      "name": "Play Me",
+      "path": "ios",
+      "framework": "swift"
+    }
+  ]
+}
