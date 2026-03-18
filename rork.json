@@ -5,5 +5,8 @@
       "path": "ios",
       "framework": "swift"
     }
-  ]
+  ],
+  "backend": {
+    "path": "backend/hono.ts"
+  }
 }
