@@ -9,7 +9,6 @@ struct NameUsernameView: View {
     @State private var step: Int = 0
     @State private var usernameAvailable: Bool? = nil
     @State private var checkingUsername = false
-    @State private var checkFailed = false
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -112,16 +111,6 @@ struct NameUsernameView: View {
                                 .foregroundStyle(.white.opacity(0.5))
                         }
                         .padding(.top, 8)
-                    } else if checkFailed && !username.isEmpty {
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                                .font(.caption)
-                            Text("could not verify — check connection")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                        .padding(.top, 8)
                     } else if let available = usernameAvailable, !username.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: available ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -161,23 +150,15 @@ struct NameUsernameView: View {
     private func checkUsernameAvailability(_ value: String) {
         guard !value.isEmpty else {
             usernameAvailable = nil
-            checkFailed = false
             return
         }
         checkingUsername = true
-        checkFailed = false
         Task {
             try? await Task.sleep(for: .milliseconds(400))
             guard username == value else { return }
-            let result = await appState.checkUsername(value)
+            let available = await appState.checkUsername(value)
             checkingUsername = false
-            if let available = result {
-                usernameAvailable = available
-                checkFailed = false
-            } else {
-                usernameAvailable = nil
-                checkFailed = true
-            }
+            usernameAvailable = available
         }
     }
 }

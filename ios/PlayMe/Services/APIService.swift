@@ -39,15 +39,12 @@ nonisolated struct APIError: Error, Sendable {
 actor APIService {
     static let shared = APIService()
 
-    private let baseURL: String
-
-    init() {
-        let rorkURL = MainActor.assumeIsolated { Config.EXPO_PUBLIC_RORK_API_BASE_URL }
-        if !rorkURL.isEmpty {
-            baseURL = rorkURL + "/api/rest"
-        } else {
-            baseURL = ""
+    private var baseURL: String {
+        let url = Config.EXPO_PUBLIC_RORK_API_BASE_URL
+        if url.isEmpty {
+            return ""
         }
+        return url + "/api/rest"
     }
 
     private func request<T: Decodable & Sendable>(_ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> T {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "../create-context";
-import { db } from "../../db";
+import { db } from "@/backend/db";
 
 export const usersRouter = createTRPCRouter({
   register: publicProcedure
@@ -9,34 +9,33 @@ export const usersRouter = createTRPCRouter({
       firstName: z.string(),
       username: z.string(),
     }))
-    .mutation(async ({ input }) => {
-      const existing = await db.users.getByPhone(input.phone);
+    .mutation(({ input }) => {
+      const existing = db.users.getByPhone(input.phone);
       if (existing) {
         return existing;
       }
-      const available = await db.users.checkUsername(input.username);
-      if (!available) {
+      if (!db.users.checkUsername(input.username)) {
         throw new Error("Username taken");
       }
-      return await db.users.create(input);
+      return db.users.create(input);
     }),
 
   getByPhone: publicProcedure
     .input(z.object({ phone: z.string() }))
-    .query(async ({ input }) => {
-      return (await db.users.getByPhone(input.phone)) ?? null;
+    .query(({ input }) => {
+      return db.users.getByPhone(input.phone) ?? null;
     }),
 
   checkUsername: publicProcedure
     .input(z.object({ username: z.string() }))
-    .query(async ({ input }) => {
-      return { available: await db.users.checkUsername(input.username) };
+    .query(({ input }) => {
+      return { available: db.users.checkUsername(input.username) };
     }),
 
   search: publicProcedure
     .input(z.object({ query: z.string(), excludeUserId: z.string().optional() }))
-    .query(async ({ input }) => {
-      let results = await db.users.searchByUsername(input.query);
+    .query(({ input }) => {
+      let results = db.users.searchByUsername(input.query);
       if (input.excludeUserId) {
         results = results.filter(u => u.id !== input.excludeUserId);
       }
@@ -45,7 +44,7 @@ export const usersRouter = createTRPCRouter({
 
   getFriends: publicProcedure
     .input(z.object({ userId: z.string() }))
-    .query(async ({ input }) => {
-      return await db.connections.getFriends(input.userId);
+    .query(({ input }) => {
+      return db.connections.getFriends(input.userId);
     }),
 });

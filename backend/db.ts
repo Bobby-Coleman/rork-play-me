@@ -1,249 +1,139 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-
-interface Database {
-  public: {
-    Tables: {
-      users: {
-        Row: DbUser;
-        Insert: Omit<DbUser, "id" | "created_at">;
-        Update: Partial<Omit<DbUser, "id" | "created_at">>;
-      };
-      connections: {
-        Row: DbConnection;
-        Insert: Omit<DbConnection, "id" | "created_at">;
-        Update: Partial<Omit<DbConnection, "id" | "created_at">>;
-      };
-      shares: {
-        Row: DbShare;
-        Insert: Omit<DbShare, "id" | "created_at">;
-        Update: Partial<Omit<DbShare, "id" | "created_at">>;
-      };
-      songs: {
-        Row: DbSong;
-        Insert: Omit<DbSong, "id">;
-        Update: Partial<Omit<DbSong, "id">>;
-      };
-    };
-  };
-}
-
-let supabaseInstance: SupabaseClient<Database> | null = null;
-
-function supabase() {
-  if (!supabaseInstance) {
-    const url = process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
-    const key = process.env.SUPABASE_ANON_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
-    supabaseInstance = createClient<Database>(url, key);
-  }
-  return supabaseInstance;
-}
-
 export interface DbUser {
   id: string;
   phone: string;
-  first_name: string;
+  firstName: string;
   username: string;
-  created_at: string;
+  createdAt: string;
 }
 
 export interface DbConnection {
   id: string;
-  user_a_id: string;
-  user_b_id: string;
-  created_at: string;
+  userAId: string;
+  userBId: string;
+  createdAt: string;
 }
 
 export interface DbShare {
   id: string;
-  sender_id: string;
-  recipient_id: string;
-  song_id: string;
+  senderId: string;
+  recipientId: string;
+  songId: string;
   note: string | null;
-  created_at: string;
+  createdAt: string;
 }
 
 export interface DbSong {
   id: string;
   title: string;
   artist: string;
-  album_art_url: string;
+  albumArtURL: string;
   duration: string;
 }
 
-function mapUser(row: DbUser) {
-  return {
-    id: row.id,
-    phone: row.phone,
-    firstName: row.first_name,
-    username: row.username,
-    createdAt: row.created_at,
-  };
-}
+const users: Map<string, DbUser> = new Map();
+const connections: Map<string, DbConnection> = new Map();
+const shares: Map<string, DbShare> = new Map();
 
-function mapSong(row: DbSong) {
-  return {
-    id: row.id,
-    title: row.title,
-    artist: row.artist,
-    albumArtURL: row.album_art_url,
-    duration: row.duration,
-  };
-}
-
-function mapShare(row: DbShare) {
-  return {
-    id: row.id,
-    senderId: row.sender_id,
-    recipientId: row.recipient_id,
-    songId: row.song_id,
-    note: row.note,
-    createdAt: row.created_at,
-  };
-}
+const songs: DbSong[] = [
+  { id: "1", title: "Can't Help Myself", artist: "Kita Alexander", albumArtURL: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&h=600&fit=crop", duration: "3:15" },
+  { id: "2", title: "Whispers in the Pines", artist: "Luna & The Woods", albumArtURL: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&h=600&fit=crop", duration: "3:22" },
+  { id: "3", title: "City Lights in the Rain", artist: "Neon Eclipse", albumArtURL: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=600&h=600&fit=crop", duration: "4:34" },
+  { id: "4", title: "Moments & Motion", artist: "Jade Rivers", albumArtURL: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&h=600&fit=crop", duration: "3:48" },
+  { id: "5", title: "Golden Hour", artist: "Mystic Source", albumArtURL: "https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=600&h=600&fit=crop", duration: "4:12" },
+  { id: "6", title: "Midnight Drive", artist: "The Velvet Haze", albumArtURL: "https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=600&h=600&fit=crop", duration: "3:56" },
+  { id: "7", title: "Bloom", artist: "Pale Winter", albumArtURL: "https://images.unsplash.com/photo-1484755560615-a4c64e778a6c?w=600&h=600&fit=crop", duration: "3:30" },
+  { id: "8", title: "Echoes of You", artist: "Dream Coast", albumArtURL: "https://images.unsplash.com/photo-1506157786151-b8491531f063?w=600&h=600&fit=crop", duration: "4:05" },
+  { id: "9", title: "Slow Burn", artist: "Amber Skies", albumArtURL: "https://images.unsplash.com/photo-1446057032654-9d8885db76c6?w=600&h=600&fit=crop", duration: "3:42" },
+  { id: "10", title: "Neon Dreams", artist: "Glass Animals Jr.", albumArtURL: "https://images.unsplash.com/photo-1504898770365-14faca6a7320?w=600&h=600&fit=crop", duration: "4:18" },
+  { id: "11", title: "Paper Planes", artist: "Wild Nothing", albumArtURL: "https://images.unsplash.com/photo-1485579149621-3123dd979885?w=600&h=600&fit=crop", duration: "3:10" },
+  { id: "12", title: "Coastline", artist: "Tidal Wave", albumArtURL: "https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=600&h=600&fit=crop", duration: "3:55" },
+  { id: "13", title: "After Dark", artist: "Noir Collective", albumArtURL: "https://images.unsplash.com/photo-1415201364774-f6f0bb35f28f?w=600&h=600&fit=crop", duration: "4:25" },
+  { id: "14", title: "Satellite", artist: "Cosmic Drift", albumArtURL: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=600&h=600&fit=crop", duration: "3:38" },
+  { id: "15", title: "Honey", artist: "Still Corners", albumArtURL: "https://images.unsplash.com/photo-1453090927415-5f45085b65c0?w=600&h=600&fit=crop", duration: "4:01" },
+];
 
 export const db = {
   songs: {
-    getAll: async () => {
-      const { data, error } = await supabase().from("songs").select("*");
-      if (error) throw error;
-      return (data as DbSong[]).map(mapSong);
-    },
-    getById: async (id: string) => {
-      const { data, error } = await supabase().from("songs").select("*").eq("id", id).single();
-      if (error) return undefined;
-      return mapSong(data as DbSong);
-    },
-    search: async (query: string) => {
-      if (!query) return db.songs.getAll();
-      const q = `%${query}%`;
-      const { data, error } = await supabase()
-        .from("songs")
-        .select("*")
-        .or(`title.ilike.${q},artist.ilike.${q}`);
-      if (error) throw error;
-      return (data as DbSong[]).map(mapSong);
+    getAll: () => songs,
+    getById: (id: string) => songs.find(s => s.id === id),
+    search: (query: string) => {
+      if (!query) return songs;
+      const q = query.toLowerCase();
+      return songs.filter(s =>
+        s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q)
+      );
     },
   },
 
   users: {
-    getById: async (id: string) => {
-      const { data, error } = await supabase().from("users").select("*").eq("id", id).single();
-      if (error) return undefined;
-      return mapUser(data as DbUser);
+    getById: (id: string) => users.get(id),
+    getByPhone: (phone: string) => Array.from(users.values()).find(u => u.phone === phone),
+    getByUsername: (username: string) => Array.from(users.values()).find(u => u.username === username),
+    create: (data: { phone: string; firstName: string; username: string }): DbUser => {
+      const id = crypto.randomUUID();
+      const user: DbUser = { id, ...data, createdAt: new Date().toISOString() };
+      users.set(id, user);
+      return user;
     },
-    getByPhone: async (phone: string) => {
-      const { data, error } = await supabase().from("users").select("*").eq("phone", phone).single();
-      if (error) return undefined;
-      return mapUser(data as DbUser);
-    },
-    getByUsername: async (username: string) => {
-      const { data, error } = await supabase().from("users").select("*").eq("username", username).single();
-      if (error) return undefined;
-      return mapUser(data as DbUser);
-    },
-    create: async (input: { phone: string; firstName: string; username: string }) => {
-      const { data, error } = await supabase()
-        .from("users")
-        .insert({ phone: input.phone, first_name: input.firstName, username: input.username } as any)
-        .select("*")
-        .single();
-      if (error) throw error;
-      return mapUser(data as DbUser);
-    },
-    searchByUsername: async (query: string) => {
+    searchByUsername: (query: string) => {
       if (!query) return [];
-      const q = `%${query}%`;
-      const { data, error } = await supabase()
-        .from("users")
-        .select("*")
-        .or(`username.ilike.${q},first_name.ilike.${q}`);
-      if (error) throw error;
-      return (data as DbUser[]).map(mapUser);
+      const q = query.toLowerCase();
+      return Array.from(users.values()).filter(u =>
+        u.username.toLowerCase().includes(q) || u.firstName.toLowerCase().includes(q)
+      );
     },
-    checkUsername: async (username: string) => {
-      const { data } = await supabase().from("users").select("id").eq("username", username).single();
-      return !data;
-    },
+    checkUsername: (username: string) => !Array.from(users.values()).some(u => u.username === username),
   },
 
   connections: {
-    exists: async (userAId: string, userBId: string) => {
-      const { data } = await supabase()
-        .from("connections")
-        .select("id")
-        .or(`and(user_a_id.eq.${userAId},user_b_id.eq.${userBId}),and(user_a_id.eq.${userBId},user_b_id.eq.${userAId})`)
-        .limit(1);
-      return (data && data.length > 0) || false;
-    },
-    create: async (userAId: string, userBId: string) => {
-      const { data, error } = await supabase()
-        .from("connections")
-        .insert({ user_a_id: userAId, user_b_id: userBId } as any)
-        .select("*")
-        .single();
-      if (error) throw error;
-      return data;
-    },
-    getFriends: async (userId: string): Promise<ReturnType<typeof mapUser>[]> => {
-      const { data, error } = await supabase()
-        .from("connections")
-        .select("*")
-        .or(`user_a_id.eq.${userId},user_b_id.eq.${userId}`);
-      if (error) throw error;
-      const friendIds = (data as DbConnection[]).map(c =>
-        c.user_a_id === userId ? c.user_b_id : c.user_a_id
+    getForUser: (userId: string) => {
+      return Array.from(connections.values()).filter(
+        c => c.userAId === userId || c.userBId === userId
       );
-      if (friendIds.length === 0) return [];
-      const { data: friends, error: fErr } = await supabase()
-        .from("users")
-        .select("*")
-        .in("id", friendIds);
-      if (fErr) throw fErr;
-      return (friends as DbUser[]).map(mapUser);
+    },
+    exists: (userAId: string, userBId: string) => {
+      return Array.from(connections.values()).some(
+        c => (c.userAId === userAId && c.userBId === userBId) ||
+             (c.userAId === userBId && c.userBId === userAId)
+      );
+    },
+    create: (userAId: string, userBId: string): DbConnection => {
+      const id = crypto.randomUUID();
+      const conn: DbConnection = { id, userAId, userBId, createdAt: new Date().toISOString() };
+      connections.set(id, conn);
+      return conn;
+    },
+    getFriends: (userId: string): DbUser[] => {
+      const conns = Array.from(connections.values()).filter(
+        c => c.userAId === userId || c.userBId === userId
+      );
+      return conns.map(c => {
+        const friendId = c.userAId === userId ? c.userBId : c.userAId;
+        return users.get(friendId);
+      }).filter(Boolean) as DbUser[];
     },
   },
 
   shares: {
-    create: async (input: { senderId: string; recipientId: string; songId: string; note: string | null }) => {
-      const { data, error } = await supabase()
-        .from("shares")
-        .insert({
-          sender_id: input.senderId,
-          recipient_id: input.recipientId,
-          song_id: input.songId,
-          note: input.note,
-        } as any)
-        .select("*")
-        .single();
-      if (error) throw error;
-      const exists = await db.connections.exists(input.senderId, input.recipientId);
-      if (!exists) {
-        await db.connections.create(input.senderId, input.recipientId);
+    create: (data: { senderId: string; recipientId: string; songId: string; note: string | null }): DbShare => {
+      const id = crypto.randomUUID();
+      const share: DbShare = { id, ...data, createdAt: new Date().toISOString() };
+      shares.set(id, share);
+      if (!db.connections.exists(data.senderId, data.recipientId)) {
+        db.connections.create(data.senderId, data.recipientId);
       }
-      return mapShare(data as DbShare);
+      return share;
     },
-    getReceived: async (userId: string) => {
-      const { data, error } = await supabase()
-        .from("shares")
-        .select("*")
-        .eq("recipient_id", userId)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data as DbShare[]).map(mapShare);
+    getReceived: (userId: string) => {
+      return Array.from(shares.values())
+        .filter(s => s.recipientId === userId)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     },
-    getSent: async (userId: string) => {
-      const { data, error } = await supabase()
-        .from("shares")
-        .select("*")
-        .eq("sender_id", userId)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data as DbShare[]).map(mapShare);
+    getSent: (userId: string) => {
+      return Array.from(shares.values())
+        .filter(s => s.senderId === userId)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     },
-    getById: async (id: string) => {
-      const { data, error } = await supabase().from("shares").select("*").eq("id", id).single();
-      if (error) return undefined;
-      return mapShare(data as DbShare);
-    },
+    getById: (id: string) => shares.get(id),
   },
 };

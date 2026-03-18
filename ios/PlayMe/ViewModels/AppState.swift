@@ -162,11 +162,11 @@ class AppState {
         }
     }
 
-    func checkUsername(_ username: String) async -> Bool? {
+    func checkUsername(_ username: String) async -> Bool {
         do {
             return try await APIService.shared.checkUsername(username)
         } catch {
-            return nil
+            return true
         }
     }
 
