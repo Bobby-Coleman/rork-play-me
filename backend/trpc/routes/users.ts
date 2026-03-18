@@ -9,33 +9,34 @@ export const usersRouter = createTRPCRouter({
       firstName: z.string(),
       username: z.string(),
     }))
-    .mutation(({ input }) => {
-      const existing = db.users.getByPhone(input.phone);
+    .mutation(async ({ input }) => {
+      const existing = await db.users.getByPhone(input.phone);
       if (existing) {
         return existing;
       }
-      if (!db.users.checkUsername(input.username)) {
+      const available = await db.users.checkUsername(input.username);
+      if (!available) {
         throw new Error("Username taken");
       }
-      return db.users.create(input);
+      return await db.users.create({ phone: input.phone, first_name: input.firstName, username: input.username });
     }),
 
   getByPhone: publicProcedure
     .input(z.object({ phone: z.string() }))
-    .query(({ input }) => {
-      return db.users.getByPhone(input.phone) ?? null;
+    .query(async ({ input }) => {
+      return (await db.users.getByPhone(input.phone)) ?? null;
     }),
 
   checkUsername: publicProcedure
     .input(z.object({ username: z.string() }))
-    .query(({ input }) => {
-      return { available: db.users.checkUsername(input.username) };
+    .query(async ({ input }) => {
+      return { available: await db.users.checkUsername(input.username) };
     }),
 
   search: publicProcedure
     .input(z.object({ query: z.string(), excludeUserId: z.string().optional() }))
-    .query(({ input }) => {
-      let results = db.users.searchByUsername(input.query);
+    .query(async ({ input }) => {
+      let results = await db.users.searchByUsername(input.query);
       if (input.excludeUserId) {
         results = results.filter(u => u.id !== input.excludeUserId);
       }
@@ -44,7 +45,7 @@ export const usersRouter = createTRPCRouter({
 
   getFriends: publicProcedure
     .input(z.object({ userId: z.string() }))
-    .query(({ input }) => {
-      return db.connections.getFriends(input.userId);
+    .query(async ({ input }) => {
+      return await db.connections.getFriends(input.userId);
     }),
 });

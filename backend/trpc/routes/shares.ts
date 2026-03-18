@@ -10,48 +10,59 @@ export const sharesRouter = createTRPCRouter({
       songId: z.string(),
       note: z.string().nullable(),
     }))
-    .mutation(({ input }) => {
-      const share = db.shares.create(input);
-      const song = db.songs.getById(input.songId);
-      const sender = db.users.getById(input.senderId);
-      const recipient = db.users.getById(input.recipientId);
+    .mutation(async ({ input }) => {
+      const share = await db.shares.create({
+        sender_id: input.senderId,
+        recipient_id: input.recipientId,
+        song_id: input.songId,
+        note: input.note,
+      });
+      const [song, sender, recipient] = await Promise.all([
+        db.songs.getById(share.song_id),
+        db.users.getById(share.sender_id),
+        db.users.getById(share.recipient_id),
+      ]);
       return { ...share, song, sender, recipient };
     }),
 
   getReceived: publicProcedure
     .input(z.object({ userId: z.string() }))
-    .query(({ input }) => {
-      const rawShares = db.shares.getReceived(input.userId);
-      return rawShares.map(s => ({
-        ...s,
-        song: db.songs.getById(s.songId),
-        sender: db.users.getById(s.senderId),
-        recipient: db.users.getById(s.recipientId),
+    .query(async ({ input }) => {
+      const rawShares = await db.shares.getReceived(input.userId);
+      return Promise.all(rawShares.map(async (s) => {
+        const [song, sender, recipient] = await Promise.all([
+          db.songs.getById(s.song_id),
+          db.users.getById(s.sender_id),
+          db.users.getById(s.recipient_id),
+        ]);
+        return { ...s, song, sender, recipient };
       }));
     }),
 
   getSent: publicProcedure
     .input(z.object({ userId: z.string() }))
-    .query(({ input }) => {
-      const rawShares = db.shares.getSent(input.userId);
-      return rawShares.map(s => ({
-        ...s,
-        song: db.songs.getById(s.songId),
-        sender: db.users.getById(s.senderId),
-        recipient: db.users.getById(s.recipientId),
+    .query(async ({ input }) => {
+      const rawShares = await db.shares.getSent(input.userId);
+      return Promise.all(rawShares.map(async (s) => {
+        const [song, sender, recipient] = await Promise.all([
+          db.songs.getById(s.song_id),
+          db.users.getById(s.sender_id),
+          db.users.getById(s.recipient_id),
+        ]);
+        return { ...s, song, sender, recipient };
       }));
     }),
 
   getById: publicProcedure
     .input(z.object({ id: z.string() }))
-    .query(({ input }) => {
-      const share = db.shares.getById(input.id);
+    .query(async ({ input }) => {
+      const share = await db.shares.getById(input.id);
       if (!share) return null;
-      return {
-        ...share,
-        song: db.songs.getById(share.songId),
-        sender: db.users.getById(share.senderId),
-        recipient: db.users.getById(share.recipientId),
-      };
+      const [song, sender, recipient] = await Promise.all([
+        db.songs.getById(share.song_id),
+        db.users.getById(share.sender_id),
+        db.users.getById(share.recipient_id),
+      ]);
+      return { ...share, song, sender, recipient };
     }),
 });

@@ -1,139 +1,172 @@
+import { supabase } from "./supabase";
+
 export interface DbUser {
   id: string;
   phone: string;
-  firstName: string;
+  first_name: string;
   username: string;
-  createdAt: string;
+  created_at: string;
 }
 
 export interface DbConnection {
   id: string;
-  userAId: string;
-  userBId: string;
-  createdAt: string;
+  user_a_id: string;
+  user_b_id: string;
+  created_at: string;
 }
 
 export interface DbShare {
   id: string;
-  senderId: string;
-  recipientId: string;
-  songId: string;
+  sender_id: string;
+  recipient_id: string;
+  song_id: string;
   note: string | null;
-  createdAt: string;
+  created_at: string;
 }
 
 export interface DbSong {
   id: string;
   title: string;
   artist: string;
-  albumArtURL: string;
+  album_art_url: string;
   duration: string;
 }
 
-const users: Map<string, DbUser> = new Map();
-const connections: Map<string, DbConnection> = new Map();
-const shares: Map<string, DbShare> = new Map();
-
-const songs: DbSong[] = [
-  { id: "1", title: "Can't Help Myself", artist: "Kita Alexander", albumArtURL: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&h=600&fit=crop", duration: "3:15" },
-  { id: "2", title: "Whispers in the Pines", artist: "Luna & The Woods", albumArtURL: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&h=600&fit=crop", duration: "3:22" },
-  { id: "3", title: "City Lights in the Rain", artist: "Neon Eclipse", albumArtURL: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=600&h=600&fit=crop", duration: "4:34" },
-  { id: "4", title: "Moments & Motion", artist: "Jade Rivers", albumArtURL: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&h=600&fit=crop", duration: "3:48" },
-  { id: "5", title: "Golden Hour", artist: "Mystic Source", albumArtURL: "https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=600&h=600&fit=crop", duration: "4:12" },
-  { id: "6", title: "Midnight Drive", artist: "The Velvet Haze", albumArtURL: "https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=600&h=600&fit=crop", duration: "3:56" },
-  { id: "7", title: "Bloom", artist: "Pale Winter", albumArtURL: "https://images.unsplash.com/photo-1484755560615-a4c64e778a6c?w=600&h=600&fit=crop", duration: "3:30" },
-  { id: "8", title: "Echoes of You", artist: "Dream Coast", albumArtURL: "https://images.unsplash.com/photo-1506157786151-b8491531f063?w=600&h=600&fit=crop", duration: "4:05" },
-  { id: "9", title: "Slow Burn", artist: "Amber Skies", albumArtURL: "https://images.unsplash.com/photo-1446057032654-9d8885db76c6?w=600&h=600&fit=crop", duration: "3:42" },
-  { id: "10", title: "Neon Dreams", artist: "Glass Animals Jr.", albumArtURL: "https://images.unsplash.com/photo-1504898770365-14faca6a7320?w=600&h=600&fit=crop", duration: "4:18" },
-  { id: "11", title: "Paper Planes", artist: "Wild Nothing", albumArtURL: "https://images.unsplash.com/photo-1485579149621-3123dd979885?w=600&h=600&fit=crop", duration: "3:10" },
-  { id: "12", title: "Coastline", artist: "Tidal Wave", albumArtURL: "https://images.unsplash.com/photo-1498038432885-c6f3f1b912ee?w=600&h=600&fit=crop", duration: "3:55" },
-  { id: "13", title: "After Dark", artist: "Noir Collective", albumArtURL: "https://images.unsplash.com/photo-1415201364774-f6f0bb35f28f?w=600&h=600&fit=crop", duration: "4:25" },
-  { id: "14", title: "Satellite", artist: "Cosmic Drift", albumArtURL: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=600&h=600&fit=crop", duration: "3:38" },
-  { id: "15", title: "Honey", artist: "Still Corners", albumArtURL: "https://images.unsplash.com/photo-1453090927415-5f45085b65c0?w=600&h=600&fit=crop", duration: "4:01" },
-];
-
 export const db = {
   songs: {
-    getAll: () => songs,
-    getById: (id: string) => songs.find(s => s.id === id),
-    search: (query: string) => {
-      if (!query) return songs;
-      const q = query.toLowerCase();
-      return songs.filter(s =>
-        s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q)
-      );
+    getAll: async (): Promise<DbSong[]> => {
+      const { data, error } = await supabase.from("songs").select("*").order("id");
+      if (error) throw error;
+      return data ?? [];
+    },
+    getById: async (id: string): Promise<DbSong | null> => {
+      const { data, error } = await supabase.from("songs").select("*").eq("id", id).single();
+      if (error) return null;
+      return data;
+    },
+    search: async (query: string): Promise<DbSong[]> => {
+      if (!query) return db.songs.getAll();
+      const { data, error } = await supabase
+        .from("songs")
+        .select("*")
+        .or(`title.ilike.%${query}%,artist.ilike.%${query}%`)
+        .order("id");
+      if (error) throw error;
+      return data ?? [];
     },
   },
 
   users: {
-    getById: (id: string) => users.get(id),
-    getByPhone: (phone: string) => Array.from(users.values()).find(u => u.phone === phone),
-    getByUsername: (username: string) => Array.from(users.values()).find(u => u.username === username),
-    create: (data: { phone: string; firstName: string; username: string }): DbUser => {
-      const id = crypto.randomUUID();
-      const user: DbUser = { id, ...data, createdAt: new Date().toISOString() };
-      users.set(id, user);
-      return user;
+    getById: async (id: string): Promise<DbUser | null> => {
+      const { data, error } = await supabase.from("users").select("*").eq("id", id).single();
+      if (error) return null;
+      return data;
     },
-    searchByUsername: (query: string) => {
+    getByPhone: async (phone: string): Promise<DbUser | null> => {
+      const { data, error } = await supabase.from("users").select("*").eq("phone", phone).single();
+      if (error) return null;
+      return data;
+    },
+    create: async (input: { phone: string; first_name: string; username: string }): Promise<DbUser> => {
+      const { data, error } = await supabase.from("users").insert(input).select().single();
+      if (error) throw error;
+      return data;
+    },
+    searchByUsername: async (query: string): Promise<DbUser[]> => {
       if (!query) return [];
-      const q = query.toLowerCase();
-      return Array.from(users.values()).filter(u =>
-        u.username.toLowerCase().includes(q) || u.firstName.toLowerCase().includes(q)
-      );
+      const { data, error } = await supabase
+        .from("users")
+        .select("*")
+        .or(`username.ilike.%${query}%,first_name.ilike.%${query}%`);
+      if (error) throw error;
+      return data ?? [];
     },
-    checkUsername: (username: string) => !Array.from(users.values()).some(u => u.username === username),
+    checkUsername: async (username: string): Promise<boolean> => {
+      const { data, error } = await supabase.from("users").select("id").eq("username", username).maybeSingle();
+      if (error) throw error;
+      return data === null;
+    },
   },
 
   connections: {
-    getForUser: (userId: string) => {
-      return Array.from(connections.values()).filter(
-        c => c.userAId === userId || c.userBId === userId
-      );
+    exists: async (userAId: string, userBId: string): Promise<boolean> => {
+      const { data, error } = await supabase
+        .from("connections")
+        .select("id")
+        .or(
+          `and(user_a_id.eq.${userAId},user_b_id.eq.${userBId}),and(user_a_id.eq.${userBId},user_b_id.eq.${userAId})`
+        )
+        .maybeSingle();
+      if (error) return false;
+      return data !== null;
     },
-    exists: (userAId: string, userBId: string) => {
-      return Array.from(connections.values()).some(
-        c => (c.userAId === userAId && c.userBId === userBId) ||
-             (c.userAId === userBId && c.userBId === userAId)
-      );
+    create: async (userAId: string, userBId: string): Promise<DbConnection> => {
+      const { data, error } = await supabase
+        .from("connections")
+        .insert({ user_a_id: userAId, user_b_id: userBId })
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
     },
-    create: (userAId: string, userBId: string): DbConnection => {
-      const id = crypto.randomUUID();
-      const conn: DbConnection = { id, userAId, userBId, createdAt: new Date().toISOString() };
-      connections.set(id, conn);
-      return conn;
-    },
-    getFriends: (userId: string): DbUser[] => {
-      const conns = Array.from(connections.values()).filter(
-        c => c.userAId === userId || c.userBId === userId
+    getFriends: async (userId: string): Promise<DbUser[]> => {
+      const { data: conns, error } = await supabase
+        .from("connections")
+        .select("*")
+        .or(`user_a_id.eq.${userId},user_b_id.eq.${userId}`);
+      if (error) throw error;
+      if (!conns || conns.length === 0) return [];
+
+      const friendIds = conns.map((c: DbConnection) =>
+        c.user_a_id === userId ? c.user_b_id : c.user_a_id
       );
-      return conns.map(c => {
-        const friendId = c.userAId === userId ? c.userBId : c.userAId;
-        return users.get(friendId);
-      }).filter(Boolean) as DbUser[];
+      const { data: friends, error: friendsError } = await supabase
+        .from("users")
+        .select("*")
+        .in("id", friendIds);
+      if (friendsError) throw friendsError;
+      return friends ?? [];
     },
   },
 
   shares: {
-    create: (data: { senderId: string; recipientId: string; songId: string; note: string | null }): DbShare => {
-      const id = crypto.randomUUID();
-      const share: DbShare = { id, ...data, createdAt: new Date().toISOString() };
-      shares.set(id, share);
-      if (!db.connections.exists(data.senderId, data.recipientId)) {
-        db.connections.create(data.senderId, data.recipientId);
+    create: async (input: {
+      sender_id: string;
+      recipient_id: string;
+      song_id: string;
+      note: string | null;
+    }): Promise<DbShare> => {
+      const { data, error } = await supabase.from("shares").insert(input).select().single();
+      if (error) throw error;
+
+      const connected = await db.connections.exists(input.sender_id, input.recipient_id);
+      if (!connected) {
+        await db.connections.create(input.sender_id, input.recipient_id);
       }
-      return share;
+      return data;
     },
-    getReceived: (userId: string) => {
-      return Array.from(shares.values())
-        .filter(s => s.recipientId === userId)
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    getReceived: async (userId: string): Promise<DbShare[]> => {
+      const { data, error } = await supabase
+        .from("shares")
+        .select("*")
+        .eq("recipient_id", userId)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data ?? [];
     },
-    getSent: (userId: string) => {
-      return Array.from(shares.values())
-        .filter(s => s.senderId === userId)
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    getSent: async (userId: string): Promise<DbShare[]> => {
+      const { data, error } = await supabase
+        .from("shares")
+        .select("*")
+        .eq("sender_id", userId)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data ?? [];
     },
-    getById: (id: string) => shares.get(id),
+    getById: async (id: string): Promise<DbShare | null> => {
+      const { data, error } = await supabase.from("shares").select("*").eq("id", id).single();
+      if (error) return null;
+      return data;
+    },
   },
 };
