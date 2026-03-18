@@ -9,6 +9,7 @@ struct NameUsernameView: View {
     @State private var step: Int = 0
     @State private var usernameAvailable: Bool? = nil
     @State private var checkingUsername = false
+    @State private var usernameCheckFailed = false
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -111,6 +112,16 @@ struct NameUsernameView: View {
                                 .foregroundStyle(.white.opacity(0.5))
                         }
                         .padding(.top, 8)
+                    } else if usernameCheckFailed && !username.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .font(.caption)
+                            Text("Could not verify — check connection")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                        .padding(.top, 8)
                     } else if let available = usernameAvailable, !username.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: available ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -121,6 +132,13 @@ struct NameUsernameView: View {
                                 .foregroundStyle(available ? .green : .red)
                         }
                         .padding(.top, 8)
+                    }
+
+                    if let error = appState.registrationError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .padding(.top, 8)
                     }
                 }
 
@@ -150,15 +168,23 @@ struct NameUsernameView: View {
     private func checkUsernameAvailability(_ value: String) {
         guard !value.isEmpty else {
             usernameAvailable = nil
+            usernameCheckFailed = false
             return
         }
         checkingUsername = true
+        usernameCheckFailed = false
         Task {
             try? await Task.sleep(for: .milliseconds(400))
             guard username == value else { return }
-            let available = await appState.checkUsername(value)
+            let result = await appState.checkUsername(value)
             checkingUsername = false
-            usernameAvailable = available
+            if let available = result {
+                usernameAvailable = available
+                usernameCheckFailed = false
+            } else {
+                usernameAvailable = nil
+                usernameCheckFailed = true
+            }
         }
     }
 }

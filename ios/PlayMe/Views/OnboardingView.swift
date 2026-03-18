@@ -21,8 +21,10 @@ struct OnboardingView: View {
             case 3:
                 NameUsernameView(firstName: $firstName, username: $username, appState: appState) {
                     Task {
-                        await appState.register(phone: phone, firstName: firstName, username: username)
-                        withAnimation(.easeInOut(duration: 0.4)) { step = 4 }
+                        let success = await appState.register(phone: phone, firstName: firstName, username: username)
+                        if success {
+                            withAnimation(.easeInOut(duration: 0.4)) { step = 4 }
+                        }
                     }
                 }
             case 4:

@@ -31,6 +31,7 @@ class AppState {
     var showSentToast = false
     var isLoading = false
     var isBackendAvailable = false
+    var registrationError: String? = nil
 
     var likedShares: [SongShare] {
         (receivedShares + sentShares).filter { likedShareIds.contains($0.id) }
@@ -51,15 +52,16 @@ class AppState {
         }
     }
 
-    func register(phone: String, firstName: String, username: String) async {
+    func register(phone: String, firstName: String, username: String) async -> Bool {
+        registrationError = nil
         do {
             let response = try await APIService.shared.register(phone: phone, firstName: firstName, username: username)
             currentUser = AppUser(id: response.id, firstName: response.firstName, username: response.username, phone: response.phone)
             isBackendAvailable = true
+            return true
         } catch {
-            let localId = UUID().uuidString
-            currentUser = AppUser(id: localId, firstName: firstName, username: username, phone: phone)
-            isBackendAvailable = false
+            registrationError = "Could not create account. Please check your connection and try again."
+            return false
         }
     }
 
@@ -162,11 +164,11 @@ class AppState {
         }
     }
 
-    func checkUsername(_ username: String) async -> Bool {
+    func checkUsername(_ username: String) async -> Bool? {
         do {
             return try await APIService.shared.checkUsername(username)
         } catch {
-            return true
+            return nil
         }
     }
 
