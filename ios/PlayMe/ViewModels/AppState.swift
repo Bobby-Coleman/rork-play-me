@@ -21,6 +21,8 @@ class AppState {
 
     var friends: [AppUser] = []
     var songs: [Song] = MockData.songs
+    var searchResults: [Song] = []
+    var isSearchingSongs: Bool = false
     var receivedShares: [SongShare] = []
     var sentShares: [SongShare] = []
     var likedShareIds: Set<String> = [] {
@@ -94,12 +96,22 @@ class AppState {
         }
     }
 
-    func searchSongs(query: String) -> [Song] {
-        guard !query.isEmpty else { return songs }
-        return songs.filter {
-            $0.title.localizedCaseInsensitiveContains(query) ||
-            $0.artist.localizedCaseInsensitiveContains(query)
+    func searchSongs(query: String) async {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            searchResults = []
+            isSearchingSongs = false
+            return
         }
+
+        isSearchingSongs = true
+        do {
+            let results = try await MusicSearchService.shared.search(term: trimmed)
+            searchResults = results
+        } catch {
+            searchResults = []
+        }
+        isSearchingSongs = false
     }
 
     func searchFriends(query: String) -> [AppUser] {

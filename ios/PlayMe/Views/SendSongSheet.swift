@@ -7,6 +7,7 @@ struct SendSongSheet: View {
     @State private var searchText: String = ""
     @State private var selectedSong: Song?
     @State private var step: Int = 0
+    @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -62,10 +63,16 @@ struct SendSongSheet: View {
                 TextField("Search songs or artists...", text: $searchText)
                     .foregroundStyle(.white)
                     .autocorrectionDisabled()
+                    .onChange(of: searchText) { _, newValue in
+                        performSearch(newValue)
+                    }
 
                 if !searchText.isEmpty {
                     Button {
                         searchText = ""
+                        appState.searchResults = []
+                        appState.isSearchingSongs = false
+                        searchTask?.cancel()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.white.opacity(0.4))
@@ -81,13 +88,65 @@ struct SendSongSheet: View {
 
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(appState.searchSongs(query: searchText)) { song in
-                        songRow(song)
+                    if appState.isSearchingSongs {
+                        ProgressView()
+                            .tint(.white)
+                            .padding(.top, 40)
+                    } else if searchText.isEmpty {
+                        hintView
+                    } else if appState.searchResults.isEmpty {
+                        noResultsView
+                    } else {
+                        ForEach(appState.searchResults) { song in
+                            songRow(song)
+                        }
                     }
                 }
                 .padding(.horizontal, 20)
             }
             .scrollDismissesKeyboard(.interactively)
+        }
+    }
+
+    private var hintView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "music.magnifyingglass")
+                .font(.system(size: 36))
+                .foregroundStyle(.white.opacity(0.15))
+            Text("Search for any song")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.3))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 60)
+    }
+
+    private var noResultsView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 36))
+                .foregroundStyle(.white.opacity(0.15))
+            Text("No results for \"\(searchText)\"")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.3))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 60)
+    }
+
+    private func performSearch(_ query: String) {
+        searchTask?.cancel()
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            appState.searchResults = []
+            appState.isSearchingSongs = false
+            return
+        }
+        appState.isSearchingSongs = true
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            await appState.searchSongs(query: trimmed)
         }
     }
 
