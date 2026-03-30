@@ -30,14 +30,16 @@ class AudioPlayerService {
         } catch {}
     }
 
+    var noPreviewAvailable: Bool = false
+
     func play(song: Song) {
         guard let previewURLString = song.previewURL,
               let url = URL(string: previewURLString) else {
-            if let uri = song.spotifyURI {
-                openInSpotify(uri: uri)
-            }
+            noPreviewAvailable = true
+            error = "No preview available — open in Spotify to listen"
             return
         }
+        noPreviewAvailable = false
 
         if currentSongId == song.id, let player {
             if isPlaying {

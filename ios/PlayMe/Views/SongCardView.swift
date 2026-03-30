@@ -114,7 +114,7 @@ struct SongCardView: View {
             scrubBar
                 .padding(.bottom, 2)
 
-            HStack(spacing: 24) {
+            HStack(spacing: 16) {
                 Button {
                     audioPlayer.play(song: share.song)
                 } label: {
@@ -136,7 +136,7 @@ struct SongCardView: View {
                 }
                 .sensoryFeedback(.impact(weight: .light), trigger: isPlayingThis)
 
-                if share.song.previewURL == nil, share.song.spotifyURI != nil {
+                if share.song.spotifyURI != nil {
                     Button {
                         if let uri = share.song.spotifyURI, let url = URL(string: uri) {
                             UIApplication.shared.open(url)
@@ -155,6 +155,13 @@ struct SongCardView: View {
                         .clipShape(.capsule)
                     }
                 }
+            }
+
+            if audioPlayer.noPreviewAvailable && (audioPlayer.currentSongId == nil || audioPlayer.currentSongId == share.song.id) {
+                Text("Preview unavailable — tap Open in Spotify")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .padding(.top, 4)
             }
         }
     }
