@@ -6,7 +6,17 @@ struct SongCardView: View {
     let onSendBack: () -> Void
     let onToggleLike: () -> Void
 
-    @State private var showToast = false
+    @State private var audioPlayer: AudioPlayerService = .shared
+    @State private var isScrubbing: Bool = false
+    @State private var scrubValue: Double = 0
+
+    private var isCurrentSong: Bool {
+        audioPlayer.currentSongId == share.song.id
+    }
+
+    private var isPlayingThis: Bool {
+        isCurrentSong && audioPlayer.isPlaying
+    }
 
     var body: some View {
         ZStack {
@@ -65,7 +75,7 @@ struct SongCardView: View {
                     }
                     .shadow(color: .white.opacity(0.05), radius: 20, y: 10)
                     .padding(.horizontal, 24)
-                    .padding(.bottom, 20)
+                    .padding(.bottom, 16)
 
                 if let note = share.note {
                     Text("\"\(note)\"")
@@ -74,32 +84,12 @@ struct SongCardView: View {
                         .italic()
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)
-                        .padding(.bottom, 16)
+                        .padding(.bottom, 12)
                 }
 
-                HStack(spacing: 16) {
-                    Button {
-                        showToast = true
-                        Task {
-                            try? await Task.sleep(for: .seconds(2))
-                            showToast = false
-                        }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 13))
-                            Text("Play")
-                                .font(.system(size: 15, weight: .semibold))
-                        }
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 12)
-                        .background(.white)
-                        .clipShape(.capsule)
-                    }
-                    .sensoryFeedback(.impact(weight: .light), trigger: showToast)
-                }
-                .padding(.bottom, 12)
+                playerControls
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 12)
 
                 Button(action: onSendBack) {
                     HStack(spacing: 8) {
@@ -117,19 +107,109 @@ struct SongCardView: View {
                 .padding(.bottom, 24)
             }
         }
-        .overlay(alignment: .top) {
-            if showToast {
-                Text("Song would open in Spotify / Apple Music")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(.ultraThinMaterial)
+    }
+
+    private var playerControls: some View {
+        VStack(spacing: 8) {
+            scrubBar
+                .padding(.bottom, 2)
+
+            HStack(spacing: 24) {
+                Button {
+                    audioPlayer.play(song: share.song)
+                } label: {
+                    ZStack {
+                        if isCurrentSong && audioPlayer.isLoading {
+                            ProgressView()
+                                .tint(.black)
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: isPlayingThis ? "pause.fill" : "play.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .contentTransition(.symbolEffect(.replace))
+                        }
+                    }
+                    .foregroundStyle(.black)
+                    .frame(width: 52, height: 40)
+                    .background(.white)
                     .clipShape(.capsule)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .padding(.top, 60)
+                }
+                .sensoryFeedback(.impact(weight: .light), trigger: isPlayingThis)
+
+                if share.song.previewURL == nil, share.song.spotifyURI != nil {
+                    Button {
+                        if let uri = share.song.spotifyURI, let url = URL(string: uri) {
+                            UIApplication.shared.open(url)
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("Open in Spotify")
+                                .font(.system(size: 13, weight: .medium))
+                        }
+                        .foregroundStyle(.white.opacity(0.6))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(.capsule)
+                    }
+                }
             }
         }
-        .animation(.spring(duration: 0.3), value: showToast)
+    }
+
+    private var scrubBar: some View {
+        VStack(spacing: 4) {
+            GeometryReader { geo in
+                let width = geo.size.width
+                let progressValue = isScrubbing ? scrubValue : (isCurrentSong ? audioPlayer.progress : 0)
+
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.15))
+                        .frame(height: 4)
+
+                    Capsule()
+                        .fill(Color.white.opacity(0.9))
+                        .frame(width: max(0, width * progressValue), height: 4)
+
+                    Circle()
+                        .fill(.white)
+                        .frame(width: isScrubbing ? 14 : 10, height: isScrubbing ? 14 : 10)
+                        .offset(x: max(0, min(width * progressValue - (isScrubbing ? 7 : 5), width - (isScrubbing ? 14 : 10))))
+                        .animation(.spring(duration: 0.2), value: isScrubbing)
+                }
+                .frame(height: 14)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            isScrubbing = true
+                            let fraction = max(0, min(1, value.location.x / width))
+                            scrubValue = fraction
+                        }
+                        .onEnded { value in
+                            let fraction = max(0, min(1, value.location.x / width))
+                            if isCurrentSong {
+                                let seekTime = fraction * audioPlayer.duration
+                                audioPlayer.seek(to: seekTime)
+                            }
+                            isScrubbing = false
+                        }
+                )
+            }
+            .frame(height: 14)
+
+            HStack {
+                Text(isCurrentSong ? audioPlayer.formattedTime(audioPlayer.currentTime) : "0:00")
+                    .monospacedDigit()
+                Spacer()
+                Text(isCurrentSong && audioPlayer.duration > 0 ? audioPlayer.formattedTime(audioPlayer.duration) : (share.song.duration.isEmpty ? "0:30" : share.song.duration))
+                    .monospacedDigit()
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.white.opacity(0.4))
+        }
     }
 }

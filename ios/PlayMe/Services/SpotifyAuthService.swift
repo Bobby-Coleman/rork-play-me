@@ -28,6 +28,7 @@ nonisolated struct SpotifyTrack: Codable, Sendable {
     let name: String
     let uri: String
     let duration_ms: Int
+    let preview_url: String?
     let artists: [SpotifyArtist]
     let album: SpotifyAlbum
 }
@@ -191,7 +192,8 @@ class SpotifyAuthService {
                 artist: track.artists.map(\.name).joined(separator: ", "),
                 albumArtURL: artURL,
                 duration: duration,
-                spotifyURI: track.uri
+                spotifyURI: track.uri,
+                previewURL: track.preview_url
             )
         } catch {
             return nil
