@@ -63,6 +63,13 @@
 			);
 			target = XX24E7FAEAE6D286D45D0AXX /* PlayMeWidget */;
 		};
+		XXA1B2C3D4E5F6A7B8C9D0XX /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 105FC5792E9EAD3100EA8BCF /* PlayMe */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -70,6 +77,9 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = PlayMe;
 			sourceTree = "<group>";
+			exceptions = (
+				XXA1B2C3D4E5F6A7B8C9D0XX /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+			);
 		};
 		105FC58C2E9EAD3200EA8BCF /* PlayMeTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -496,6 +506,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PlayMe/Info.plist;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -530,6 +541,7 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PlayMe/Info.plist;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

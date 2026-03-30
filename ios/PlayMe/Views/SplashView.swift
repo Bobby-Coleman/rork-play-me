@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct SplashView: View {
-    let onContinue: () -> Void
+    let spotifyAuth: SpotifyAuthService
+    let onConnected: () -> Void
 
     @State private var floatingOffsets: [CGSize] = (0..<6).map { _ in
         CGSize(width: CGFloat.random(in: -30...30), height: CGFloat.random(in: -30...30))
@@ -52,15 +53,43 @@ struct SplashView: View {
 
                 Spacer()
 
-                Button(action: onContinue) {
-                    Text("CONTINUE")
-                        .font(.system(size: 15, weight: .bold))
-                        .tracking(1.5)
+                VStack(spacing: 14) {
+                    Button {
+                        spotifyAuth.startLogin()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "music.note")
+                                .font(.system(size: 18, weight: .bold))
+                            Text("CONNECT WITH SPOTIFY")
+                                .font(.system(size: 15, weight: .bold))
+                                .tracking(1)
+                        }
                         .foregroundStyle(.black)
                         .frame(maxWidth: .infinity)
                         .frame(height: 52)
-                        .background(.white)
+                        .background(Color(red: 0.11, green: 0.73, blue: 0.33))
                         .clipShape(.rect(cornerRadius: 26))
+                    }
+                    .disabled(spotifyAuth.isLoggingIn)
+                    .opacity(spotifyAuth.isLoggingIn ? 0.6 : 1)
+
+                    if spotifyAuth.isLoggingIn {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .tint(.white)
+                                .scaleEffect(0.8)
+                            Text("Waiting for Spotify...")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+                    }
+
+                    if let error = spotifyAuth.authError {
+                        Text(error)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.red.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                    }
                 }
                 .padding(.horizontal, 40)
                 .padding(.bottom, 60)
@@ -74,6 +103,11 @@ struct SplashView: View {
                         height: CGFloat.random(in: -40...40)
                     )
                 }
+            }
+        }
+        .onChange(of: spotifyAuth.isAuthenticated) { _, authenticated in
+            if authenticated {
+                onConnected()
             }
         }
     }

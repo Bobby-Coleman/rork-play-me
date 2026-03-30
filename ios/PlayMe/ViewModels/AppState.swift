@@ -54,10 +54,10 @@ class AppState {
         }
     }
 
-    func register(phone: String, firstName: String, username: String) async -> Bool {
+    func register(username: String) async -> Bool {
         registrationError = nil
         let id = UUID().uuidString
-        currentUser = AppUser(id: id, firstName: firstName, username: username, phone: phone)
+        currentUser = AppUser(id: id, firstName: username, username: username, phone: "")
         isBackendAvailable = false
         return true
     }
@@ -151,6 +151,7 @@ class AppState {
         likedShareIds = []
         isOnboarded = false
         isBackendAvailable = false
+        SpotifyAuthService.shared.logout()
         UserDefaults.standard.removeObject(forKey: "currentUserId")
         UserDefaults.standard.removeObject(forKey: "currentUserFirstName")
         UserDefaults.standard.removeObject(forKey: "currentUserUsername")

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
+    let spotifyAuth: SpotifyAuthService
     @State private var appState = AppState()
     @State private var showSendSheet = false
     @State private var selectedTab: Int = 0
@@ -12,7 +13,7 @@ struct ContentView: View {
                     await appState.loadData()
                 }
         } else {
-            OnboardingView(appState: appState) {
+            OnboardingView(appState: appState, spotifyAuth: spotifyAuth) {
                 withAnimation(.easeInOut(duration: 0.5)) {
                     appState.isOnboarded = true
                 }
