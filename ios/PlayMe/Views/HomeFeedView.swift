@@ -17,6 +17,7 @@ struct HomeFeedView: View {
                         SongCardView(
                             share: share,
                             isLiked: appState.isLiked(shareId: share.id),
+                            player: appState.audioPlayer,
                             onSendBack: onSendSong,
                             onToggleLike: { appState.toggleLike(shareId: share.id) }
                         )
