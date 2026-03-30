@@ -54,53 +54,22 @@ class AppState {
 
     func register(phone: String, firstName: String, username: String) async -> Bool {
         registrationError = nil
-        do {
-            let response = try await APIService.shared.register(phone: phone, firstName: firstName, username: username)
-            currentUser = AppUser(id: response.id, firstName: response.firstName, username: response.username, phone: response.phone)
-            isBackendAvailable = true
-            return true
-        } catch {
-            registrationError = "Could not create account. Please check your connection and try again."
-            return false
-        }
+        let id = UUID().uuidString
+        currentUser = AppUser(id: id, firstName: firstName, username: username, phone: phone)
+        isBackendAvailable = false
+        return true
     }
 
     func loadData() async {
         guard let user = currentUser else { return }
         isLoading = true
 
-        do {
-            let remoteSongs = try await APIService.shared.getSongs()
-            songs = remoteSongs.map { Song(id: $0.id, title: $0.title, artist: $0.artist, albumArtURL: $0.albumArtURL, duration: $0.duration) }
-            isBackendAvailable = true
-        } catch {
-            songs = MockData.songs
-            isBackendAvailable = false
+        songs = MockData.songs
+        if friends.isEmpty {
+            friends = MockData.friends
         }
-
-        do {
-            let remoteFriends = try await APIService.shared.getFriends(userId: user.id)
-            friends = remoteFriends.map { AppUser(id: $0.id, firstName: $0.firstName, username: $0.username, phone: $0.phone) }
-        } catch {
-            if friends.isEmpty && !isBackendAvailable {
-                friends = MockData.friends
-            }
-        }
-
-        do {
-            let received = try await APIService.shared.getReceivedShares(userId: user.id)
-            receivedShares = received.compactMap { mapShare($0) }
-        } catch {
-            if receivedShares.isEmpty && !isBackendAvailable {
-                loadSampleShares()
-            }
-        }
-
-        do {
-            let sent = try await APIService.shared.getSentShares(userId: user.id)
-            sentShares = sent.compactMap { mapShare($0) }
-        } catch {
-            // keep existing
+        if receivedShares.isEmpty {
+            loadSampleShares()
         }
 
         isLoading = false
@@ -109,27 +78,14 @@ class AppState {
     func sendSong(_ song: Song, to friend: AppUser, note: String?) async {
         guard let user = currentUser else { return }
 
-        do {
-            let response = try await APIService.shared.sendShare(
-                senderId: user.id,
-                recipientId: friend.id,
-                songId: song.id,
-                note: note?.isEmpty == true ? nil : note
-            )
-            if let share = mapShare(response) {
-                sentShares.insert(share, at: 0)
-                updateWidgetData(share: share)
-            }
-        } catch {
-            let share = SongShare(
-                song: song,
-                sender: currentUser ?? AppUser(id: "me", firstName: "Me", username: "me", phone: ""),
-                recipient: friend,
-                note: note?.isEmpty == true ? nil : note
-            )
-            sentShares.insert(share, at: 0)
-            updateWidgetData(share: share)
-        }
+        let share = SongShare(
+            song: song,
+            sender: AppUser(id: user.id, firstName: user.firstName, username: user.username, phone: user.phone),
+            recipient: friend,
+            note: note?.isEmpty == true ? nil : note
+        )
+        sentShares.insert(share, at: 0)
+        updateWidgetData(share: share)
 
         showSentToast = true
         Task {
@@ -155,21 +111,12 @@ class AppState {
     }
 
     func searchAllUsers(query: String) async -> [AppUser] {
-        guard !query.isEmpty, let user = currentUser else { return [] }
-        do {
-            let results = try await APIService.shared.searchUsers(query: query, excludeUserId: user.id)
-            return results.map { AppUser(id: $0.id, firstName: $0.firstName, username: $0.username, phone: $0.phone) }
-        } catch {
-            return searchFriends(query: query)
-        }
+        return searchFriends(query: query)
     }
 
     func checkUsername(_ username: String) async -> Bool? {
-        do {
-            return try await APIService.shared.checkUsername(username)
-        } catch {
-            return nil
-        }
+        try? await Task.sleep(for: .milliseconds(300))
+        return true
     }
 
     func toggleLike(shareId: String) {
@@ -199,15 +146,7 @@ class AppState {
         UserDefaults.standard.removeObject(forKey: "likedShareIds")
     }
 
-    func refreshShares() async {
-        guard let user = currentUser else { return }
-        do {
-            let received = try await APIService.shared.getReceivedShares(userId: user.id)
-            receivedShares = received.compactMap { mapShare($0) }
-            let sent = try await APIService.shared.getSentShares(userId: user.id)
-            sentShares = sent.compactMap { mapShare($0) }
-        } catch {}
-    }
+    func refreshShares() async {}
 
     private func mapShare(_ response: APIShareResponse) -> SongShare? {
         guard let songResp = response.song,
