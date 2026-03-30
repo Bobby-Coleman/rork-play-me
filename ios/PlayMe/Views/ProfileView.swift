@@ -54,9 +54,6 @@ struct ProfileView: View {
                 }
                 .padding(.top, 32)
 
-                spotifySection
-                    .padding(.horizontal, 20)
-
                 tabPicker
                     .padding(.horizontal, 20)
 
@@ -99,71 +96,6 @@ struct ProfileView: View {
         .background(Color.black)
         .refreshable {
             await appState.refreshShares()
-        }
-    }
-
-    private var spotifySection: some View {
-        VStack(spacing: 0) {
-            if appState.spotifyAuth.isAuthenticated {
-                HStack(spacing: 12) {
-                    Image(systemName: "waveform.circle.fill")
-                        .font(.system(size: 28))
-                        .foregroundStyle(Color(red: 0.11, green: 0.73, blue: 0.33))
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text("Spotify Connected")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white)
-                            Circle()
-                                .fill(Color(red: 0.11, green: 0.73, blue: 0.33))
-                                .frame(width: 6, height: 6)
-                        }
-                        if let name = appState.spotifyAuth.userProfile?.display_name {
-                            Text(name)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.white.opacity(0.4))
-                        }
-                    }
-
-                    Spacer()
-
-                    Button {
-                        appState.spotifyAuth.disconnect()
-                    } label: {
-                        Text("Disconnect")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.red.opacity(0.8))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.06))
-                            .clipShape(.capsule)
-                    }
-                }
-                .padding(16)
-                .background(Color.white.opacity(0.05))
-                .clipShape(.rect(cornerRadius: 12))
-            } else {
-                Button {
-                    Task { await appState.spotifyAuth.authenticate() }
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "waveform.circle.fill")
-                            .font(.system(size: 20))
-                        Text("Connect Spotify")
-                            .font(.system(size: 15, weight: .semibold))
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.3))
-                    }
-                    .foregroundStyle(Color(red: 0.11, green: 0.73, blue: 0.33))
-                    .padding(16)
-                    .background(Color(red: 0.11, green: 0.73, blue: 0.33).opacity(0.1))
-                    .clipShape(.rect(cornerRadius: 12))
-                }
-                .disabled(appState.spotifyAuth.isAuthenticating)
-            }
         }
     }
 

@@ -28,10 +28,6 @@ struct OnboardingView: View {
                     }
                 }
             case 4:
-                SpotifyConnectView(spotifyAuth: appState.spotifyAuth) {
-                    withAnimation(.easeInOut(duration: 0.4)) { step = 5 }
-                }
-            case 5:
                 WidgetInstructionsView { onComplete() }
             default:
                 EmptyView()

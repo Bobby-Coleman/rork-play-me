@@ -35,9 +35,6 @@ class AppState {
     var isBackendAvailable = false
     var registrationError: String? = nil
 
-    let spotifyAuth = SpotifyAuthService()
-    let audioPlayer = AudioPlayerService.shared
-
     var likedShares: [SongShare] {
         (receivedShares + sentShares).filter { likedShareIds.contains($0.id) }
             .sorted { $0.timestamp > $1.timestamp }
@@ -66,7 +63,7 @@ class AppState {
     }
 
     func loadData() async {
-        guard currentUser != nil else { return }
+        guard let user = currentUser else { return }
         isLoading = true
 
         songs = MockData.songs
@@ -108,23 +105,12 @@ class AppState {
         }
 
         isSearchingSongs = true
-
-        if spotifyAuth.isAuthenticated, let token = await spotifyAuth.getValidAccessToken() {
-            do {
-                let results = try await SpotifyAPIService.shared.search(term: trimmed, accessToken: token)
-                searchResults = results
-            } catch {
-                searchResults = []
-            }
-        } else {
-            do {
-                let results = try await MusicSearchService.shared.search(term: trimmed)
-                searchResults = results
-            } catch {
-                searchResults = []
-            }
+        do {
+            let results = try await MusicSearchService.shared.search(term: trimmed)
+            searchResults = results
+        } catch {
+            searchResults = []
         }
-
         isSearchingSongs = false
     }
 
@@ -158,8 +144,6 @@ class AppState {
     }
 
     func logout() {
-        audioPlayer.stop()
-        spotifyAuth.disconnect()
         currentUser = nil
         friends = []
         receivedShares = []

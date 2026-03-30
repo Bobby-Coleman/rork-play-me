@@ -3,13 +3,10 @@ import SwiftUI
 struct SongCardView: View {
     let share: SongShare
     let isLiked: Bool
-    let player: AudioPlayerService
     let onSendBack: () -> Void
     let onToggleLike: () -> Void
 
-    private var isThisSongPlaying: Bool {
-        player.currentSong?.id == share.song.id && player.isPlaying
-    }
+    @State private var showToast = false
 
     var body: some View {
         ZStack {
@@ -66,20 +63,6 @@ struct SongCardView: View {
                         .sensoryFeedback(.impact(weight: .medium), trigger: isLiked)
                         .padding(12)
                     }
-                    .overlay(alignment: .center) {
-                        if share.song.previewURL != nil {
-                            Button {
-                                player.play(song: share.song)
-                            } label: {
-                                Image(systemName: isThisSongPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                    .font(.system(size: 56))
-                                    .foregroundStyle(.white)
-                                    .shadow(color: .black.opacity(0.5), radius: 12)
-                                    .contentTransition(.symbolEffect(.replace))
-                            }
-                            .sensoryFeedback(.impact(weight: .medium), trigger: isThisSongPlaying)
-                        }
-                    }
                     .shadow(color: .white.opacity(0.05), radius: 20, y: 10)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 20)
@@ -94,44 +77,27 @@ struct SongCardView: View {
                         .padding(.bottom, 16)
                 }
 
-                HStack(spacing: 12) {
-                    if share.song.previewURL != nil {
-                        Button {
-                            player.play(song: share.song)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: isThisSongPlaying ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 13))
-                                    .contentTransition(.symbolEffect(.replace))
-                                Text(isThisSongPlaying ? "Pause" : "Play")
-                                    .font(.system(size: 15, weight: .semibold))
-                            }
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 12)
-                            .background(.white)
-                            .clipShape(.capsule)
+                HStack(spacing: 16) {
+                    Button {
+                        showToast = true
+                        Task {
+                            try? await Task.sleep(for: .seconds(2))
+                            showToast = false
                         }
-                        .sensoryFeedback(.impact(weight: .light), trigger: isThisSongPlaying)
-                    }
-
-                    if share.song.spotifyID != nil {
-                        Button {
-                            player.openInSpotify(song: share.song)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "arrow.up.right")
-                                    .font(.system(size: 12, weight: .bold))
-                                Text("Spotify")
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                            .foregroundStyle(Color(red: 0.11, green: 0.73, blue: 0.33))
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 12)
-                            .background(Color(red: 0.11, green: 0.73, blue: 0.33).opacity(0.15))
-                            .clipShape(.capsule)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 13))
+                            Text("Play")
+                                .font(.system(size: 15, weight: .semibold))
                         }
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(.white)
+                        .clipShape(.capsule)
                     }
+                    .sensoryFeedback(.impact(weight: .light), trigger: showToast)
                 }
                 .padding(.bottom, 12)
 
@@ -151,5 +117,19 @@ struct SongCardView: View {
                 .padding(.bottom, 24)
             }
         }
+        .overlay(alignment: .top) {
+            if showToast {
+                Text("Song would open in Spotify / Apple Music")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial)
+                    .clipShape(.capsule)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .padding(.top, 60)
+            }
+        }
+        .animation(.spring(duration: 0.3), value: showToast)
     }
 }

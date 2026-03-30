@@ -49,27 +49,13 @@ struct SendSongSheet: View {
 
     private var songSearchView: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .bottom) {
-                Text("search a song")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(.white)
-
-                Spacer()
-
-                if appState.spotifyAuth.isAuthenticated {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(Color(red: 0.11, green: 0.73, blue: 0.33))
-                            .frame(width: 6, height: 6)
-                        Text("Spotify")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color(red: 0.11, green: 0.73, blue: 0.33))
-                    }
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, 20)
+            Text("search a song")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 20)
 
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
@@ -166,52 +152,28 @@ struct SendSongSheet: View {
 
     private func songRow(_ song: Song) -> some View {
         HStack(spacing: 14) {
-            ZStack {
-                Color(.systemGray5)
-                    .frame(width: 56, height: 56)
-                    .overlay {
-                        AsyncImage(url: URL(string: song.albumArtURL)) { phase in
-                            if let image = phase.image {
-                                image.resizable().aspectRatio(contentMode: .fill)
-                            }
+            Color(.systemGray5)
+                .frame(width: 56, height: 56)
+                .overlay {
+                    AsyncImage(url: URL(string: song.albumArtURL)) { phase in
+                        if let image = phase.image {
+                            image.resizable().aspectRatio(contentMode: .fill)
                         }
-                        .allowsHitTesting(false)
                     }
-                    .clipShape(.rect(cornerRadius: 6))
-
-                if song.previewURL != nil {
-                    Button {
-                        appState.audioPlayer.play(song: song)
-                    } label: {
-                        let isThisSong = appState.audioPlayer.currentSong?.id == song.id
-                        Image(systemName: isThisSong && appState.audioPlayer.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
-                            .background(.black.opacity(0.6))
-                            .clipShape(Circle())
-                    }
-                    .sensoryFeedback(.impact(weight: .light), trigger: appState.audioPlayer.currentSong?.id)
+                    .allowsHitTesting(false)
                 }
-            }
+                .clipShape(.rect(cornerRadius: 6))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(song.title)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                HStack(spacing: 4) {
-                    if song.spotifyID != nil {
-                        Image(systemName: "waveform")
-                            .font(.system(size: 9))
-                            .foregroundStyle(Color(red: 0.11, green: 0.73, blue: 0.33))
-                    }
-                    Text(song.artist.uppercased())
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
-                        .tracking(0.5)
-                        .lineLimit(1)
-                }
+                Text(song.artist.uppercased())
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .tracking(0.5)
+                    .lineLimit(1)
             }
 
             Spacer()

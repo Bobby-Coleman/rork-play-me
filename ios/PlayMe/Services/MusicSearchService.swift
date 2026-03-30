@@ -32,8 +32,7 @@ nonisolated struct iTunesTrack: Codable, Sendable {
             title: trackName,
             artist: artistName,
             albumArtURL: artworkUrl600,
-            duration: formattedDuration,
-            previewURL: previewUrl
+            duration: formattedDuration
         )
     }
 }
