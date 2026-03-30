@@ -30,6 +30,7 @@ class AppState {
             UserDefaults.standard.set(Array(likedShareIds), forKey: "likedShareIds")
         }
     }
+    var spotifySavedSong: Song?
     var showSentToast = false
     var isLoading = false
     var isBackendAvailable = false
@@ -66,7 +67,14 @@ class AppState {
         guard let user = currentUser else { return }
         isLoading = true
 
-        songs = MockData.songs
+        let spotifyAuth = SpotifyAuthService.shared
+        if spotifyAuth.isAuthenticated {
+            await spotifyAuth.fetchUserProfile()
+            if let savedTrack = await spotifyAuth.fetchRecentSavedTrack() {
+                spotifySavedSong = savedTrack
+            }
+        }
+
         if friends.isEmpty {
             friends = MockData.friends
         }
@@ -187,17 +195,13 @@ class AppState {
         let alice = MockData.friends[1]
         let ben = MockData.friends[2]
 
+        let feedSong = spotifySavedSong ?? MockData.songs[0]
+
         receivedShares = [
-            SongShare(song: MockData.songs[0], sender: molly, recipient: me, note: "this song reminds me of you 💛", timestamp: Date().addingTimeInterval(-300)),
-            SongShare(song: MockData.songs[3], sender: alice, recipient: me, note: "good lil song to wake up to", timestamp: Date().addingTimeInterval(-7200)),
-            SongShare(song: MockData.songs[5], sender: ben, recipient: me, note: nil, timestamp: Date().addingTimeInterval(-86400)),
-            SongShare(song: MockData.songs[7], sender: molly, recipient: me, note: "fell asleep to this and thought of u", timestamp: Date().addingTimeInterval(-172800)),
+            SongShare(song: feedSong, sender: molly, recipient: me, note: "this song reminds me of you 💛", timestamp: Date().addingTimeInterval(-300)),
         ]
 
-        sentShares = [
-            SongShare(song: MockData.songs[1], sender: me, recipient: molly, note: "listen to this rn", timestamp: Date().addingTimeInterval(-3600)),
-            SongShare(song: MockData.songs[4], sender: me, recipient: ben, note: nil, timestamp: Date().addingTimeInterval(-43200)),
-        ]
+        sentShares = []
     }
 
     private func updateWidgetData(share: SongShare) {

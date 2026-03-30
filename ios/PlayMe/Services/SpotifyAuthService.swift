@@ -10,6 +10,42 @@ nonisolated struct SpotifyTokenResponse: Codable, Sendable {
     let refresh_token: String?
 }
 
+nonisolated struct SpotifyUserProfile: Codable, Sendable {
+    let id: String
+    let display_name: String?
+}
+
+nonisolated struct SpotifySavedTracksResponse: Codable, Sendable {
+    let items: [SpotifySavedTrackItem]
+}
+
+nonisolated struct SpotifySavedTrackItem: Codable, Sendable {
+    let track: SpotifyTrack
+}
+
+nonisolated struct SpotifyTrack: Codable, Sendable {
+    let id: String
+    let name: String
+    let uri: String
+    let duration_ms: Int
+    let artists: [SpotifyArtist]
+    let album: SpotifyAlbum
+}
+
+nonisolated struct SpotifyArtist: Codable, Sendable {
+    let name: String
+}
+
+nonisolated struct SpotifyAlbum: Codable, Sendable {
+    let images: [SpotifyImage]
+}
+
+nonisolated struct SpotifyImage: Codable, Sendable {
+    let url: String
+    let width: Int?
+    let height: Int?
+}
+
 @Observable
 @MainActor
 class SpotifyAuthService {
@@ -37,7 +73,7 @@ class SpotifyAuthService {
     private let authorizeURL = "https://accounts.spotify.com/authorize"
     private let tokenURL = "https://accounts.spotify.com/api/token"
     private let redirectURI = "playme://spotify-callback"
-    private let scopes = "user-read-private user-read-email"
+    private let scopes = "user-read-private user-read-email user-library-read"
 
     private var clientID: String {
         let id = Config.EXPO_PUBLIC_SPOTIFY_CLIENT_ID
@@ -47,6 +83,7 @@ class SpotifyAuthService {
     init() {
         accessToken = UserDefaults.standard.string(forKey: "spotifyAccessToken")
         refreshToken = UserDefaults.standard.string(forKey: "spotifyRefreshToken")
+        userDisplayName = UserDefaults.standard.string(forKey: "spotifyDisplayName")
         let expiration = UserDefaults.standard.double(forKey: "spotifyTokenExpiration")
         if expiration > 0 {
             tokenExpirationDate = Date(timeIntervalSince1970: expiration)
@@ -114,6 +151,50 @@ class SpotifyAuthService {
             authError = "Failed to get access token"
             isLoggingIn = false
             return false
+        }
+    }
+
+    var userDisplayName: String? {
+        didSet { UserDefaults.standard.set(userDisplayName, forKey: "spotifyDisplayName") }
+    }
+
+    func fetchUserProfile() async {
+        guard let token = accessToken else { return }
+        var request = URLRequest(url: URL(string: "https://api.spotify.com/v1/me")!)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return }
+            let profile = try JSONDecoder().decode(SpotifyUserProfile.self, from: data)
+            userDisplayName = profile.display_name ?? profile.id
+        } catch {}
+    }
+
+    func fetchRecentSavedTrack() async -> Song? {
+        guard let token = accessToken else { return nil }
+        var request = URLRequest(url: URL(string: "https://api.spotify.com/v1/me/tracks?limit=1")!)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
+            let saved = try JSONDecoder().decode(SpotifySavedTracksResponse.self, from: data)
+            guard let item = saved.items.first else { return nil }
+            let track = item.track
+            let artURL = track.album.images.first?.url ?? ""
+            let durationSec = track.duration_ms / 1000
+            let mins = durationSec / 60
+            let secs = durationSec % 60
+            let duration = "\(mins):\(String(format: "%02d", secs))"
+            return Song(
+                id: track.id,
+                title: track.name,
+                artist: track.artists.map(\.name).joined(separator: ", "),
+                albumArtURL: artURL,
+                duration: duration,
+                spotifyURI: track.uri
+            )
+        } catch {
+            return nil
         }
     }
 
