@@ -157,8 +157,9 @@ struct SongCardView: View {
                 }
             }
 
-            if audioPlayer.noPreviewAvailable && (audioPlayer.currentSongId == nil || audioPlayer.currentSongId == share.song.id) {
-                Text("Preview unavailable — tap Open in Spotify")
+            if let error = audioPlayer.error,
+               audioPlayer.currentSongId == nil || audioPlayer.currentSongId == share.song.id {
+                Text(error)
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.4))
                     .padding(.top, 4)

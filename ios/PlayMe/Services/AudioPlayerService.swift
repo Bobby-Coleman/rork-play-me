@@ -13,14 +13,20 @@ class AudioPlayerService {
     var duration: TimeInterval = 0
     var isLoading: Bool = false
     var error: String?
+    var noPreviewAvailable: Bool = false
+    var isUsingSpotify: Bool = false
 
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var statusObservation: NSKeyValueObservation?
     private var durationObservation: NSKeyValueObservation?
 
+    private var currentSpotifyURI: String?
+    private let spotifyPlayback = SpotifyPlaybackService.shared
+
     private init() {
         setupAudioSession()
+        setupSpotifyCallbacks()
     }
 
     private func setupAudioSession() {
@@ -30,18 +36,93 @@ class AudioPlayerService {
         } catch {}
     }
 
-    var noPreviewAvailable: Bool = false
+    private func setupSpotifyCallbacks() {
+        spotifyPlayback.onStateChange = { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.syncFromSpotifyState()
+            }
+        }
+    }
 
     func play(song: Song) {
-        guard let previewURLString = song.previewURL,
-              let url = URL(string: previewURLString) else {
-            noPreviewAvailable = true
-            error = "No preview available — open in Spotify to listen"
+        if let spotifyURI = song.spotifyURI, !spotifyURI.isEmpty {
+            playViaSpotify(uri: spotifyURI, song: song)
             return
         }
+
+        if let previewURLString = song.previewURL, let url = URL(string: previewURLString) {
+            playViaAVPlayer(url: url, song: song)
+            return
+        }
+
+        noPreviewAvailable = true
+        error = "No preview available — open in Spotify to listen"
+    }
+
+    // MARK: - Spotify Playback
+
+    private func playViaSpotify(uri: String, song: Song) {
         noPreviewAvailable = false
 
-        if currentSongId == song.id, let player {
+        if currentSongId == song.id && isUsingSpotify {
+            if isPlaying {
+                spotifyPlayback.pause()
+            } else {
+                spotifyPlayback.resume()
+            }
+            return
+        }
+
+        stopAVPlayer()
+        isUsingSpotify = true
+        isLoading = true
+        error = nil
+        currentSongId = song.id
+        currentSpotifyURI = uri
+        currentTime = 0
+
+        let durationParts = song.duration.split(separator: ":")
+        if durationParts.count == 2,
+           let mins = Double(durationParts[0]),
+           let secs = Double(durationParts[1]) {
+            duration = mins * 60 + secs
+        } else {
+            duration = 0
+        }
+
+        spotifyPlayback.play(uri: uri)
+    }
+
+    private func syncFromSpotifyState() {
+        guard isUsingSpotify else { return }
+
+        let pb = spotifyPlayback
+
+        if pb.isConnected && !pb.isPaused {
+            isLoading = false
+            isPlaying = true
+        } else if pb.isConnected && pb.isPaused {
+            isLoading = false
+            isPlaying = false
+        }
+
+        if pb.trackDurationMs > 0 {
+            duration = Double(pb.trackDurationMs) / 1000.0
+        }
+        currentTime = Double(pb.playbackPositionMs) / 1000.0
+
+        if let err = pb.connectionError {
+            isLoading = false
+            error = err
+        }
+    }
+
+    // MARK: - AVPlayer Playback (fallback for preview URLs)
+
+    private func playViaAVPlayer(url: URL, song: Song) {
+        noPreviewAvailable = false
+
+        if currentSongId == song.id && !isUsingSpotify, let player {
             if isPlaying {
                 player.pause()
                 isPlaying = false
@@ -53,6 +134,7 @@ class AudioPlayerService {
         }
 
         stop()
+        isUsingSpotify = false
         isLoading = true
         error = nil
         currentSongId = song.id
@@ -83,36 +165,59 @@ class AudioPlayerService {
         addEndObserver()
     }
 
+    // MARK: - Public Controls
+
     func togglePlayPause() {
-        guard let player else { return }
-        if isPlaying {
-            player.pause()
-            isPlaying = false
-        } else {
-            player.play()
-            isPlaying = true
+        if isUsingSpotify {
+            if isPlaying {
+                spotifyPlayback.pause()
+            } else {
+                spotifyPlayback.resume()
+            }
+        } else if let player {
+            if isPlaying {
+                player.pause()
+                isPlaying = false
+            } else {
+                player.play()
+                isPlaying = true
+            }
         }
     }
 
     func seek(to time: TimeInterval) {
-        let cmTime = CMTime(seconds: time, preferredTimescale: 600)
-        player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
         currentTime = time
+        if isUsingSpotify {
+            spotifyPlayback.seek(toPositionMs: Int(time * 1000))
+        } else {
+            let cmTime = CMTime(seconds: time, preferredTimescale: 600)
+            player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
     }
 
     func stop() {
+        if isUsingSpotify {
+            spotifyPlayback.pause()
+        }
+        stopAVPlayer()
+        isUsingSpotify = false
+        isPlaying = false
+        currentTime = 0
+        duration = 0
+        currentSongId = nil
+        currentSpotifyURI = nil
+        isLoading = false
+        error = nil
+        noPreviewAvailable = false
+    }
+
+    private func stopAVPlayer() {
         player?.pause()
         removeTimeObserver()
         statusObservation?.invalidate()
         statusObservation = nil
         durationObservation = nil
         player = nil
-        isPlaying = false
-        currentTime = 0
-        duration = 0
-        currentSongId = nil
-        isLoading = false
-        error = nil
     }
 
     var progress: Double {
@@ -120,12 +225,14 @@ class AudioPlayerService {
         return currentTime / duration
     }
 
+    // MARK: - AVPlayer Observers
+
     private func addTimeObserver() {
         removeTimeObserver()
         let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
         timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, !self.isUsingSpotify else { return }
                 let seconds = time.seconds
                 if seconds.isFinite {
                     self.currentTime = seconds
@@ -150,12 +257,6 @@ class AudioPlayerService {
                 self.currentTime = 0
                 self.player?.seek(to: .zero)
             }
-        }
-    }
-
-    private func openInSpotify(uri: String) {
-        if let url = URL(string: uri) {
-            UIApplication.shared.open(url)
         }
     }
 

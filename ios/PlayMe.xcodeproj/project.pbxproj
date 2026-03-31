@@ -57,14 +57,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		XXA1B2C3D4E5F6A7B8C9D0XX /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+		XXA1B2C3D4E5F6A7B8C9D0XX /* Exceptions for "PlayMe" folder in "PlayMe" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
 			target = 105FC5792E9EAD3100EA8BCF /* PlayMe */;
 		};
-		XXC0043600F55E8BA8B2D0XX /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+		XXC0043600F55E8BA8B2D0XX /* Exceptions for "PlayMeWidget" folder in "PlayMeWidget" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -76,11 +76,11 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		105FC57C2E9EAD3100EA8BCF /* PlayMe */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				XXA1B2C3D4E5F6A7B8C9D0XX /* Exceptions for "PlayMe" folder in "PlayMe" target */,
+			);
 			path = PlayMe;
 			sourceTree = "<group>";
-			exceptions = (
-				XXA1B2C3D4E5F6A7B8C9D0XX /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
-			);
 		};
 		105FC58C2E9EAD3200EA8BCF /* PlayMeTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -94,11 +94,11 @@
 		};
 		XX7DD80A4CD0ED2A772BF9XX /* PlayMeWidget */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				XXC0043600F55E8BA8B2D0XX /* Exceptions for "PlayMeWidget" folder in "PlayMeWidget" target */,
+			);
 			path = PlayMeWidget;
 			sourceTree = "<group>";
-			exceptions = (
-				XXC0043600F55E8BA8B2D0XX /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
-			);
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
@@ -243,13 +243,13 @@
 			);
 			dependencies = (
 			);
+			fileSystemSynchronizedGroups = (
+				XX7DD80A4CD0ED2A772BF9XX /* PlayMeWidget */,
+			);
 			name = PlayMeWidget;
 			productName = PlayMeWidget;
 			productReference = XX8D76BE4CCED1AB217465XX /* PlayMeWidget.appex */;
 			productType = "com.apple.product-type.app-extension";
-			fileSystemSynchronizedGroups = (
-				XX7DD80A4CD0ED2A772BF9XX /* PlayMeWidget */,
-			);
 		};
 /* End PBXNativeTarget section */
 
@@ -283,6 +283,9 @@
 			);
 			mainGroup = 105FC5712E9EAD3100EA8BCF;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				XXA114A237F4760930422AXX /* XCRemoteSwiftPackageReference "ios-sdk" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 105FC57B2E9EAD3100EA8BCF /* Products */;
 			projectDirPath = "";
@@ -292,9 +295,6 @@
 				105FC5882E9EAD3200EA8BCF /* PlayMeTests */,
 				105FC5922E9EAD3200EA8BCF /* PlayMeUITests */,
 				XX24E7FAEAE6D286D45D0AXX /* PlayMeWidget */,
-			);
-			packageReferences = (
-				XXA114A237F4760930422AXX /* XCRemoteSwiftPackageReference "ios-sdk" */,
 			);
 		};
 /* End PBXProject section */
@@ -509,7 +509,7 @@
 				CODE_SIGN_ENTITLEMENTS = PlayMe/PlayMe.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = Y8LFBVELVR;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PlayMe/Info.plist;
@@ -524,6 +524,10 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.rork.6lps4bdet5kkzmhqjyurh;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -544,7 +548,7 @@
 				CODE_SIGN_ENTITLEMENTS = PlayMe/PlayMe.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = Y8LFBVELVR;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PlayMe/Info.plist;
@@ -559,6 +563,10 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.rork.6lps4bdet5kkzmhqjyurh;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -659,22 +667,27 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = PlayMeWidget/PlayMeWidget.entitlements;
-				PRODUCT_BUNDLE_IDENTIFIER = app.rork.6lps4bdet5kkzmhqjyurh.playmewidget;
-				PRODUCT_NAME = PlayMeWidget;
-				SWIFT_VERSION = 5.0;
-				SDKROOT = iphoneos;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = PlayMeWidget/Info.plist;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
-				SKIP_INSTALL = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				MARKETING_VERSION = 1.0;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				DEVELOPMENT_TEAM = Y8LFBVELVR;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PlayMeWidget/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "$(PRODUCT_NAME)";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rork.6lps4bdet5kkzmhqjyurh.playmewidget;
+				PRODUCT_NAME = PlayMeWidget;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
 		};
@@ -682,22 +695,27 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = PlayMeWidget/PlayMeWidget.entitlements;
-				PRODUCT_BUNDLE_IDENTIFIER = app.rork.6lps4bdet5kkzmhqjyurh.playmewidget;
-				PRODUCT_NAME = PlayMeWidget;
-				SWIFT_VERSION = 5.0;
-				SDKROOT = iphoneos;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = PlayMeWidget/Info.plist;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
-				SKIP_INSTALL = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				MARKETING_VERSION = 1.0;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				DEVELOPMENT_TEAM = Y8LFBVELVR;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PlayMeWidget/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "$(PRODUCT_NAME)";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rork.6lps4bdet5kkzmhqjyurh.playmewidget;
+				PRODUCT_NAME = PlayMeWidget;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};

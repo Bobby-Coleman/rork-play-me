@@ -114,8 +114,14 @@ class AppState {
 
         isSearchingSongs = true
         do {
-            let results = try await MusicSearchService.shared.search(term: trimmed)
-            searchResults = results
+            let spotifyAuth = SpotifyAuthService.shared
+            if let token = spotifyAuth.accessToken {
+                let results = try await MusicSearchService.shared.searchSpotify(term: trimmed, token: token)
+                searchResults = results
+            } else {
+                let results = try await MusicSearchService.shared.search(term: trimmed)
+                searchResults = results
+            }
         } catch {
             searchResults = []
         }
@@ -159,6 +165,8 @@ class AppState {
         likedShareIds = []
         isOnboarded = false
         isBackendAvailable = false
+        AudioPlayerService.shared.stop()
+        SpotifyPlaybackService.shared.disconnect()
         SpotifyAuthService.shared.logout()
         UserDefaults.standard.removeObject(forKey: "currentUserId")
         UserDefaults.standard.removeObject(forKey: "currentUserFirstName")

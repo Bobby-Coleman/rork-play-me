@@ -74,7 +74,7 @@ class SpotifyAuthService {
     private let authorizeURL = "https://accounts.spotify.com/authorize"
     private let tokenURL = "https://accounts.spotify.com/api/token"
     private let redirectURI = "playme://spotify-callback"
-    private let scopes = "user-read-private user-read-email user-library-read"
+    private let scopes = "user-read-private user-read-email user-library-read streaming app-remote-control user-modify-playback-state user-read-playback-state"
 
     private var clientID: String {
         let id = Config.EXPO_PUBLIC_SPOTIFY_CLIENT_ID

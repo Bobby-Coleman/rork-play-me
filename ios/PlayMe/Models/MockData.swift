@@ -2,7 +2,7 @@ import Foundation
 
 enum MockData {
     static let songs: [Song] = [
-        Song(id: "1", title: "Can't Help Myself", artist: "Kita Alexander", albumArtURL: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&h=600&fit=crop", duration: "3:15"),
+        Song(id: "1", title: "Blinding Lights", artist: "The Weeknd", albumArtURL: "https://i.scdn.co/image/ab67616d0000b2738863bc11d2aa12b54f5aeb36", duration: "3:20", spotifyURI: "spotify:track:0VjIjW4GlUZAMYd2vXMi3b"),
         Song(id: "2", title: "Whispers in the Pines", artist: "Luna & The Woods", albumArtURL: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&h=600&fit=crop", duration: "3:22"),
         Song(id: "3", title: "City Lights in the Rain", artist: "Neon Eclipse", albumArtURL: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=600&h=600&fit=crop", duration: "4:34"),
         Song(id: "4", title: "Moments & Motion", artist: "Jade Rivers", albumArtURL: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&h=600&fit=crop", duration: "3:48"),

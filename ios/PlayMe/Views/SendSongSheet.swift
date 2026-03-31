@@ -8,6 +8,8 @@ struct SendSongSheet: View {
     @State private var selectedSong: Song?
     @State private var step: Int = 0
     @State private var searchTask: Task<Void, Never>?
+    @State private var detailSong: Song?
+    @State private var audioPlayer: AudioPlayerService = .shared
 
     var body: some View {
         NavigationStack {
@@ -45,6 +47,11 @@ struct SendSongSheet: View {
             .toolbarBackground(.hidden, for: .navigationBar)
         }
         .presentationBackground(.black)
+        .sheet(item: $detailSong) { song in
+            SongDetailSheet(song: song, appState: appState)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     private var songSearchView: some View {
@@ -151,18 +158,45 @@ struct SendSongSheet: View {
     }
 
     private func songRow(_ song: Song) -> some View {
-        HStack(spacing: 14) {
-            Color(.systemGray5)
-                .frame(width: 56, height: 56)
-                .overlay {
-                    AsyncImage(url: URL(string: song.albumArtURL)) { phase in
-                        if let image = phase.image {
-                            image.resizable().aspectRatio(contentMode: .fill)
+        let isPlaying = audioPlayer.currentSongId == song.id && audioPlayer.isPlaying
+        let isLoading = audioPlayer.currentSongId == song.id && audioPlayer.isLoading
+
+        return HStack(spacing: 14) {
+            ZStack {
+                Color(.systemGray5)
+                    .frame(width: 56, height: 56)
+                    .overlay {
+                        AsyncImage(url: URL(string: song.albumArtURL)) { phase in
+                            if let image = phase.image {
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            }
+                        }
+                        .allowsHitTesting(false)
+                    }
+                    .clipShape(.rect(cornerRadius: 6))
+
+                Button {
+                    audioPlayer.play(song: song)
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(.black.opacity(0.45))
+                            .frame(width: 32, height: 32)
+
+                        if isLoading {
+                            ProgressView()
+                                .tint(.white)
+                                .scaleEffect(0.6)
+                        } else {
+                            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .contentTransition(.symbolEffect(.replace))
                         }
                     }
-                    .allowsHitTesting(false)
                 }
-                .clipShape(.rect(cornerRadius: 6))
+                .sensoryFeedback(.impact(weight: .light), trigger: isPlaying)
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(song.title)
@@ -197,6 +231,10 @@ struct SendSongSheet: View {
                 .foregroundStyle(.white.opacity(0.3))
         }
         .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            detailSong = song
+        }
         .overlay(alignment: .bottom) {
             Color.white.opacity(0.05)
                 .frame(height: 0.5)

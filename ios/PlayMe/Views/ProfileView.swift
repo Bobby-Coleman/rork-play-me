@@ -10,6 +10,8 @@ struct ProfileView: View {
     let appState: AppState
 
     @State private var selectedTab: ProfileTab = .received
+    @State private var detailShare: SongShare?
+    @State private var audioPlayer: AudioPlayerService = .shared
 
     private var user: AppUser? { appState.currentUser }
 
@@ -108,6 +110,11 @@ struct ProfileView: View {
         .refreshable {
             await appState.refreshShares()
         }
+        .sheet(item: $detailShare) { share in
+            SongDetailSheet(song: share.song, appState: appState, share: share)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     private var tabPicker: some View {
@@ -184,18 +191,45 @@ struct ProfileView: View {
             }
         }()
 
+        let isPlaying = audioPlayer.currentSongId == share.song.id && audioPlayer.isPlaying
+        let isLoading = audioPlayer.currentSongId == share.song.id && audioPlayer.isLoading
+
         return HStack(spacing: 12) {
-            Color(.systemGray5)
-                .frame(width: 48, height: 48)
-                .overlay {
-                    AsyncImage(url: URL(string: share.song.albumArtURL)) { phase in
-                        if let image = phase.image {
-                            image.resizable().aspectRatio(contentMode: .fill)
+            ZStack {
+                Color(.systemGray5)
+                    .frame(width: 48, height: 48)
+                    .overlay {
+                        AsyncImage(url: URL(string: share.song.albumArtURL)) { phase in
+                            if let image = phase.image {
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            }
+                        }
+                        .allowsHitTesting(false)
+                    }
+                    .clipShape(.rect(cornerRadius: 6))
+
+                Button {
+                    audioPlayer.play(song: share.song)
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(.black.opacity(0.45))
+                            .frame(width: 28, height: 28)
+
+                        if isLoading {
+                            ProgressView()
+                                .tint(.white)
+                                .scaleEffect(0.5)
+                        } else {
+                            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .contentTransition(.symbolEffect(.replace))
                         }
                     }
-                    .allowsHitTesting(false)
                 }
-                .clipShape(.rect(cornerRadius: 6))
+                .sensoryFeedback(.impact(weight: .light), trigger: isPlaying)
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(share.song.title)
@@ -225,5 +259,9 @@ struct ProfileView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            detailShare = share
+        }
     }
 }
