@@ -155,12 +155,56 @@ class SpotifyAuthService {
         }
     }
 
+    func exchangeCodeViaServer(code: String) async -> Bool {
+        authError = nil
+
+        do {
+            let tokenResponse = try await performServerSwap(code: code)
+            accessToken = tokenResponse.access_token
+            refreshToken = tokenResponse.refresh_token
+            tokenExpirationDate = Date().addingTimeInterval(TimeInterval(tokenResponse.expires_in))
+            isLoggingIn = false
+
+            Task {
+                await FirebaseService.shared.signInWithSpotify(spotifyAccessToken: tokenResponse.access_token)
+            }
+
+            return true
+        } catch {
+            authError = "Failed to get access token"
+            isLoggingIn = false
+            return false
+        }
+    }
+
+    private nonisolated func performServerSwap(code: String) async throws -> SpotifyTokenResponse {
+        let swapURL = "\(Config.firebaseFunctionsBaseURL)/swap"
+
+        var request = URLRequest(url: URL(string: swapURL)!)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        var body = URLComponents()
+        body.queryItems = [
+            URLQueryItem(name: "code", value: code),
+        ]
+        request.httpBody = body.query?.data(using: .utf8)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+
+        return try JSONDecoder().decode(SpotifyTokenResponse.self, from: data)
+    }
+
     var userDisplayName: String? {
         didSet { UserDefaults.standard.set(userDisplayName, forKey: "spotifyDisplayName") }
     }
 
     func fetchUserProfile() async {
-        guard let token = accessToken else { return }
+        guard let token = await validToken() else { return }
         var request = URLRequest(url: URL(string: "https://api.spotify.com/v1/me")!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         do {
@@ -172,7 +216,7 @@ class SpotifyAuthService {
     }
 
     func fetchRecentSavedTrack() async -> Song? {
-        guard let token = accessToken else { return nil }
+        guard let token = await validToken() else { return nil }
         var request = URLRequest(url: URL(string: "https://api.spotify.com/v1/me/tracks?limit=1")!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         do {
@@ -200,14 +244,78 @@ class SpotifyAuthService {
         }
     }
 
+    func setDirectToken(_ token: String) {
+        accessToken = token
+        tokenExpirationDate = Date().addingTimeInterval(3600)
+        refreshToken = nil
+    }
+
     func logout() {
         accessToken = nil
         refreshToken = nil
         tokenExpirationDate = nil
         codeVerifier = nil
+        userDisplayName = nil
         UserDefaults.standard.removeObject(forKey: "spotifyAccessToken")
         UserDefaults.standard.removeObject(forKey: "spotifyRefreshToken")
         UserDefaults.standard.removeObject(forKey: "spotifyTokenExpiration")
+        UserDefaults.standard.removeObject(forKey: "spotifyDisplayName")
+        FirebaseService.shared.signOut()
+    }
+
+    func validToken() async -> String? {
+        guard let token = accessToken else { return nil }
+        if let expiry = tokenExpirationDate, expiry > Date().addingTimeInterval(60) {
+            return token
+        }
+        if tokenExpirationDate == nil {
+            return token
+        }
+        guard let refresh = refreshToken else {
+            logout()
+            return nil
+        }
+        let refreshed = await refreshAccessToken(refreshToken: refresh)
+        if refreshed == nil {
+            logout()
+        }
+        return refreshed
+    }
+
+    private func refreshAccessToken(refreshToken: String) async -> String? {
+        do {
+            let tokenResponse = try await performTokenRefresh(refreshToken: refreshToken)
+            accessToken = tokenResponse.access_token
+            if let newRefresh = tokenResponse.refresh_token {
+                self.refreshToken = newRefresh
+            }
+            tokenExpirationDate = Date().addingTimeInterval(TimeInterval(tokenResponse.expires_in))
+            return tokenResponse.access_token
+        } catch {
+            return nil
+        }
+    }
+
+    private nonisolated func performTokenRefresh(refreshToken: String) async throws -> SpotifyTokenResponse {
+        let refreshURL = "\(Config.firebaseFunctionsBaseURL)/refresh"
+
+        var request = URLRequest(url: URL(string: refreshURL)!)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        var body = URLComponents()
+        body.queryItems = [
+            URLQueryItem(name: "refresh_token", value: refreshToken),
+        ]
+        request.httpBody = body.query?.data(using: .utf8)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+
+        return try JSONDecoder().decode(SpotifyTokenResponse.self, from: data)
     }
 
     private nonisolated func exchangeCodeForToken(code: String, codeVerifier: String) async throws -> SpotifyTokenResponse {

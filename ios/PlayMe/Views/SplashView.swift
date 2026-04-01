@@ -55,6 +55,7 @@ struct SplashView: View {
 
                 VStack(spacing: 14) {
                     Button {
+                        spotifyAuth.isLoggingIn = true
                         SpotifyPlaybackService.shared.authorizeAndPlay()
                     } label: {
                         HStack(spacing: 10) {

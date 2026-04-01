@@ -22,7 +22,11 @@ class SpotifyPlaybackService: NSObject, SPTAppRemoteDelegate, SPTAppRemotePlayer
             ? "10ac0a719f3e4135a2d3fd857c67d0f6"
             : Config.EXPO_PUBLIC_SPOTIFY_CLIENT_ID
         let redirectURL = URL(string: "playme://spotify-callback")!
-        return SPTConfiguration(clientID: clientID, redirectURL: redirectURL)
+        let config = SPTConfiguration(clientID: clientID, redirectURL: redirectURL)
+        let base = Config.firebaseFunctionsBaseURL
+        config.tokenSwapURL = URL(string: "\(base)/swap")!
+        config.tokenRefreshURL = URL(string: "\(base)/refresh")!
+        return config
     }()
 
     private lazy var appRemote: SPTAppRemote = {
@@ -44,10 +48,18 @@ class SpotifyPlaybackService: NSObject, SPTAppRemoteDelegate, SPTAppRemotePlayer
     }
 
     func connect() {
-        guard let token = SpotifyAuthService.shared.accessToken, !token.isEmpty else {
-            connectionError = "No Spotify access token"
-            return
+        Task { @MainActor in
+            guard let token = await SpotifyAuthService.shared.validToken(), !token.isEmpty else {
+                connectionError = "No Spotify access token"
+                onStateChange?()
+                return
+            }
+            appRemote.connectionParameters.accessToken = token
+            appRemote.connect()
         }
+    }
+
+    func connectWithToken(_ token: String) {
         appRemote.connectionParameters.accessToken = token
         appRemote.connect()
     }
@@ -166,11 +178,13 @@ class SpotifyPlaybackService: NSObject, SPTAppRemoteDelegate, SPTAppRemotePlayer
         Task { @MainActor [weak self] in
             guard let self else { return }
             self.isConnected = false
-            self.connectionError = error?.localizedDescription ?? "Connection failed"
 
             if let uri = self.pendingPlayURI {
                 self.pendingPlayURI = nil
-                self.openSpotifyToPlay(uri: uri)
+                self.connectionError = nil
+                appRemote.authorizeAndPlayURI(uri)
+            } else {
+                self.connectionError = error?.localizedDescription ?? "Connection failed"
             }
 
             self.onStateChange?()
