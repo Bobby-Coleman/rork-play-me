@@ -16,30 +16,13 @@ struct PlayMeApp: App {
             ContentView(spotifyAuth: spotifyAuth)
                 .onOpenURL { url in
                     guard url.scheme == "playme" else { return }
-
                     let playbackService = SpotifyPlaybackService.shared
 
                     let sdkParams = playbackService.authParameters(from: url)
-                    let sdkToken = sdkParams?[SPTAppRemoteAccessTokenKey]
-
-                    let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-                    let codeFromQuery = components?.queryItems?.first(where: { $0.name == "code" })?.value
-
-                    let authCode = codeFromQuery ?? sdkToken
-
-                    if let code = authCode, !code.isEmpty {
-                        Task {
-                            let success = await spotifyAuth.exchangeCodeViaServer(code: code)
-                            if success {
-                                playbackService.connect()
-                            } else if let token = sdkToken, !token.isEmpty {
-                                spotifyAuth.setDirectToken(token)
-                                playbackService.connectWithToken(token)
-                            }
-                        }
-                    } else if let token = sdkToken, !token.isEmpty {
-                        spotifyAuth.setDirectToken(token)
-                        playbackService.connectWithToken(token)
+                    if let code = sdkParams?[SPTAppRemoteAccessTokenKey], !code.isEmpty {
+                        spotifyAuth.setDirectToken(code)
+                        playbackService.pendingAuthCode = code
+                        playbackService.connectWithToken(code)
                     }
                 }
                 .onChange(of: scenePhase) { _, newPhase in

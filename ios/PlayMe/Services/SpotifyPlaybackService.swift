@@ -13,9 +13,13 @@ class SpotifyPlaybackService: NSObject, SPTAppRemoteDelegate, SPTAppRemotePlayer
     private(set) var connectionError: String?
 
     var onStateChange: (() -> Void)?
+    var pendingAuthCode: String?
 
     private var pendingPlayURI: String?
+    private var requestedTrackURI: String?
     private var progressTimer: Timer?
+    private var connectionRetryCount = 0
+    private let maxConnectionRetries = 3
 
     private lazy var configuration: SPTConfiguration = {
         let clientID = Config.EXPO_PUBLIC_SPOTIFY_CLIENT_ID.isEmpty
@@ -48,6 +52,11 @@ class SpotifyPlaybackService: NSObject, SPTAppRemoteDelegate, SPTAppRemotePlayer
     }
 
     func connect() {
+        connectionRetryCount = 0
+        attemptConnect()
+    }
+
+    private func attemptConnect() {
         Task { @MainActor in
             guard let token = await SpotifyAuthService.shared.validToken(), !token.isEmpty else {
                 connectionError = "No Spotify access token"
@@ -60,6 +69,7 @@ class SpotifyPlaybackService: NSObject, SPTAppRemoteDelegate, SPTAppRemotePlayer
     }
 
     func connectWithToken(_ token: String) {
+        connectionRetryCount = 0
         appRemote.connectionParameters.accessToken = token
         appRemote.connect()
     }
@@ -78,6 +88,7 @@ class SpotifyPlaybackService: NSObject, SPTAppRemoteDelegate, SPTAppRemotePlayer
             return
         }
         currentTrackURI = uri
+        requestedTrackURI = uri
         appRemote.playerAPI?.play(uri, callback: { [weak self] _, error in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -146,6 +157,7 @@ class SpotifyPlaybackService: NSObject, SPTAppRemoteDelegate, SPTAppRemotePlayer
             guard let self else { return }
             self.isConnected = true
             self.connectionError = nil
+            self.connectionRetryCount = 0
 
             appRemote.playerAPI?.delegate = self
             appRemote.playerAPI?.subscribe(toPlayerState: { _, error in
@@ -159,6 +171,13 @@ class SpotifyPlaybackService: NSObject, SPTAppRemoteDelegate, SPTAppRemotePlayer
                 self.play(uri: uri)
             } else {
                 appRemote.playerAPI?.pause(nil)
+            }
+
+            if let code = self.pendingAuthCode {
+                self.pendingAuthCode = nil
+                Task {
+                    await SpotifyAuthService.shared.retrieveTokensFromServer(code: code)
+                }
             }
 
             self.onStateChange?()
@@ -179,15 +198,17 @@ class SpotifyPlaybackService: NSObject, SPTAppRemoteDelegate, SPTAppRemotePlayer
             guard let self else { return }
             self.isConnected = false
 
-            if let uri = self.pendingPlayURI {
-                self.pendingPlayURI = nil
-                self.connectionError = nil
-                appRemote.authorizeAndPlayURI(uri)
+            if self.connectionRetryCount < self.maxConnectionRetries {
+                self.connectionRetryCount += 1
+                Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    self.attemptConnect()
+                }
             } else {
+                self.pendingPlayURI = nil
                 self.connectionError = error?.localizedDescription ?? "Connection failed"
+                self.onStateChange?()
             }
-
-            self.onStateChange?()
         }
     }
 
@@ -202,6 +223,17 @@ class SpotifyPlaybackService: NSObject, SPTAppRemoteDelegate, SPTAppRemotePlayer
     // MARK: - Internal
 
     private func updateFromPlayerState(_ state: SPTAppRemotePlayerState) {
+        if let requested = requestedTrackURI,
+           state.track.uri != requested,
+           !state.isPaused {
+            appRemote.playerAPI?.pause(nil)
+            isPaused = true
+            stopProgressTimer()
+            requestedTrackURI = nil
+            onStateChange?()
+            return
+        }
+
         isPaused = state.isPaused
         playbackPositionMs = state.playbackPosition
         trackDurationMs = state.track.duration

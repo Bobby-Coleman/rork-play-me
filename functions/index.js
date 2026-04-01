@@ -1,6 +1,7 @@
 const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
+const crypto = require("crypto");
 
 admin.initializeApp();
 
@@ -43,6 +44,14 @@ exports.swap = onRequest({ secrets: [spotifyClientSecret] }, async (req, res) =>
       res.status(response.status).json(data);
       return;
     }
+
+    const codeHash = crypto.createHash("sha256").update(code).digest("hex");
+    await admin.firestore().collection("tokenCache").doc(codeHash).set({
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expires_in: data.expires_in,
+      created_at: Date.now(),
+    });
 
     res.json(data);
   } catch (err) {
@@ -87,6 +96,35 @@ exports.refresh = onRequest({ secrets: [spotifyClientSecret] }, async (req, res)
   } catch (err) {
     res.status(500).json({ error: "Token refresh failed", details: err.message });
   }
+});
+
+exports.getTokens = onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  const code = req.body.code;
+  if (!code) {
+    res.status(400).json({ error: "Missing code" });
+    return;
+  }
+
+  const codeHash = crypto.createHash("sha256").update(code).digest("hex");
+  const doc = await admin.firestore().collection("tokenCache").doc(codeHash).get();
+
+  if (!doc.exists) {
+    res.status(404).json({ error: "Tokens not found" });
+    return;
+  }
+
+  const tokens = doc.data();
+  await admin.firestore().collection("tokenCache").doc(codeHash).delete();
+  res.json({
+    access_token: tokens.access_token,
+    refresh_token: tokens.refresh_token,
+    expires_in: tokens.expires_in,
+  });
 });
 
 exports.auth = onRequest({ secrets: [spotifyClientSecret] }, async (req, res) => {

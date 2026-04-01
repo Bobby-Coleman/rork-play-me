@@ -166,7 +166,12 @@ class SpotifyAuthService {
             isLoggingIn = false
 
             Task {
-                await FirebaseService.shared.signInWithSpotify(spotifyAccessToken: tokenResponse.access_token)
+                try? await Task.sleep(for: .seconds(1))
+                let success = await FirebaseService.shared.signInWithSpotify(spotifyAccessToken: tokenResponse.access_token)
+                if !success {
+                    try? await Task.sleep(for: .seconds(2))
+                    await FirebaseService.shared.signInWithSpotify(spotifyAccessToken: tokenResponse.access_token)
+                }
             }
 
             return true
@@ -174,6 +179,40 @@ class SpotifyAuthService {
             authError = "Failed to get access token"
             isLoggingIn = false
             return false
+        }
+    }
+
+    func retrieveTokensFromServer(code: String) async {
+        let getTokensURL = "\(Config.firebaseFunctionsBaseURL)/getTokens"
+        var request = URLRequest(url: URL(string: getTokensURL)!)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        var body = URLComponents()
+        body.queryItems = [URLQueryItem(name: "code", value: code)]
+        request.httpBody = body.query?.data(using: .utf8)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                print("SpotifyAuth: getTokens returned non-200")
+                return
+            }
+            let tokens = try JSONDecoder().decode(SpotifyTokenResponse.self, from: data)
+            accessToken = tokens.access_token
+            refreshToken = tokens.refresh_token
+            tokenExpirationDate = Date().addingTimeInterval(TimeInterval(tokens.expires_in))
+            authError = nil
+
+            Task {
+                try? await Task.sleep(for: .seconds(1))
+                let ok = await FirebaseService.shared.signInWithSpotify(spotifyAccessToken: tokens.access_token)
+                if !ok {
+                    try? await Task.sleep(for: .seconds(2))
+                    await FirebaseService.shared.signInWithSpotify(spotifyAccessToken: tokens.access_token)
+                }
+            }
+        } catch {
+            print("SpotifyAuth: retrieve tokens failed: \(error.localizedDescription)")
         }
     }
 
@@ -248,6 +287,8 @@ class SpotifyAuthService {
         accessToken = token
         tokenExpirationDate = Date().addingTimeInterval(3600)
         refreshToken = nil
+        authError = nil
+        isLoggingIn = false
     }
 
     func logout() {
@@ -272,7 +313,6 @@ class SpotifyAuthService {
             return token
         }
         guard let refresh = refreshToken else {
-            logout()
             return nil
         }
         let refreshed = await refreshAccessToken(refreshToken: refresh)
