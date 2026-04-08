@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct ContentView: View {
-    let spotifyAuth: SpotifyAuthService
     @State private var appState = AppState()
     @State private var showSendSheet = false
     @State private var selectedTab: Int = 0
@@ -13,7 +12,7 @@ struct ContentView: View {
                     await appState.loadData()
                 }
         } else {
-            OnboardingView(appState: appState, spotifyAuth: spotifyAuth) {
+            OnboardingView(appState: appState) {
                 withAnimation(.easeInOut(duration: 0.5)) {
                     appState.isOnboarded = true
                 }
@@ -41,6 +40,13 @@ struct ContentView: View {
             }
 
             Tab(value: 2) {
+                MessagesListView(appState: appState)
+            } label: {
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                Text("Messages")
+            }
+
+            Tab(value: 3) {
                 ProfileView(appState: appState)
             } label: {
                 Image(systemName: "person.fill")

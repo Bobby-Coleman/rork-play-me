@@ -8,8 +8,9 @@ nonisolated struct Song: Identifiable, Hashable, Sendable {
     let duration: String
     let spotifyURI: String?
     let previewURL: String?
+    let appleMusicURL: String?
 
-    init(id: String, title: String, artist: String, albumArtURL: String, duration: String, spotifyURI: String? = nil, previewURL: String? = nil) {
+    init(id: String, title: String, artist: String, albumArtURL: String, duration: String, spotifyURI: String? = nil, previewURL: String? = nil, appleMusicURL: String? = nil) {
         self.id = id
         self.title = title
         self.artist = artist
@@ -17,5 +18,6 @@ nonisolated struct Song: Identifiable, Hashable, Sendable {
         self.duration = duration
         self.spotifyURI = spotifyURI
         self.previewURL = previewURL
+        self.appleMusicURL = appleMusicURL
     }
 }

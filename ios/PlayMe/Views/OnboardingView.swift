@@ -2,7 +2,6 @@ import SwiftUI
 
 struct OnboardingView: View {
     let appState: AppState
-    let spotifyAuth: SpotifyAuthService
     let onComplete: () -> Void
 
     @State private var step: Int = 0
@@ -12,7 +11,8 @@ struct OnboardingView: View {
         Group {
             switch step {
             case 0:
-                SplashView(spotifyAuth: spotifyAuth) {
+                SplashView { service in
+                    appState.preferredMusicService = service
                     withAnimation(.easeInOut(duration: 0.4)) { step = 1 }
                 }
             case 1:

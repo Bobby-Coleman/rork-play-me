@@ -1,14 +1,22 @@
 import SwiftUI
+import Combine
 
 struct SongCardView: View {
     let share: SongShare
     let isLiked: Bool
-    let onSendBack: () -> Void
+    let appState: AppState
     let onToggleLike: () -> Void
 
     @State private var audioPlayer: AudioPlayerService = .shared
     @State private var isScrubbing: Bool = false
     @State private var scrubValue: Double = 0
+    @State private var resolvedSpotifyURL: String?
+    @State private var showShareFlow: Bool = false
+    @State private var replyText: String = ""
+    @State private var showSentConfirmation: Bool = false
+    @State private var isSendingReply: Bool = false
+    @State private var keyboardHeight: CGFloat = 0
+    @FocusState private var isReplyFocused: Bool
 
     private var isCurrentSong: Bool {
         audioPlayer.currentSongId == share.song.id
@@ -21,6 +29,7 @@ struct SongCardView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
+                .onTapGesture { isReplyFocused = false }
 
             VStack(spacing: 0) {
                 VStack(spacing: 4) {
@@ -75,7 +84,17 @@ struct SongCardView: View {
                     }
                     .shadow(color: .white.opacity(0.05), radius: 20, y: 10)
                     .padding(.horizontal, 24)
-                    .padding(.bottom, 16)
+                    .padding(.bottom, 12)
+
+                HStack(spacing: 6) {
+                    Text(share.sender.firstName)
+                        .font(.system(size: 13, weight: .medium))
+                    Text("·")
+                    Text(share.timestamp, format: .dateTime.month(.abbreviated).day())
+                }
+                .foregroundStyle(.white.opacity(0.5))
+                .font(.system(size: 13))
+                .padding(.bottom, 8)
 
                 if let note = share.note {
                     Text("\"\(note)\"")
@@ -91,21 +110,43 @@ struct SongCardView: View {
                     .padding(.horizontal, 32)
                     .padding(.bottom, 12)
 
-                Button(action: onSendBack) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 13))
-                        Text("Send a song back?")
-                            .font(.system(size: 14))
-                    }
-                    .foregroundStyle(.white.opacity(0.5))
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(.capsule)
+                if !isReplyFocused {
+                    replyBar
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 24)
                 }
-                .padding(.bottom, 24)
             }
+        }
+        .overlay(alignment: .bottom) {
+            if isReplyFocused {
+                replyBar
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, keyboardHeight > 0 ? keyboardHeight + 8 : 24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: keyboardHeight)
+        .animation(.easeOut(duration: 0.2), value: isReplyFocused)
+        .onReceive(keyboardHeightPublisher) { height in
+            keyboardHeight = height
+        }
+        .task {
+            if appState.preferredMusicService == .spotify, let amURL = share.song.appleMusicURL {
+                resolvedSpotifyURL = await MusicSearchService.shared.resolveSpotifyURL(appleMusicURL: amURL)
+            }
+        }
+        .sheet(isPresented: $showShareFlow) {
+            NavigationStack {
+                FriendSelectorView(
+                    song: share.song,
+                    appState: appState,
+                    onBack: { showShareFlow = false },
+                    onSent: { showShareFlow = false }
+                )
+            }
+            .presentationBackground(.black)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -114,7 +155,7 @@ struct SongCardView: View {
             scrubBar
                 .padding(.bottom, 2)
 
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 Button {
                     audioPlayer.play(song: share.song)
                 } label: {
@@ -136,24 +177,17 @@ struct SongCardView: View {
                 }
                 .sensoryFeedback(.impact(weight: .light), trigger: isPlayingThis)
 
-                if share.song.spotifyURI != nil {
-                    Button {
-                        if let uri = share.song.spotifyURI, let url = URL(string: uri) {
-                            UIApplication.shared.open(url)
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text("Open in Spotify")
-                                .font(.system(size: 13, weight: .medium))
-                        }
+                openInServiceButton(song: share.song, service: appState.preferredMusicService, resolvedSpotifyURL: resolvedSpotifyURL)
+
+                Button {
+                    showShareFlow = true
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(.white.opacity(0.6))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
+                        .frame(width: 40, height: 40)
                         .background(Color.white.opacity(0.08))
                         .clipShape(.capsule)
-                    }
                 }
             }
 
@@ -163,6 +197,72 @@ struct SongCardView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.4))
                     .padding(.top, 4)
+            }
+        }
+    }
+
+    private var replyBar: some View {
+        ZStack {
+            if showSentConfirmation {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.green)
+                    Text("Sent!")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                .transition(.opacity)
+            } else {
+                HStack(spacing: 8) {
+                    TextField("Reply to \(share.sender.firstName)...", text: $replyText)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white)
+                        .tint(.white)
+                        .focused($isReplyFocused)
+
+                    if !replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button {
+                            sendReply()
+                        } label: {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 26))
+                                .foregroundStyle(Color(red: 0.76, green: 0.38, blue: 0.35))
+                        }
+                        .disabled(isSendingReply)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.12))
+                .clipShape(.capsule)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: showSentConfirmation)
+    }
+
+    private func sendReply() {
+        let text = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        isSendingReply = true
+        let capturedText = text
+        replyText = ""
+        isReplyFocused = false
+
+        Task {
+            var success = false
+            if let conv = await FirebaseService.shared.getOrCreateConversation(
+                with: share.sender.id,
+                friendName: share.sender.firstName
+            ) {
+                await appState.sendMessage(conversationId: conv.id, text: capturedText, song: share.song)
+                success = true
+            }
+            isSendingReply = false
+            if success {
+                showSentConfirmation = true
+                try? await Task.sleep(for: .seconds(1.5))
+                showSentConfirmation = false
             }
         }
     }
@@ -219,5 +319,15 @@ struct SongCardView: View {
             .font(.system(size: 11))
             .foregroundStyle(.white.opacity(0.4))
         }
+    }
+
+    private var keyboardHeightPublisher: AnyPublisher<CGFloat, Never> {
+        Publishers.Merge(
+            NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
+                .compactMap { ($0.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect)?.height },
+            NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
+                .map { _ in CGFloat(0) }
+        )
+        .eraseToAnyPublisher()
     }
 }

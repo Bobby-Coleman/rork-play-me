@@ -1,8 +1,7 @@
 import SwiftUI
 
 struct SplashView: View {
-    let spotifyAuth: SpotifyAuthService
-    let onConnected: () -> Void
+    let onServiceSelected: (MusicService) -> Void
 
     @State private var floatingOffsets: [CGSize] = (0..<6).map { _ in
         CGSize(width: CGFloat.random(in: -30...30), height: CGFloat.random(in: -30...30))
@@ -46,22 +45,26 @@ struct SplashView: View {
                         .foregroundStyle(.white)
                         .tracking(2)
 
-                    Text("©")
-                        .font(.caption)
+                    Text("Share songs with friends")
+                        .font(.system(size: 15))
                         .foregroundStyle(.white.opacity(0.5))
                 }
 
                 Spacer()
 
                 VStack(spacing: 14) {
+                    Text("I listen on...")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .tracking(0.5)
+
                     Button {
-                        spotifyAuth.isLoggingIn = true
-                        SpotifyPlaybackService.shared.authorizeAndPlay()
+                        onServiceSelected(.spotify)
                     } label: {
                         HStack(spacing: 10) {
                             Image(systemName: "music.note")
                                 .font(.system(size: 18, weight: .bold))
-                            Text("CONNECT WITH SPOTIFY")
+                            Text("SPOTIFY")
                                 .font(.system(size: 15, weight: .bold))
                                 .tracking(1)
                         }
@@ -71,25 +74,24 @@ struct SplashView: View {
                         .background(Color(red: 0.11, green: 0.73, blue: 0.33))
                         .clipShape(.rect(cornerRadius: 26))
                     }
-                    .disabled(spotifyAuth.isLoggingIn)
-                    .opacity(spotifyAuth.isLoggingIn ? 0.6 : 1)
 
-                    if spotifyAuth.isLoggingIn {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .tint(.white)
-                                .scaleEffect(0.8)
-                            Text("Waiting for Spotify...")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.white.opacity(0.5))
+                    Button {
+                        onServiceSelected(.appleMusic)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "music.note")
+                                .font(.system(size: 18, weight: .bold))
+                            Text("APPLE MUSIC")
+                                .font(.system(size: 15, weight: .bold))
+                                .tracking(1)
                         }
-                    }
-
-                    if let error = spotifyAuth.authError {
-                        Text(error)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.red.opacity(0.8))
-                            .multilineTextAlignment(.center)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(
+                            LinearGradient(colors: [Color(red: 0.98, green: 0.24, blue: 0.47), Color(red: 0.65, green: 0.18, blue: 0.82)], startPoint: .leading, endPoint: .trailing)
+                        )
+                        .clipShape(.rect(cornerRadius: 26))
                     }
                 }
                 .padding(.horizontal, 40)
@@ -104,11 +106,6 @@ struct SplashView: View {
                         height: CGFloat.random(in: -40...40)
                     )
                 }
-            }
-        }
-        .onChange(of: spotifyAuth.isAuthenticated) { _, authenticated in
-            if authenticated {
-                onConnected()
             }
         }
     }

@@ -11,6 +11,10 @@ struct SongDetailSheet: View {
     @State private var isScrubbing: Bool = false
     @State private var scrubValue: Double = 0
     @State private var showShareFlow: Bool = false
+    @State private var resolvedSpotifyURL: String?
+    @State private var replyText: String = ""
+    @State private var showSentConfirmation: Bool = false
+    @State private var isSendingReply: Bool = false
 
     private var isCurrentSong: Bool {
         audioPlayer.currentSongId == song.id
@@ -34,6 +38,17 @@ struct SongDetailSheet: View {
                     VStack(spacing: 0) {
                         headerSection
                         albumArtSection
+                        if let share {
+                            HStack(spacing: 6) {
+                                Text(share.sender.firstName)
+                                    .font(.system(size: 13, weight: .medium))
+                                Text("·")
+                                Text(share.timestamp, format: .dateTime.month(.abbreviated).day())
+                            }
+                            .foregroundStyle(.white.opacity(0.5))
+                            .font(.system(size: 13))
+                            .padding(.top, 12)
+                        }
                         playerControls
                             .padding(.horizontal, 32)
                             .padding(.top, 16)
@@ -62,6 +77,11 @@ struct SongDetailSheet: View {
             .toolbarBackground(.hidden, for: .navigationBar)
         }
         .presentationBackground(.black)
+        .task {
+            if appState.preferredMusicService == .spotify, let amURL = song.appleMusicURL {
+                resolvedSpotifyURL = await MusicSearchService.shared.resolveSpotifyURL(appleMusicURL: amURL)
+            }
+        }
         .sheet(isPresented: $showShareFlow) {
             NavigationStack {
                 FriendSelectorView(
@@ -157,7 +177,7 @@ struct SongDetailSheet: View {
             scrubBar
                 .padding(.bottom, 2)
 
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 Button {
                     audioPlayer.play(song: song)
                 } label: {
@@ -179,24 +199,17 @@ struct SongDetailSheet: View {
                 }
                 .sensoryFeedback(.impact(weight: .light), trigger: isPlayingThis)
 
-                if song.spotifyURI != nil {
-                    Button {
-                        if let uri = song.spotifyURI, let url = URL(string: uri) {
-                            UIApplication.shared.open(url)
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text("Open in Spotify")
-                                .font(.system(size: 13, weight: .medium))
-                        }
+                openInServiceButton(song: song, service: appState.preferredMusicService, resolvedSpotifyURL: resolvedSpotifyURL)
+
+                Button {
+                    showShareFlow = true
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(.white.opacity(0.6))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
+                        .frame(width: 40, height: 40)
                         .background(Color.white.opacity(0.08))
                         .clipShape(.capsule)
-                    }
                 }
             }
 
@@ -269,21 +282,116 @@ struct SongDetailSheet: View {
     // MARK: - Action Buttons
 
     private var actionButtons: some View {
-        Button {
-            showShareFlow = true
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "paperplane.fill")
-                    .font(.system(size: 13))
-                Text("Share this song")
-                    .font(.system(size: 14, weight: .medium))
+        VStack(spacing: 10) {
+            if let share {
+                replyBar(for: share)
+                    .padding(.horizontal, 24)
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 12)
-            .background(Color(red: 0.76, green: 0.38, blue: 0.35))
-            .clipShape(.capsule)
         }
-        .sensoryFeedback(.impact(weight: .light), trigger: showShareFlow)
+    }
+
+    private func replyBar(for share: SongShare) -> some View {
+        ZStack {
+            if showSentConfirmation {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.green)
+                    Text("Sent!")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                .transition(.opacity)
+            } else {
+                HStack(spacing: 8) {
+                    TextField("Reply to \(share.sender.firstName)...", text: $replyText)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white)
+                        .tint(.white)
+
+                    if !replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button {
+                            sendReply(to: share)
+                        } label: {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 26))
+                                .foregroundStyle(Color(red: 0.76, green: 0.38, blue: 0.35))
+                        }
+                        .disabled(isSendingReply)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.08))
+                .clipShape(.capsule)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: showSentConfirmation)
+    }
+
+    private func sendReply(to share: SongShare) {
+        let text = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        isSendingReply = true
+        let capturedText = text
+        replyText = ""
+
+        Task {
+            var success = false
+            if let conv = await FirebaseService.shared.getOrCreateConversation(
+                with: share.sender.id,
+                friendName: share.sender.firstName
+            ) {
+                await appState.sendMessage(conversationId: conv.id, text: capturedText, song: song)
+                success = true
+            }
+            isSendingReply = false
+            if success {
+                showSentConfirmation = true
+                try? await Task.sleep(for: .seconds(1.5))
+                showSentConfirmation = false
+            }
+        }
+    }
+}
+
+// MARK: - Open in Service Button
+
+@MainActor
+func openInServiceButton(song: Song, service: MusicService, resolvedSpotifyURL: String? = nil) -> some View {
+    Button {
+        let url = externalURL(for: song, service: service, resolvedSpotifyURL: resolvedSpotifyURL)
+        if let url {
+            UIApplication.shared.open(url)
+        }
+    } label: {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.up.right")
+                .font(.system(size: 11, weight: .semibold))
+            Text(service == .spotify ? "Open in Spotify" : "Open in Apple Music")
+                .font(.system(size: 13, weight: .medium))
+        }
+        .foregroundStyle(.white.opacity(0.6))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.08))
+        .clipShape(.capsule)
+    }
+}
+
+private func externalURL(for song: Song, service: MusicService, resolvedSpotifyURL: String? = nil) -> URL? {
+    switch service {
+    case .appleMusic:
+        if let appleMusicURL = song.appleMusicURL, let url = URL(string: appleMusicURL) {
+            return url
+        }
+        let query = "\(song.title) \(song.artist)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        return URL(string: "https://music.apple.com/search?term=\(query)")
+    case .spotify:
+        if let resolved = resolvedSpotifyURL, let url = URL(string: resolved) {
+            return url
+        }
+        let query = "\(song.title) \(song.artist)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        return URL(string: "https://open.spotify.com/search/\(query)")
     }
 }

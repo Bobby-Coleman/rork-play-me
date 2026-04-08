@@ -8,6 +8,16 @@ class AppState {
         didSet { UserDefaults.standard.set(isOnboarded, forKey: "isOnboarded") }
     }
 
+    var preferredMusicService: MusicService {
+        get {
+            let raw = UserDefaults.standard.string(forKey: "preferredMusicService") ?? MusicService.appleMusic.rawValue
+            return MusicService(rawValue: raw) ?? .appleMusic
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: "preferredMusicService")
+        }
+    }
+
     var currentUser: AppUser? {
         didSet {
             if let user = currentUser {
@@ -30,7 +40,7 @@ class AppState {
             UserDefaults.standard.set(Array(likedShareIds), forKey: "likedShareIds")
         }
     }
-    var spotifySavedSong: Song?
+    var conversations: [Conversation] = []
     var showSentToast = false
     var isLoading = false
     var isBackendAvailable = false
@@ -55,23 +65,20 @@ class AppState {
         }
     }
 
-    func register(username: String) async -> Bool {
+    func register(username: String, firstName: String? = nil) async -> Bool {
         registrationError = nil
+        let displayName = firstName ?? username
 
         let firebase = FirebaseService.shared
-        let uid = firebase.firebaseUID ?? UUID().uuidString
-        currentUser = AppUser(id: uid, firstName: username, username: username, phone: "")
-
-        if firebase.isSignedIn {
+        let signedIn = await firebase.signInAnonymously()
+        if signedIn {
             isBackendAvailable = true
-            let spotifyAuth = SpotifyAuthService.shared
-            await firebase.createOrUpdateUserProfile(
-                username: username,
-                spotifyDisplayName: spotifyAuth.userDisplayName,
-                spotifyId: nil
-            )
+            let uid = firebase.firebaseUID ?? UUID().uuidString
+            currentUser = AppUser(id: uid, firstName: displayName, username: username, phone: "")
+            await firebase.createOrUpdateUserProfile(username: username, firstName: displayName)
         } else {
             isBackendAvailable = false
+            currentUser = AppUser(id: UUID().uuidString, firstName: displayName, username: username, phone: "")
         }
 
         return true
@@ -81,24 +88,16 @@ class AppState {
         guard let user = currentUser else { return }
         isLoading = true
 
-        let spotifyAuth = SpotifyAuthService.shared
-        if spotifyAuth.isAuthenticated {
-            await spotifyAuth.fetchUserProfile()
-            if let savedTrack = await spotifyAuth.fetchRecentSavedTrack() {
-                spotifySavedSong = savedTrack
-            }
-
-            if !FirebaseService.shared.isSignedIn, let token = spotifyAuth.accessToken {
-                let signedIn = await FirebaseService.shared.signInWithSpotify(spotifyAccessToken: token)
-                if signedIn {
-                    isBackendAvailable = true
-                }
-            } else if FirebaseService.shared.isSignedIn {
+        let firebase = FirebaseService.shared
+        if !firebase.isSignedIn {
+            let signedIn = await firebase.signInAnonymously()
+            if signedIn {
                 isBackendAvailable = true
             }
+        } else {
+            isBackendAvailable = true
         }
 
-        let firebase = FirebaseService.shared
         if firebase.isSignedIn {
             if let profile = await firebase.loadUserProfile() {
                 if currentUser?.username != profile.username {
@@ -127,19 +126,21 @@ class AppState {
             if !serverReceived.isEmpty {
                 receivedShares = serverReceived
             } else if receivedShares.isEmpty {
-                loadSampleShares()
+                await loadSampleShares()
             }
 
             let serverSent = await firebase.loadSentShares()
             if !serverSent.isEmpty {
                 sentShares = serverSent
             }
+
+            await loadConversations()
         } else {
             if friends.isEmpty {
                 friends = MockData.friends
             }
             if receivedShares.isEmpty {
-                loadSampleShares()
+                await loadSampleShares()
             }
         }
 
@@ -160,11 +161,29 @@ class AppState {
 
         Task { await FirebaseService.shared.saveShare(share) }
 
+        let firebase = FirebaseService.shared
+        if let conv = await firebase.getOrCreateConversation(with: friend.id, friendName: friend.firstName) {
+            let messageText = note?.isEmpty == false ? note! : "Sent you a song"
+            await firebase.sendMessage(conversationId: conv.id, text: messageText, song: song)
+            await loadConversations()
+        }
+
         showSentToast = true
         Task {
             try? await Task.sleep(for: .seconds(2))
             showSentToast = false
         }
+    }
+
+    func loadConversations() async {
+        let firebase = FirebaseService.shared
+        guard firebase.isSignedIn else { return }
+        conversations = await firebase.loadConversations()
+    }
+
+    func sendMessage(conversationId: String, text: String, song: Song? = nil) async {
+        await FirebaseService.shared.sendMessage(conversationId: conversationId, text: text, song: song)
+        await loadConversations()
     }
 
     func searchSongs(query: String) async {
@@ -177,16 +196,7 @@ class AppState {
 
         isSearchingSongs = true
         do {
-            if let token = await SpotifyAuthService.shared.validToken() {
-                let results = try await MusicSearchService.shared.searchSpotify(term: trimmed, token: token)
-                if !results.isEmpty {
-                    searchResults = results
-                } else {
-                    searchResults = try await MusicSearchService.shared.search(term: trimmed)
-                }
-            } else {
-                searchResults = try await MusicSearchService.shared.search(term: trimmed)
-            }
+            searchResults = try await MusicSearchService.shared.search(term: trimmed)
         } catch {
             searchResults = []
         }
@@ -238,17 +248,17 @@ class AppState {
         receivedShares = []
         sentShares = []
         likedShareIds = []
+        conversations = []
         isOnboarded = false
         isBackendAvailable = false
         AudioPlayerService.shared.stop()
-        SpotifyPlaybackService.shared.disconnect()
-        SpotifyAuthService.shared.logout()
         FirebaseService.shared.signOut()
         UserDefaults.standard.removeObject(forKey: "currentUserId")
         UserDefaults.standard.removeObject(forKey: "currentUserFirstName")
         UserDefaults.standard.removeObject(forKey: "currentUserUsername")
         UserDefaults.standard.removeObject(forKey: "currentUserPhone")
         UserDefaults.standard.removeObject(forKey: "likedShareIds")
+        UserDefaults.standard.removeObject(forKey: "preferredMusicService")
     }
 
     func refreshShares() async {
@@ -290,17 +300,19 @@ class AppState {
         )
     }
 
-    private func loadSampleShares() {
+    private func loadSampleShares() async {
         guard let user = currentUser else { return }
         let me = AppUser(id: user.id, firstName: user.firstName, username: user.username, phone: user.phone)
         let molly = MockData.friends[0]
-        let alice = MockData.friends[1]
-        let ben = MockData.friends[2]
 
-        let feedSong = spotifySavedSong ?? MockData.songs[0]
+        var feedSong = MockData.songs[0]
+        if let results = try? await MusicSearchService.shared.search(term: "Blinding Lights The Weeknd", limit: 1),
+           let realSong = results.first {
+            feedSong = realSong
+        }
 
         receivedShares = [
-            SongShare(song: feedSong, sender: molly, recipient: me, note: "this song reminds me of you 💛", timestamp: Date().addingTimeInterval(-300)),
+            SongShare(song: feedSong, sender: molly, recipient: me, note: "this song reminds me of you", timestamp: Date().addingTimeInterval(-300)),
         ]
 
         sentShares = []

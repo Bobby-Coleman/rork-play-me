@@ -42,18 +42,17 @@ struct ProfileView: View {
                         .font(.system(size: 15))
                         .foregroundStyle(.white.opacity(0.4))
 
-                    if SpotifyAuthService.shared.isAuthenticated,
-                       let displayName = SpotifyAuthService.shared.userDisplayName {
-                        HStack(spacing: 6) {
-                            Image(systemName: "music.note.circle.fill")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.green)
-                            Text("Logged in with Spotify as: \(displayName)")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.white.opacity(0.5))
-                        }
-                        .padding(.top, 4)
-                    } else if !appState.isBackendAvailable {
+                    HStack(spacing: 6) {
+                        Image(systemName: "music.note.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(appState.preferredMusicService == .spotify ? .green : .pink)
+                        Text(appState.preferredMusicService == .spotify ? "Spotify listener" : "Apple Music listener")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                    .padding(.top, 4)
+
+                    if !appState.isBackendAvailable {
                         HStack(spacing: 6) {
                             Circle()
                                 .fill(.orange)

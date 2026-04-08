@@ -17,7 +17,7 @@ struct HomeFeedView: View {
                         SongCardView(
                             share: share,
                             isLiked: appState.isLiked(shareId: share.id),
-                            onSendBack: onSendSong,
+                            appState: appState,
                             onToggleLike: { appState.toggleLike(shareId: share.id) }
                         )
                         .containerRelativeFrame(.vertical)

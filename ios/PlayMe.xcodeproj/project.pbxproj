@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		XX3DF24C364CC9BFC26E41XX /* PlayMeWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = XX8D76BE4CCED1AB217465XX /* PlayMeWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		XX6085FD983076D858C9FCXX /* SpotifyiOS in Frameworks */ = {isa = PBXBuildFile; productRef = XX37B8C79BA55C48FF64B0XX /* SpotifyiOS */; };
 		XXFB01A1E3C4D5B6A7F8E9XX /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = XXFB01A2E3C4D5B6A7F8E9XX /* FirebaseAuth */; };
 		XXFB01A3E3C4D5B6A7F8E9XX /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = XXFB01A4E3C4D5B6A7F8E9XX /* FirebaseFirestore */; };
 /* End PBXBuildFile section */
@@ -109,7 +108,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				XX6085FD983076D858C9FCXX /* SpotifyiOS in Frameworks */,
 				XXFB01A1E3C4D5B6A7F8E9XX /* FirebaseAuth in Frameworks */,
 				XXFB01A3E3C4D5B6A7F8E9XX /* FirebaseFirestore in Frameworks */,
 			);
@@ -183,7 +181,6 @@
 			);
 			name = PlayMe;
 			packageProductDependencies = (
-				XX37B8C79BA55C48FF64B0XX /* SpotifyiOS */,
 				XXFB01A2E3C4D5B6A7F8E9XX /* FirebaseAuth */,
 				XXFB01A4E3C4D5B6A7F8E9XX /* FirebaseFirestore */,
 			);
@@ -290,7 +287,6 @@
 			mainGroup = 105FC5712E9EAD3100EA8BCF;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				XXA114A237F4760930422AXX /* XCRemoteSwiftPackageReference "ios-sdk" */,
 				XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -777,14 +773,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		XXA114A237F4760930422AXX /* XCRemoteSwiftPackageReference "ios-sdk" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/spotify/ios-sdk.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 5.0.0;
-			};
-		};
 		XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
@@ -796,11 +784,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		XX37B8C79BA55C48FF64B0XX /* SpotifyiOS */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = XXA114A237F4760930422AXX /* XCRemoteSwiftPackageReference "ios-sdk" */;
-			productName = SpotifyiOS;
-		};
 		XXFB01A2E3C4D5B6A7F8E9XX /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
