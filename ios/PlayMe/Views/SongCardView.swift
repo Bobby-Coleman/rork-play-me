@@ -7,9 +7,7 @@ struct SongCardView: View {
     let appState: AppState
     let onToggleLike: () -> Void
 
-    @State private var audioPlayer: AudioPlayerService = .shared
-    @State private var isScrubbing: Bool = false
-    @State private var scrubValue: Double = 0
+    private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
     @State private var resolvedSpotifyURL: String?
     @State private var showShareFlow: Bool = false
     @State private var replyText: String = ""
@@ -29,7 +27,6 @@ struct SongCardView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-                .onTapGesture { isReplyFocused = false }
 
             VStack(spacing: 0) {
                 VStack(spacing: 4) {
@@ -110,24 +107,16 @@ struct SongCardView: View {
                     .padding(.horizontal, 32)
                     .padding(.bottom, 12)
 
-                if !isReplyFocused {
-                    replyBar
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 24)
-                }
+                Spacer(minLength: 60)
             }
         }
         .overlay(alignment: .bottom) {
-            if isReplyFocused {
-                replyBar
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, keyboardHeight > 0 ? keyboardHeight + 8 : 24)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
+            replyBar
+                .padding(.horizontal, 24)
+                .padding(.bottom, keyboardHeight > 0 ? keyboardHeight + 8 : 24)
+                .animation(.easeOut(duration: 0.25), value: keyboardHeight)
         }
-        .animation(.easeOut(duration: 0.25), value: keyboardHeight)
-        .animation(.easeOut(duration: 0.2), value: isReplyFocused)
-        .onReceive(keyboardHeightPublisher) { height in
+        .onReceive(KeyboardObserver.shared.publisher) { height in
             keyboardHeight = height
         }
         .task {
@@ -152,7 +141,7 @@ struct SongCardView: View {
 
     private var playerControls: some View {
         VStack(spacing: 8) {
-            scrubBar
+            ScrubBarView(songId: share.song.id, fallbackDuration: share.song.duration)
                 .padding(.bottom, 2)
 
             HStack(spacing: 12) {
@@ -220,6 +209,16 @@ struct SongCardView: View {
                         .foregroundStyle(.white)
                         .tint(.white)
                         .focused($isReplyFocused)
+                        .submitLabel(.send)
+                        .onSubmit { sendReply() }
+
+                    if isReplyFocused && replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button { isReplyFocused = false } label: {
+                            Text("Done")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.6))
+                        }
+                    }
 
                     if !replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button {
@@ -266,12 +265,28 @@ struct SongCardView: View {
             }
         }
     }
+}
 
-    private var scrubBar: some View {
+// MARK: - ScrubBarView (isolated progress observation)
+
+struct ScrubBarView: View {
+    let songId: String
+    let fallbackDuration: String
+
+    private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
+    private var progressModel: PlayerProgressModel { AudioPlayerService.shared.progressModel }
+    @State private var isScrubbing: Bool = false
+    @State private var scrubValue: Double = 0
+
+    private var isCurrentSong: Bool {
+        audioPlayer.currentSongId == songId
+    }
+
+    var body: some View {
         VStack(spacing: 4) {
             GeometryReader { geo in
                 let width = geo.size.width
-                let progressValue = isScrubbing ? scrubValue : (isCurrentSong ? audioPlayer.progress : 0)
+                let progressValue = isScrubbing ? scrubValue : (isCurrentSong ? progressModel.progress : 0)
 
                 ZStack(alignment: .leading) {
                     Capsule()
@@ -300,7 +315,7 @@ struct SongCardView: View {
                         .onEnded { value in
                             let fraction = max(0, min(1, value.location.x / width))
                             if isCurrentSong {
-                                let seekTime = fraction * audioPlayer.duration
+                                let seekTime = fraction * progressModel.duration
                                 audioPlayer.seek(to: seekTime)
                             }
                             isScrubbing = false
@@ -310,24 +325,14 @@ struct SongCardView: View {
             .frame(height: 14)
 
             HStack {
-                Text(isCurrentSong ? audioPlayer.formattedTime(audioPlayer.currentTime) : "0:00")
+                Text(isCurrentSong ? progressModel.formattedTime(progressModel.currentTime) : "0:00")
                     .monospacedDigit()
                 Spacer()
-                Text(isCurrentSong && audioPlayer.duration > 0 ? audioPlayer.formattedTime(audioPlayer.duration) : (share.song.duration.isEmpty ? "0:30" : share.song.duration))
+                Text(isCurrentSong && progressModel.duration > 0 ? progressModel.formattedTime(progressModel.duration) : (fallbackDuration.isEmpty ? "0:30" : fallbackDuration))
                     .monospacedDigit()
             }
             .font(.system(size: 11))
             .foregroundStyle(.white.opacity(0.4))
         }
-    }
-
-    private var keyboardHeightPublisher: AnyPublisher<CGFloat, Never> {
-        Publishers.Merge(
-            NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
-                .compactMap { ($0.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect)?.height },
-            NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
-                .map { _ in CGFloat(0) }
-        )
-        .eraseToAnyPublisher()
     }
 }

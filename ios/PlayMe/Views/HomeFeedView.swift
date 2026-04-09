@@ -27,7 +27,7 @@ struct HomeFeedView: View {
             }
             .scrollTargetBehavior(.paging)
             .scrollIndicators(.hidden)
-            .ignoresSafeArea()
+            .ignoresSafeArea(.keyboard)
         }
     }
 

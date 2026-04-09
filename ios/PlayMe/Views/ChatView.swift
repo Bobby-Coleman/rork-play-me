@@ -167,7 +167,11 @@ struct ChatView: View {
     private func startListening() {
         listener = FirebaseService.shared.listenForMessages(conversationId: conversation.id) { newMessages in
             Task { @MainActor in
-                self.messages = newMessages
+                let newIds = newMessages.map(\.id)
+                let oldIds = self.messages.map(\.id)
+                if newIds != oldIds {
+                    self.messages = newMessages
+                }
             }
         }
     }

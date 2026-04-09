@@ -7,9 +7,7 @@ struct SongDetailSheet: View {
     var onDismiss: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
-    @State private var audioPlayer: AudioPlayerService = .shared
-    @State private var isScrubbing: Bool = false
-    @State private var scrubValue: Double = 0
+    private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
     @State private var showShareFlow: Bool = false
     @State private var resolvedSpotifyURL: String?
     @State private var replyText: String = ""
@@ -174,7 +172,7 @@ struct SongDetailSheet: View {
 
     private var playerControls: some View {
         VStack(spacing: 8) {
-            scrubBar
+            ScrubBarView(songId: song.id, fallbackDuration: song.duration)
                 .padding(.bottom, 2)
 
             HStack(spacing: 12) {
@@ -220,62 +218,6 @@ struct SongDetailSheet: View {
                     .foregroundStyle(.white.opacity(0.4))
                     .padding(.top, 4)
             }
-        }
-    }
-
-    // MARK: - Scrub Bar
-
-    private var scrubBar: some View {
-        VStack(spacing: 4) {
-            GeometryReader { geo in
-                let width = geo.size.width
-                let progressValue = isScrubbing ? scrubValue : (isCurrentSong ? audioPlayer.progress : 0)
-
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.white.opacity(0.15))
-                        .frame(height: 4)
-
-                    Capsule()
-                        .fill(Color.white.opacity(0.9))
-                        .frame(width: max(0, width * progressValue), height: 4)
-
-                    Circle()
-                        .fill(.white)
-                        .frame(width: isScrubbing ? 14 : 10, height: isScrubbing ? 14 : 10)
-                        .offset(x: max(0, min(width * progressValue - (isScrubbing ? 7 : 5), width - (isScrubbing ? 14 : 10))))
-                        .animation(.spring(duration: 0.2), value: isScrubbing)
-                }
-                .frame(height: 14)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            isScrubbing = true
-                            let fraction = max(0, min(1, value.location.x / width))
-                            scrubValue = fraction
-                        }
-                        .onEnded { value in
-                            let fraction = max(0, min(1, value.location.x / width))
-                            if isCurrentSong {
-                                let seekTime = fraction * audioPlayer.duration
-                                audioPlayer.seek(to: seekTime)
-                            }
-                            isScrubbing = false
-                        }
-                )
-            }
-            .frame(height: 14)
-
-            HStack {
-                Text(isCurrentSong ? audioPlayer.formattedTime(audioPlayer.currentTime) : "0:00")
-                    .monospacedDigit()
-                Spacer()
-                Text(isCurrentSong && audioPlayer.duration > 0 ? audioPlayer.formattedTime(audioPlayer.duration) : (song.duration.isEmpty ? "0:30" : song.duration))
-                    .monospacedDigit()
-            }
-            .font(.system(size: 11))
-            .foregroundStyle(.white.opacity(0.4))
         }
     }
 

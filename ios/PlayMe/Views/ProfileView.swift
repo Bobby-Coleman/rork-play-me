@@ -11,7 +11,6 @@ struct ProfileView: View {
 
     @State private var selectedTab: ProfileTab = .received
     @State private var detailShare: SongShare?
-    @State private var audioPlayer: AudioPlayerService = .shared
 
     private var user: AppUser? { appState.currentUser }
 
@@ -69,12 +68,18 @@ struct ProfileView: View {
                 tabPicker
                     .padding(.horizontal, 20)
 
-                VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     if currentShares.isEmpty {
                         emptyState
                     } else {
                         ForEach(currentShares) { share in
-                            songRow(share: share)
+                            ProfileSongRow(
+                                share: share,
+                                personLabel: personLabel(for: share),
+                                isLiked: appState.isLiked(shareId: share.id),
+                                onToggleLike: { appState.toggleLike(shareId: share.id) },
+                                onTap: { detailShare = share }
+                            )
 
                             if share.id != currentShares.last?.id {
                                 Divider()
@@ -113,6 +118,19 @@ struct ProfileView: View {
             SongDetailSheet(song: share.song, appState: appState, share: share)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func personLabel(for share: SongShare) -> String {
+        switch selectedTab {
+        case .received: share.sender.firstName
+        case .sent: share.recipient.firstName
+        case .liked:
+            if share.sender.id == appState.currentUser?.id {
+                "To \(share.recipient.firstName)"
+            } else {
+                "From \(share.sender.firstName)"
+            }
         }
     }
 
@@ -175,25 +193,29 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 48)
     }
+}
 
-    private func songRow(share: SongShare) -> some View {
-        let person: String = {
-            switch selectedTab {
-            case .received: share.sender.firstName
-            case .sent: share.recipient.firstName
-            case .liked:
-                if share.sender.id == appState.currentUser?.id {
-                    "To \(share.recipient.firstName)"
-                } else {
-                    "From \(share.sender.firstName)"
-                }
-            }
-        }()
+// MARK: - ProfileSongRow (isolates audioPlayer observation per row)
 
-        let isPlaying = audioPlayer.currentSongId == share.song.id && audioPlayer.isPlaying
-        let isLoading = audioPlayer.currentSongId == share.song.id && audioPlayer.isLoading
+private struct ProfileSongRow: View {
+    let share: SongShare
+    let personLabel: String
+    let isLiked: Bool
+    let onToggleLike: () -> Void
+    let onTap: () -> Void
 
-        return HStack(spacing: 12) {
+    private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
+
+    private var isPlaying: Bool {
+        audioPlayer.currentSongId == share.song.id && audioPlayer.isPlaying
+    }
+
+    private var isLoading: Bool {
+        audioPlayer.currentSongId == share.song.id && audioPlayer.isLoading
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
             ZStack {
                 Color(.systemGray5)
                     .frame(width: 48, height: 48)
@@ -235,7 +257,7 @@ struct ProfileView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                Text(person)
+                Text(personLabel)
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.4))
             }
@@ -243,13 +265,13 @@ struct ProfileView: View {
             Spacer()
 
             Button {
-                appState.toggleLike(shareId: share.id)
+                onToggleLike()
             } label: {
-                Image(systemName: appState.isLiked(shareId: share.id) ? "heart.fill" : "heart")
+                Image(systemName: isLiked ? "heart.fill" : "heart")
                     .font(.system(size: 16))
-                    .foregroundStyle(appState.isLiked(shareId: share.id) ? .pink : .white.opacity(0.25))
+                    .foregroundStyle(isLiked ? .pink : .white.opacity(0.25))
             }
-            .sensoryFeedback(.impact(weight: .light), trigger: appState.isLiked(shareId: share.id))
+            .sensoryFeedback(.impact(weight: .light), trigger: isLiked)
 
             Text(share.timestamp.formatted(.relative(presentation: .named)))
                 .font(.system(size: 11))
@@ -260,7 +282,7 @@ struct ProfileView: View {
         .padding(.vertical, 10)
         .contentShape(Rectangle())
         .onTapGesture {
-            detailShare = share
+            onTap()
         }
     }
 }

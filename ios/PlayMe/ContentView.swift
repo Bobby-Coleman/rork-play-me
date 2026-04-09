@@ -33,7 +33,6 @@ struct ContentView: View {
 
             Tab(value: 1) {
                 Color.black
-                    .onAppear { showSendSheet = true }
             } label: {
                 Image(systemName: "paperplane.fill")
                 Text("Send")
@@ -55,8 +54,13 @@ struct ContentView: View {
         }
         .tint(.white)
         .preferredColorScheme(.dark)
+        .onChange(of: selectedTab) { _, newValue in
+            if newValue == 1 {
+                showSendSheet = true
+            }
+        }
         .sheet(isPresented: $showSendSheet) {
-            if selectedTab == 1 { selectedTab = 0 }
+            selectedTab = 0
         } content: {
             SendSongSheet(appState: appState)
                 .presentationDetents([.large])

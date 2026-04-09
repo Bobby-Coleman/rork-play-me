@@ -4,18 +4,43 @@ import UIKit
 
 @Observable
 @MainActor
+final class PlayerProgressModel {
+    var currentTime: TimeInterval = 0
+    var duration: TimeInterval = 0
+
+    var progress: Double {
+        guard duration > 0 else { return 0 }
+        return currentTime / duration
+    }
+
+    func formattedTime(_ time: TimeInterval) -> String {
+        guard time.isFinite else { return "0:00" }
+        let mins = Int(time) / 60
+        let secs = Int(time) % 60
+        return "\(mins):\(String(format: "%02d", secs))"
+    }
+
+    func reset() {
+        currentTime = 0
+        duration = 0
+    }
+}
+
+@Observable
+@MainActor
 class AudioPlayerService {
     static let shared = AudioPlayerService()
 
     var isPlaying: Bool = false
     var currentSongId: String?
-    var currentTime: TimeInterval = 0
-    var duration: TimeInterval = 0
     var isLoading: Bool = false
     var error: String?
 
+    let progressModel = PlayerProgressModel()
+
     private var player: AVPlayer?
     private var timeObserver: Any?
+    private var endObserver: (any NSObjectProtocol)?
     private var statusObservation: NSKeyValueObservation?
 
     private init() {
@@ -64,7 +89,7 @@ class AudioPlayerService {
                 switch item.status {
                 case .readyToPlay:
                     self.isLoading = false
-                    self.duration = item.duration.seconds.isFinite ? item.duration.seconds : 30
+                    self.progressModel.duration = item.duration.seconds.isFinite ? item.duration.seconds : 30
                     self.player?.play()
                     self.isPlaying = true
                 case .failed:
@@ -82,7 +107,7 @@ class AudioPlayerService {
     }
 
     func seek(to time: TimeInterval) {
-        currentTime = time
+        progressModel.currentTime = time
         let cmTime = CMTime(seconds: time, preferredTimescale: 600)
         player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
     }
@@ -90,31 +115,26 @@ class AudioPlayerService {
     func stop() {
         player?.pause()
         removeTimeObserver()
+        removeEndObserver()
         statusObservation?.invalidate()
         statusObservation = nil
         player = nil
         isPlaying = false
-        currentTime = 0
-        duration = 0
+        progressModel.reset()
         currentSongId = nil
         isLoading = false
         error = nil
     }
 
-    var progress: Double {
-        guard duration > 0 else { return 0 }
-        return currentTime / duration
-    }
-
     private func addTimeObserver() {
         removeTimeObserver()
-        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
+        let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
         timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             Task { @MainActor in
                 guard let self else { return }
                 let seconds = time.seconds
                 if seconds.isFinite {
-                    self.currentTime = seconds
+                    self.progressModel.currentTime = seconds
                 }
             }
         }
@@ -128,21 +148,21 @@ class AudioPlayerService {
     }
 
     private func addEndObserver() {
-        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
-        NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem, queue: .main) { [weak self] _ in
+        removeEndObserver()
+        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
                 self.isPlaying = false
-                self.currentTime = 0
+                self.progressModel.currentTime = 0
                 self.player?.seek(to: .zero)
             }
         }
     }
 
-    func formattedTime(_ time: TimeInterval) -> String {
-        guard time.isFinite else { return "0:00" }
-        let mins = Int(time) / 60
-        let secs = Int(time) % 60
-        return "\(mins):\(String(format: "%02d", secs))"
+    private func removeEndObserver() {
+        if let observer = endObserver {
+            NotificationCenter.default.removeObserver(observer)
+            endObserver = nil
+        }
     }
 }
