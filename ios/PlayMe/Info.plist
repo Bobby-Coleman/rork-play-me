@@ -12,6 +12,14 @@
 				<string>playme</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Firebase Phone Auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>app-1-846382766731-ios-d7bda055ca31018632d28e</string>
+			</array>
+		</dict>
 	</array>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>

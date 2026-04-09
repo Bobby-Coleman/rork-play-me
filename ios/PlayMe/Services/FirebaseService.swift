@@ -11,10 +11,40 @@ class FirebaseService {
     var isSignedIn: Bool { firebaseUID != nil }
 
     private let db = Firestore.firestore()
+    private var verificationID: String?
 
     init() {
         if let user = Auth.auth().currentUser {
             firebaseUID = user.uid
+        }
+    }
+
+    // MARK: - Phone Auth
+
+    func sendVerificationCode(phoneNumber: String) async -> Result<Void, Error> {
+        do {
+            let id = try await PhoneAuthProvider.provider().verifyPhoneNumber(phoneNumber, uiDelegate: nil)
+            verificationID = id
+            return .success(())
+        } catch {
+            print("FirebaseService: sendVerificationCode failed: \(error.localizedDescription)")
+            return .failure(error)
+        }
+    }
+
+    func verifyCode(_ code: String) async -> Result<Void, Error> {
+        guard let verificationID else {
+            return .failure(NSError(domain: "PlayMe", code: -1, userInfo: [NSLocalizedDescriptionKey: "No verification ID. Request a code first."]))
+        }
+        let credential = PhoneAuthProvider.provider().credential(withVerificationID: verificationID, verificationCode: code)
+        do {
+            let result = try await Auth.auth().signIn(with: credential)
+            firebaseUID = result.user.uid
+            self.verificationID = nil
+            return .success(())
+        } catch {
+            print("FirebaseService: verifyCode failed: \(error.localizedDescription)")
+            return .failure(error)
         }
     }
 
@@ -36,19 +66,66 @@ class FirebaseService {
     func signOut() {
         try? Auth.auth().signOut()
         firebaseUID = nil
+        verificationID = nil
     }
 
     // MARK: - User Profile
 
-    func createOrUpdateUserProfile(username: String, firstName: String? = nil) async {
+    func claimUsernameAndCreateProfile(username: String, firstName: String, phone: String) async -> Bool {
+        guard let uid = firebaseUID else { return false }
+        let lowered = username.lowercased()
+        let usernameRef = db.collection("usernames").document(lowered)
+        let userRef = db.collection("users").document(uid)
+
+        do {
+            let result = try await db.runTransaction { transaction, errorPointer -> Any? in
+                let usernameDoc: DocumentSnapshot
+                do {
+                    usernameDoc = try transaction.getDocument(usernameRef)
+                } catch let fetchError as NSError {
+                    errorPointer?.pointee = fetchError
+                    return NSNumber(value: false)
+                }
+
+                if usernameDoc.exists {
+                    let existingUID = usernameDoc.data()?["uid"] as? String
+                    if existingUID != uid {
+                        return NSNumber(value: false)
+                    }
+                }
+
+                transaction.setData([
+                    "uid": uid,
+                    "createdAt": FieldValue.serverTimestamp(),
+                ], forDocument: usernameRef)
+
+                transaction.setData([
+                    "username": lowered,
+                    "firstName": firstName,
+                    "phone": phone,
+                    "createdAt": FieldValue.serverTimestamp(),
+                    "updatedAt": FieldValue.serverTimestamp(),
+                ], forDocument: userRef, merge: true)
+
+                return NSNumber(value: true)
+            }
+            return (result as? NSNumber)?.boolValue ?? false
+        } catch {
+            print("FirebaseService: claimUsername failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    func createOrUpdateUserProfile(username: String, firstName: String? = nil, phone: String? = nil) async {
         guard let uid = firebaseUID else { return }
 
         let ref = db.collection("users").document(uid)
         var data: [String: Any] = [
-            "username": username,
+            "username": username.lowercased(),
             "firstName": firstName ?? username,
             "updatedAt": FieldValue.serverTimestamp(),
         ]
+        if let phone { data["phone"] = phone }
 
         do {
             let doc = try await ref.getDocument()
@@ -63,7 +140,22 @@ class FirebaseService {
         }
     }
 
-    func loadUserProfile() async -> (username: String, firstName: String)? {
+    func isUsernameTaken(_ username: String) async -> Bool? {
+        let lowered = username.lowercased()
+        do {
+            let doc = try await db.collection("usernames").document(lowered).getDocument()
+            if doc.exists {
+                let existingUID = doc.data()?["uid"] as? String
+                return existingUID != firebaseUID
+            }
+            return false
+        } catch {
+            print("FirebaseService: isUsernameTaken check failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func loadUserProfile() async -> (username: String, firstName: String, phone: String)? {
         guard let uid = firebaseUID else { return nil }
 
         do {
@@ -71,7 +163,8 @@ class FirebaseService {
             guard let data = doc.data() else { return nil }
             let username = data["username"] as? String ?? ""
             let firstName = data["firstName"] as? String ?? username
-            return (username: username, firstName: firstName)
+            let phone = data["phone"] as? String ?? ""
+            return (username: username, firstName: firstName, phone: phone)
         } catch {
             print("FirebaseService: profile load failed: \(error.localizedDescription)")
             return nil

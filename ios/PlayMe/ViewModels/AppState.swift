@@ -41,6 +41,7 @@ class AppState {
         }
     }
     var conversations: [Conversation] = []
+    var phoneNumber: String = ""
     var showSentToast = false
     var isLoading = false
     var isBackendAvailable = false
@@ -65,85 +66,125 @@ class AppState {
         }
     }
 
+    func sendCode(phoneNumber: String) async -> Bool {
+        registrationError = nil
+        self.phoneNumber = phoneNumber
+        let result = await FirebaseService.shared.sendVerificationCode(phoneNumber: phoneNumber)
+        switch result {
+        case .success:
+            return true
+        case .failure(let error):
+            registrationError = error.localizedDescription
+            return false
+        }
+    }
+
+    func verifyCode(_ code: String) async -> Bool {
+        registrationError = nil
+        let result = await FirebaseService.shared.verifyCode(code)
+        switch result {
+        case .success:
+            isBackendAvailable = true
+            return true
+        case .failure(let error):
+            registrationError = error.localizedDescription
+            return false
+        }
+    }
+
+    func checkForExistingUser() async -> Bool {
+        let firebase = FirebaseService.shared
+        guard firebase.isSignedIn, let uid = firebase.firebaseUID else { return false }
+        guard let profile = await firebase.loadUserProfile() else { return false }
+        guard !profile.username.isEmpty else { return false }
+
+        isBackendAvailable = true
+        currentUser = AppUser(id: uid, firstName: profile.firstName,
+                              username: profile.username, phone: profile.phone)
+        return true
+    }
+
     func register(username: String, firstName: String? = nil) async -> Bool {
         registrationError = nil
         let displayName = firstName ?? username
-
         let firebase = FirebaseService.shared
-        let signedIn = await firebase.signInAnonymously()
-        if signedIn {
-            isBackendAvailable = true
-            let uid = firebase.firebaseUID ?? UUID().uuidString
-            currentUser = AppUser(id: uid, firstName: displayName, username: username, phone: "")
-            await firebase.createOrUpdateUserProfile(username: username, firstName: displayName)
-        } else {
-            isBackendAvailable = false
-            currentUser = AppUser(id: UUID().uuidString, firstName: displayName, username: username, phone: "")
+
+        guard firebase.isSignedIn, let uid = firebase.firebaseUID else {
+            registrationError = "Not signed in. Please go back and verify your phone number."
+            return false
         }
 
+        let claimed = await firebase.claimUsernameAndCreateProfile(
+            username: username,
+            firstName: displayName,
+            phone: phoneNumber
+        )
+
+        guard claimed else {
+            registrationError = "Username is taken. Please choose another."
+            return false
+        }
+
+        isBackendAvailable = true
+        currentUser = AppUser(id: uid, firstName: displayName, username: username.lowercased(), phone: phoneNumber)
         return true
     }
 
     func loadData() async {
-        guard let user = currentUser else { return }
+        guard currentUser != nil else { return }
         isLoading = true
 
         let firebase = FirebaseService.shared
+
         if !firebase.isSignedIn {
-            let signedIn = await firebase.signInAnonymously()
-            if signedIn {
-                isBackendAvailable = true
-            }
-        } else {
-            isBackendAvailable = true
+            isBackendAvailable = false
+            isLoading = false
+            isOnboarded = false
+            return
         }
 
-        if firebase.isSignedIn {
-            if let profile = await firebase.loadUserProfile() {
-                if currentUser?.username != profile.username {
-                    currentUser = AppUser(
-                        id: firebase.firebaseUID ?? user.id,
-                        firstName: profile.firstName,
-                        username: profile.username,
-                        phone: ""
-                    )
-                }
-            }
+        isBackendAvailable = true
 
-            let serverLikes = await firebase.loadLikedShareIds()
-            if !serverLikes.isEmpty {
-                likedShareIds = serverLikes
-            }
-
-            let serverFriends = await firebase.loadFriends()
-            if !serverFriends.isEmpty {
-                friends = serverFriends
-            } else if friends.isEmpty {
-                friends = MockData.friends
-            }
-
-            let serverReceived = await firebase.loadReceivedShares()
-            if !serverReceived.isEmpty {
-                receivedShares = serverReceived
-            } else if receivedShares.isEmpty {
-                await loadSampleShares()
-            }
-
-            let serverSent = await firebase.loadSentShares()
-            if !serverSent.isEmpty {
-                sentShares = serverSent
-            }
-
-            await loadConversations()
-        } else {
-            if friends.isEmpty {
-                friends = MockData.friends
-            }
-            if receivedShares.isEmpty {
-                await loadSampleShares()
-            }
+        if let uid = firebase.firebaseUID, currentUser?.id != uid {
+            let oldUser = currentUser!
+            currentUser = AppUser(id: uid, firstName: oldUser.firstName, username: oldUser.username, phone: oldUser.phone)
         }
 
+        if let profile = await firebase.loadUserProfile() {
+            let uid = firebase.firebaseUID ?? currentUser!.id
+            currentUser = AppUser(
+                id: uid,
+                firstName: profile.firstName,
+                username: profile.username,
+                phone: profile.phone
+            )
+        }
+
+        let serverLikes = await firebase.loadLikedShareIds()
+        if !serverLikes.isEmpty {
+            likedShareIds = serverLikes
+        }
+
+        let serverFriends = await firebase.loadFriends()
+        if !serverFriends.isEmpty {
+            friends = serverFriends
+        } else if friends.isEmpty {
+            friends = MockData.friends
+        }
+
+        let serverReceived = await firebase.loadReceivedShares()
+        if !serverReceived.isEmpty {
+            receivedShares = serverReceived
+        } else if receivedShares.isEmpty {
+            await loadSampleShares()
+        }
+
+        let serverSent = await firebase.loadSentShares()
+        if !serverSent.isEmpty {
+            sentShares = serverSent
+        }
+
+        await loadConversations()
         isLoading = false
     }
 
@@ -221,11 +262,12 @@ class AppState {
 
     func checkUsername(_ username: String) async -> Bool? {
         try? await Task.sleep(for: .milliseconds(300))
-        guard FirebaseService.shared.isSignedIn else { return true }
+        guard FirebaseService.shared.isSignedIn else { return nil }
 
-        let results = await FirebaseService.shared.searchUsers(query: username.lowercased())
-        let taken = results.contains { $0.username.lowercased() == username.lowercased() }
-        return !taken
+        if let taken = await FirebaseService.shared.isUsernameTaken(username) {
+            return !taken
+        }
+        return nil
     }
 
     func toggleLike(shareId: String) {
