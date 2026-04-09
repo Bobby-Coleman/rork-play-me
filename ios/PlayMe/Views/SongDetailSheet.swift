@@ -22,9 +22,12 @@ struct SongDetailSheet: View {
         isCurrentSong && audioPlayer.isPlaying
     }
 
+    private var likeId: String {
+        share?.id ?? "song_\(song.id)"
+    }
+
     private var isLiked: Bool {
-        guard let share else { return false }
-        return appState.isLiked(shareId: share.id)
+        appState.isLiked(shareId: likeId)
     }
 
     var body: some View {
@@ -147,22 +150,18 @@ struct SongDetailSheet: View {
             }
             .clipShape(.rect(cornerRadius: 16))
             .overlay(alignment: .topTrailing) {
-                if share != nil {
-                    Button {
-                        if let share {
-                            appState.toggleLike(shareId: share.id)
-                        }
-                    } label: {
-                        Image(systemName: isLiked ? "heart.fill" : "heart")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundStyle(isLiked ? .pink : .white.opacity(0.8))
-                            .padding(10)
-                            .background(.ultraThinMaterial)
-                            .clipShape(Circle())
-                    }
-                    .sensoryFeedback(.impact(weight: .medium), trigger: isLiked)
-                    .padding(12)
+                Button {
+                    appState.toggleLike(shareId: likeId)
+                } label: {
+                    Image(systemName: isLiked ? "heart.fill" : "heart")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(isLiked ? .pink : .white.opacity(0.8))
+                        .padding(10)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
                 }
+                .sensoryFeedback(.impact(weight: .medium), trigger: isLiked)
+                .padding(12)
             }
             .shadow(color: .white.opacity(0.05), radius: 20, y: 10)
             .padding(.horizontal, 24)
@@ -264,7 +263,7 @@ struct SongDetailSheet: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(Color.white.opacity(0.08))
+                .background(Color(white: 0.18).opacity(0.92))
                 .clipShape(.capsule)
             }
         }

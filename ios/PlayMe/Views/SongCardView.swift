@@ -233,7 +233,7 @@ struct SongCardView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(Color.white.opacity(0.22))
+                .background(Color(white: 0.18).opacity(0.92))
                 .clipShape(.capsule)
             }
         }

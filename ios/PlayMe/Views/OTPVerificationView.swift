@@ -1,4 +1,70 @@
 import SwiftUI
+import UIKit
+
+// MARK: - UIViewRepresentable OTP TextField
+
+struct OTPTextField: UIViewRepresentable {
+    @Binding var text: String
+    var onSixDigits: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, onSixDigits: onSixDigits)
+    }
+
+    func makeUIView(context: Context) -> UITextField {
+        let tf = UITextField()
+        tf.keyboardType = .numberPad
+        tf.textContentType = .oneTimeCode
+        tf.textColor = .clear
+        tf.tintColor = .clear
+        tf.font = .systemFont(ofSize: 24)
+        tf.delegate = context.coordinator
+        tf.addTarget(context.coordinator, action: #selector(Coordinator.textChanged(_:)), for: .editingChanged)
+        return tf
+    }
+
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        if uiView.text != text {
+            uiView.text = text
+        }
+    }
+
+    class Coordinator: NSObject, UITextFieldDelegate {
+        @Binding var text: String
+        let onSixDigits: () -> Void
+
+        init(text: Binding<String>, onSixDigits: @escaping () -> Void) {
+            _text = text
+            self.onSixDigits = onSixDigits
+        }
+
+        func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+            let current = textField.text ?? ""
+            guard let swiftRange = Range(range, in: current) else { return false }
+            let proposed = current.replacingCharacters(in: swiftRange, with: string)
+            let filtered = String(proposed.filter { $0.isNumber }.prefix(6))
+            textField.text = filtered
+            text = filtered
+            if filtered.count == 6 {
+                DispatchQueue.main.async { self.onSixDigits() }
+            }
+            return false
+        }
+
+        @objc func textChanged(_ textField: UITextField) {
+            let filtered = String((textField.text ?? "").filter { $0.isNumber }.prefix(6))
+            if textField.text != filtered {
+                textField.text = filtered
+            }
+            text = filtered
+            if filtered.count == 6 {
+                DispatchQueue.main.async { self.onSixDigits() }
+            }
+        }
+    }
+}
+
+// MARK: - OTP Verification View
 
 struct OTPVerificationView: View {
     let appState: AppState
@@ -7,7 +73,7 @@ struct OTPVerificationView: View {
     @State private var codeText: String = ""
     @State private var isVerifying = false
     @State private var errorMessage: String?
-    @FocusState private var isCodeFieldFocused: Bool
+    @State private var fieldIsFocused = false
 
     var body: some View {
         ZStack {
@@ -27,27 +93,11 @@ struct OTPVerificationView: View {
                     .padding(.bottom, 32)
 
                 ZStack {
-                    TextField("", text: $codeText)
-                        .keyboardType(.numberPad)
-                        .textContentType(.oneTimeCode)
-                        .focused($isCodeFieldFocused)
-                        .opacity(0)
-                        .frame(width: 1, height: 1)
-                        .onChange(of: codeText) { _, newValue in
-                            let filtered = String(newValue.filter { $0.isNumber }.prefix(6))
-                            if filtered != newValue {
-                                codeText = filtered
-                            }
-                            if filtered.count == 6 {
-                                verifyCode()
-                            }
-                        }
-
                     HStack(spacing: 10) {
                         ForEach(0..<6, id: \.self) { index in
                             let characters = Array(codeText)
                             let digit = index < characters.count ? String(characters[index]) : ""
-                            let isCurrent = index == codeText.count && isCodeFieldFocused
+                            let isCurrent = index == codeText.count && fieldIsFocused
 
                             Text(digit)
                                 .font(.system(size: 24, weight: .bold))
@@ -57,10 +107,13 @@ struct OTPVerificationView: View {
                                 .clipShape(.rect(cornerRadius: 10))
                         }
                     }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        isCodeFieldFocused = true
+                    .allowsHitTesting(false)
+
+                    OTPTextField(text: $codeText) {
+                        verifyCode()
                     }
+                    .frame(height: 52)
+                    .onAppear { fieldIsFocused = true }
                 }
 
                 if isVerifying {
@@ -87,7 +140,6 @@ struct OTPVerificationView: View {
             }
             .padding(.horizontal, 24)
         }
-        .onAppear { isCodeFieldFocused = true }
     }
 
     private func verifyCode() {
@@ -103,7 +155,6 @@ struct OTPVerificationView: View {
             } else {
                 errorMessage = appState.registrationError ?? "Invalid code. Please try again."
                 codeText = ""
-                isCodeFieldFocused = true
             }
         }
     }

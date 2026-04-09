@@ -58,6 +58,9 @@ struct ContentView: View {
             if newValue == 1 {
                 showSendSheet = true
             }
+            if newValue == 2 {
+                Task { await appState.loadConversations() }
+            }
         }
         .sheet(isPresented: $showSendSheet) {
             selectedTab = 0

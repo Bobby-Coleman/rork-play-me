@@ -34,8 +34,11 @@ service cloud.firestore {
     }
 
     match /conversations/{convId} {
+      // Allow get() when the doc does not exist so clients can run get-then-create.
+      // Without !resource.exists, reads on missing docs fail (empty participants) and
+      // getOrCreateConversation never reaches setData().
       allow read: if request.auth != null
-        && request.auth.uid in resource.data.participants;
+        && (!resource.exists || request.auth.uid in resource.data.participants);
       allow create: if request.auth != null
         && request.auth.uid in request.resource.data.participants;
       allow update: if request.auth != null
