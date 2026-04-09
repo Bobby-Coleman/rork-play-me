@@ -345,18 +345,27 @@ class FirebaseService {
     }
 
     func getOrCreateConversation(with friendId: String, friendName: String) async -> Conversation? {
-        guard let uid = firebaseUID else { return nil }
+        guard let uid = firebaseUID else {
+            print("FirebaseService: getOrCreateConversation - not signed in")
+            return nil
+        }
         let myName = UserDefaults.standard.string(forKey: "currentUserFirstName") ?? ""
-        guard let convId = conversationId(with: friendId) else { return nil }
+        guard let convId = conversationId(with: friendId) else {
+            print("FirebaseService: getOrCreateConversation - could not build convId")
+            return nil
+        }
 
+        print("FirebaseService: getOrCreateConversation uid=\(uid) friendId=\(friendId) convId=\(convId)")
         let ref = db.collection("conversations").document(convId)
 
         do {
             let doc = try await ref.getDocument()
             if doc.exists, let data = doc.data() {
+                print("FirebaseService: conversation \(convId) already exists")
                 return parseConversation(id: convId, data: data)
             }
 
+            print("FirebaseService: creating new conversation \(convId)")
             let participants = [uid, friendId].sorted()
             let names: [String: String] = [uid: myName, friendId: friendName]
             let data: [String: Any] = [
@@ -368,6 +377,7 @@ class FirebaseService {
                 "unreadCount_\(friendId)": 0,
             ]
             try await ref.setData(data)
+            print("FirebaseService: conversation \(convId) created successfully")
 
             return Conversation(
                 id: convId,
@@ -378,14 +388,18 @@ class FirebaseService {
                 unreadCount: 0
             )
         } catch {
-            print("FirebaseService: getOrCreateConversation failed: \(error.localizedDescription)")
+            print("FirebaseService: getOrCreateConversation FAILED: \(error)")
             return nil
         }
     }
 
     func sendMessage(conversationId: String, text: String, song: Song? = nil) async {
-        guard let uid = firebaseUID else { return }
+        guard let uid = firebaseUID else {
+            print("FirebaseService: sendMessage - not signed in")
+            return
+        }
 
+        print("FirebaseService: sendMessage convId=\(conversationId) text=\(text.prefix(30))")
         var msgData: [String: Any] = [
             "senderId": uid,
             "text": text,
@@ -407,6 +421,7 @@ class FirebaseService {
         do {
             let convRef = db.collection("conversations").document(conversationId)
             try await convRef.collection("messages").addDocument(data: msgData)
+            print("FirebaseService: message added to \(conversationId)")
 
             let convDoc = try await convRef.getDocument()
             let participants = convDoc.data()?["participants"] as? [String] ?? []
@@ -418,24 +433,31 @@ class FirebaseService {
                 updates["unreadCount_\(p)"] = FieldValue.increment(Int64(1))
             }
             try await convRef.updateData(updates)
+            print("FirebaseService: conversation \(conversationId) updated")
         } catch {
-            print("FirebaseService: sendMessage failed: \(error.localizedDescription)")
+            print("FirebaseService: sendMessage FAILED: \(error)")
         }
     }
 
     func loadConversations() async -> [Conversation] {
-        guard let uid = firebaseUID else { return [] }
+        guard let uid = firebaseUID else {
+            print("FirebaseService: loadConversations - not signed in")
+            return []
+        }
         do {
+            print("FirebaseService: loadConversations for uid=\(uid)")
             let snapshot = try await db.collection("conversations")
                 .whereField("participants", arrayContains: uid)
                 .order(by: "lastMessageTimestamp", descending: true)
                 .limit(to: 50)
                 .getDocuments()
-            return snapshot.documents.compactMap { doc in
+            let convos = snapshot.documents.compactMap { doc in
                 parseConversation(id: doc.documentID, data: doc.data())
             }
+            print("FirebaseService: loadConversations found \(convos.count) conversations")
+            return convos
         } catch {
-            print("FirebaseService: loadConversations failed: \(error.localizedDescription)")
+            print("FirebaseService: loadConversations FAILED: \(error)")
             return []
         }
     }
