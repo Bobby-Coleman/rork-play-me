@@ -7,7 +7,7 @@ struct FriendSelectorView: View {
     let onSent: () -> Void
 
     @State private var searchText: String = ""
-    @State private var selectedFriend: AppUser?
+    @State private var selectedFriends: Set<String> = []
     @State private var note: String = ""
     @State private var showSentAnimation = false
     @State private var searchResults: [AppUser] = []
@@ -18,6 +18,10 @@ struct FriendSelectorView: View {
             return appState.friends
         }
         return searchResults
+    }
+
+    private var allSelected: Bool {
+        !displayedUsers.isEmpty && displayedUsers.allSatisfy { selectedFriends.contains($0.id) }
     }
 
     var body: some View {
@@ -75,6 +79,12 @@ struct FriendSelectorView: View {
                                 .tint(.white)
                                 .padding(.top, 20)
                         } else {
+                            if !displayedUsers.isEmpty {
+                                sendToAllRow
+                                Divider()
+                                    .background(Color.white.opacity(0.06))
+                            }
+
                             ForEach(displayedUsers) { friend in
                                 friendRow(friend)
                             }
@@ -103,27 +113,30 @@ struct FriendSelectorView: View {
                         }
 
                     Button {
-                        guard let friend = selectedFriend else { return }
+                        guard !selectedFriends.isEmpty else { return }
                         showSentAnimation = true
+                        let friends = resolveSelectedFriends()
                         Task {
-                            await appState.sendSong(song, to: friend, note: note)
+                            for friend in friends {
+                                await appState.sendSong(song, to: friend, note: note)
+                            }
                             try? await Task.sleep(for: .seconds(1.2))
                             onSent()
                         }
                     } label: {
-                        Text("Share")
+                        Text(shareButtonLabel)
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .frame(height: 50)
                             .background(
-                                selectedFriend != nil
+                                !selectedFriends.isEmpty
                                     ? Color(red: 0.76, green: 0.38, blue: 0.35)
                                     : Color.white.opacity(0.1)
                             )
                             .clipShape(.rect(cornerRadius: 25))
                     }
-                    .disabled(selectedFriend == nil)
+                    .disabled(selectedFriends.isEmpty)
                     .sensoryFeedback(.success, trigger: showSentAnimation)
                 }
                 .padding(.horizontal, 20)
@@ -150,6 +163,72 @@ struct FriendSelectorView: View {
         .animation(.spring(duration: 0.3), value: showSentAnimation)
     }
 
+    private var shareButtonLabel: String {
+        let count = selectedFriends.count
+        if count == 0 { return "Share" }
+        if count == 1 { return "Share" }
+        return "Share to \(count) friends"
+    }
+
+    private func resolveSelectedFriends() -> [AppUser] {
+        let all = appState.friends + searchResults
+        var seen = Set<String>()
+        var result: [AppUser] = []
+        for user in all where selectedFriends.contains(user.id) && !seen.contains(user.id) {
+            seen.insert(user.id)
+            result.append(user)
+        }
+        return result
+    }
+
+    // MARK: - Send to All
+
+    private var sendToAllRow: some View {
+        Button {
+            if allSelected {
+                for user in displayedUsers {
+                    selectedFriends.remove(user.id)
+                }
+            } else {
+                for user in displayedUsers {
+                    selectedFriends.insert(user.id)
+                }
+            }
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(Color(red: 0.76, green: 0.38, blue: 0.35).opacity(0.3))
+                    .clipShape(Circle())
+
+                Text("Send to All")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+
+                Spacer()
+
+                Circle()
+                    .stroke(allSelected ? Color.clear : Color.white.opacity(0.2), lineWidth: 1.5)
+                    .fill(allSelected ? Color(red: 0.76, green: 0.38, blue: 0.35) : Color.clear)
+                    .frame(width: 24, height: 24)
+                    .overlay {
+                        if allSelected {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+            }
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Search
+
     private func performSearch(_ query: String) {
         guard !query.isEmpty else {
             searchResults = []
@@ -164,13 +243,15 @@ struct FriendSelectorView: View {
         }
     }
 
+    // MARK: - Friend Row
+
     private func friendRow(_ friend: AppUser) -> some View {
-        let isSelected = selectedFriend?.id == friend.id
+        let isSelected = selectedFriends.contains(friend.id)
         return Button {
             if isSelected {
-                selectedFriend = nil
+                selectedFriends.remove(friend.id)
             } else {
-                selectedFriend = friend
+                selectedFriends.insert(friend.id)
             }
         } label: {
             HStack(spacing: 14) {
