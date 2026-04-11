@@ -6,6 +6,8 @@ struct OnboardingView: View {
 
     @State private var step: Int = 0
     @State private var phoneNumber: String = ""
+    @State private var firstName: String = ""
+    @State private var lastName: String = ""
     @State private var username: String = ""
 
     var body: some View {
@@ -31,15 +33,27 @@ struct OnboardingView: View {
                     }
                 }
             case 3:
+                NameEntryView(firstName: $firstName, lastName: $lastName) {
+                    withAnimation(.easeInOut(duration: 0.4)) { step = 4 }
+                }
+            case 4:
                 UsernamePickerView(username: $username, appState: appState) {
                     Task {
-                        let success = await appState.register(username: username)
+                        let success = await appState.register(
+                            username: username,
+                            firstName: firstName.trimmingCharacters(in: .whitespaces),
+                            lastName: lastName.trimmingCharacters(in: .whitespaces)
+                        )
                         if success {
-                            withAnimation(.easeInOut(duration: 0.4)) { step = 4 }
+                            withAnimation(.easeInOut(duration: 0.4)) { step = 5 }
                         }
                     }
                 }
-            case 4:
+            case 5:
+                OnboardingInviteView(username: username.lowercased()) {
+                    withAnimation(.easeInOut(duration: 0.4)) { step = 6 }
+                }
+            case 6:
                 WidgetInstructionsView { onComplete() }
             default:
                 EmptyView()

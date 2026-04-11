@@ -84,7 +84,7 @@ struct UsernamePickerView: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                             .font(.caption)
-                        Text("Could not verify — check connection")
+                        Text("Could not verify \u{2014} check connection")
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }

@@ -64,14 +64,35 @@ class FirebaseService {
     }
 
     func signOut() {
+        Task { await removeFCMToken() }
         try? Auth.auth().signOut()
         firebaseUID = nil
         verificationID = nil
     }
 
+    // MARK: - FCM Token
+
+    func saveFCMToken(_ token: String) async {
+        guard let uid = firebaseUID else { return }
+        do {
+            try await db.collection("users").document(uid).setData(["fcmToken": token], merge: true)
+        } catch {
+            print("FirebaseService: saveFCMToken failed: \(error.localizedDescription)")
+        }
+    }
+
+    func removeFCMToken() async {
+        guard let uid = firebaseUID else { return }
+        do {
+            try await db.collection("users").document(uid).updateData(["fcmToken": FieldValue.delete()])
+        } catch {
+            print("FirebaseService: removeFCMToken failed: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - User Profile
 
-    func claimUsernameAndCreateProfile(username: String, firstName: String, phone: String) async -> Bool {
+    func claimUsernameAndCreateProfile(username: String, firstName: String, lastName: String = "", phone: String) async -> Bool {
         guard let uid = firebaseUID else { return false }
         let lowered = username.lowercased()
         let usernameRef = db.collection("usernames").document(lowered)
@@ -102,6 +123,7 @@ class FirebaseService {
                 transaction.setData([
                     "username": lowered,
                     "firstName": firstName,
+                    "lastName": lastName,
                     "phone": phone,
                     "createdAt": FieldValue.serverTimestamp(),
                     "updatedAt": FieldValue.serverTimestamp(),
@@ -116,13 +138,14 @@ class FirebaseService {
         }
     }
 
-    func createOrUpdateUserProfile(username: String, firstName: String? = nil, phone: String? = nil) async {
+    func createOrUpdateUserProfile(username: String, firstName: String? = nil, lastName: String? = nil, phone: String? = nil) async {
         guard let uid = firebaseUID else { return }
 
         let ref = db.collection("users").document(uid)
         var data: [String: Any] = [
             "username": username.lowercased(),
             "firstName": firstName ?? username,
+            "lastName": lastName ?? "",
             "updatedAt": FieldValue.serverTimestamp(),
         ]
         if let phone { data["phone"] = phone }
@@ -155,7 +178,7 @@ class FirebaseService {
         }
     }
 
-    func loadUserProfile() async -> (username: String, firstName: String, phone: String)? {
+    func loadUserProfile() async -> (username: String, firstName: String, lastName: String, phone: String)? {
         guard let uid = firebaseUID else { return nil }
 
         do {
@@ -163,8 +186,9 @@ class FirebaseService {
             guard let data = doc.data() else { return nil }
             let username = data["username"] as? String ?? ""
             let firstName = data["firstName"] as? String ?? username
+            let lastName = data["lastName"] as? String ?? ""
             let phone = data["phone"] as? String ?? ""
-            return (username: username, firstName: firstName, phone: phone)
+            return (username: username, firstName: firstName, lastName: lastName, phone: phone)
         } catch {
             print("FirebaseService: profile load failed: \(error.localizedDescription)")
             return nil
@@ -228,11 +252,13 @@ class FirebaseService {
             "sender": [
                 "id": uid,
                 "firstName": share.sender.firstName,
+                "lastName": share.sender.lastName,
                 "username": share.sender.username,
             ],
             "recipient": [
                 "id": share.recipient.id,
                 "firstName": share.recipient.firstName,
+                "lastName": share.recipient.lastName,
                 "username": share.recipient.username,
             ],
         ]
@@ -278,19 +304,21 @@ class FirebaseService {
 
     // MARK: - Friends
 
-    func addFriend(friendUID: String, friendUsername: String, friendFirstName: String) async {
+    func addFriend(friendUID: String, friendUsername: String, friendFirstName: String, friendLastName: String = "") async {
         guard let uid = firebaseUID else { return }
         do {
             try await db.collection("users").document(uid).collection("friends")
                 .document(friendUID).setData([
                     "username": friendUsername,
                     "firstName": friendFirstName,
+                    "lastName": friendLastName,
                     "addedAt": FieldValue.serverTimestamp(),
                 ])
             try await db.collection("users").document(friendUID).collection("friends")
                 .document(uid).setData([
                     "username": UserDefaults.standard.string(forKey: "currentUserUsername") ?? "",
                     "firstName": UserDefaults.standard.string(forKey: "currentUserFirstName") ?? "",
+                    "lastName": UserDefaults.standard.string(forKey: "currentUserLastName") ?? "",
                     "addedAt": FieldValue.serverTimestamp(),
                 ])
         } catch {
@@ -306,7 +334,8 @@ class FirebaseService {
                 let data = doc.data()
                 guard let username = data["username"] as? String,
                       let firstName = data["firstName"] as? String else { return nil }
-                return AppUser(id: doc.documentID, firstName: firstName, username: username, phone: "")
+                let lastName = data["lastName"] as? String ?? ""
+                return AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: "")
             }
         } catch {
             print("FirebaseService: load friends failed: \(error.localizedDescription)")
@@ -328,7 +357,8 @@ class FirebaseService {
                 let data = doc.data()
                 let username = data["username"] as? String ?? ""
                 let firstName = data["firstName"] as? String ?? username
-                return AppUser(id: doc.documentID, firstName: firstName, username: username, phone: "")
+                let lastName = data["lastName"] as? String ?? ""
+                return AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: "")
             }
         } catch {
             print("FirebaseService: search users failed: \(error.localizedDescription)")
@@ -580,6 +610,7 @@ class FirebaseService {
         let sender = AppUser(
             id: senderData["id"] as? String ?? "",
             firstName: senderData["firstName"] as? String ?? "",
+            lastName: senderData["lastName"] as? String ?? "",
             username: senderData["username"] as? String ?? "",
             phone: ""
         )
@@ -587,6 +618,7 @@ class FirebaseService {
         let recipient = AppUser(
             id: recipientData["id"] as? String ?? "",
             firstName: recipientData["firstName"] as? String ?? "",
+            lastName: recipientData["lastName"] as? String ?? "",
             username: recipientData["username"] as? String ?? "",
             phone: ""
         )

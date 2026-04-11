@@ -1,0 +1,245 @@
+import SwiftUI
+import MessageUI
+
+struct OnboardingInviteView: View {
+    let username: String
+    let onContinue: () -> Void
+
+    @State private var contacts: [SimpleContact] = []
+    @State private var contactsGranted = false
+    @State private var contactsDenied = false
+    @State private var inviteRecipient: [String] = []
+    @State private var showMessageCompose = false
+    @State private var showShareSheet = false
+    @State private var searchText = ""
+
+    private var inviteURL: String {
+        let base = Bundle.main.object(forInfoDictionaryKey: "InviteBaseURL") as? String
+            ?? "https://rork-play-me.web.app"
+        return "\(base)/invite/u/\(username)"
+    }
+
+    private var inviteBody: String {
+        "I found this app where we can send songs to each other's home screen you should add me \(inviteURL)"
+    }
+
+    private var filteredContacts: [SimpleContact] {
+        guard !searchText.isEmpty else { return contacts }
+        let q = searchText.lowercased()
+        return contacts.filter {
+            $0.firstName.lowercased().contains(q) ||
+            $0.lastName.lowercased().contains(q) ||
+            $0.phoneNumber.contains(q)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                Text("Find your friends!")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.top, 24)
+                    .padding(.bottom, 4)
+
+                Text("Invite friends so you can send\nsongs to each other")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .multilineTextAlignment(.center)
+                    .padding(.bottom, 20)
+
+                // MARK: - Share your PlayMe link
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Share your Play Me link")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .textCase(.uppercase)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 8)
+
+                    shareRow(icon: "message.fill", color: .green, title: "Messages") {
+                        inviteRecipient = []
+                        showMessageCompose = true
+                    }
+
+                    Divider().background(Color.white.opacity(0.06)).padding(.leading, 62)
+
+                    shareRow(icon: "square.and.arrow.up", color: .gray, title: "Other apps") {
+                        showShareSheet = true
+                    }
+                }
+                .padding(.bottom, 16)
+
+                // MARK: - Contacts
+                if contactsGranted {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Your contacts")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .textCase(.uppercase)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 8)
+
+                        HStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(.white.opacity(0.4))
+                            TextField("Search your contacts", text: $searchText)
+                                .foregroundStyle(.white)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(.rect(cornerRadius: 10))
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 8)
+
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(filteredContacts) { contact in
+                                    contactRow(contact)
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                        }
+                    }
+                } else if contactsDenied {
+                    VStack(spacing: 12) {
+                        Image(systemName: "person.crop.circle.badge.xmark")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.white.opacity(0.3))
+                        Text("Contacts access was denied.\nYou can enable it in Settings.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.top, 24)
+                    Spacer()
+                } else {
+                    Spacer()
+                }
+
+                // MARK: - Bottom buttons
+                VStack(spacing: 8) {
+                    Button(action: onContinue) {
+                        Text("Continue")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(.white)
+                            .clipShape(.rect(cornerRadius: 25))
+                    }
+                    .padding(.horizontal, 20)
+
+                    Button(action: onContinue) {
+                        Text("testing skip")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.3))
+                    }
+                }
+                .padding(.bottom, 24)
+            }
+        }
+        .task {
+            let granted = await ContactsService.shared.requestAccess()
+            contactsGranted = granted
+            contactsDenied = !granted
+            if granted {
+                contacts = ContactsService.shared.fetchContacts()
+            }
+        }
+        .sheet(isPresented: $showMessageCompose) {
+            if MessageComposeView.canSendText {
+                MessageComposeView(
+                    recipients: inviteRecipient,
+                    body: inviteBody
+                ) { showMessageCompose = false }
+            }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            ShareSheetView(items: [inviteBody])
+        }
+    }
+
+    // MARK: - Rows
+
+    private func shareRow(icon: String, color: Color, title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 16))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(color)
+                    .clipShape(.rect(cornerRadius: 8))
+
+                Text(title)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func contactRow(_ contact: SimpleContact) -> some View {
+        HStack(spacing: 14) {
+            Text(contact.initials)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(Color.white.opacity(0.12))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(contact.fullName)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Button {
+                inviteRecipient = [contact.phoneNumber]
+                showMessageCompose = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .bold))
+                    Text("Invite")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                .clipShape(.capsule)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+// MARK: - Share Sheet (UIActivityViewController)
+struct ShareSheetView: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}

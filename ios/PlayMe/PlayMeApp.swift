@@ -1,13 +1,26 @@
 import SwiftUI
 import FirebaseAuth
 import FirebaseCore
+import FirebaseMessaging
 import UserNotifications
 
-class AppDelegate: NSObject, UIApplicationDelegate {
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         FirebaseApp.configure()
+
+        UNUserNotificationCenter.current().delegate = self
+        Messaging.messaging().delegate = self
+
+        let authOptions: UNAuthorizationOptions = [.alert, .badge, .sound]
+        UNUserNotificationCenter.current().requestAuthorization(options: authOptions) { granted, error in
+            if let error {
+                print("Notification permission error: \(error.localizedDescription)")
+            }
+            print("Notification permission granted: \(granted)")
+        }
         application.registerForRemoteNotifications()
+
         return true
     }
 
@@ -18,6 +31,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         #else
         Auth.auth().setAPNSToken(deviceToken, type: .prod)
         #endif
+        Messaging.messaging().apnsToken = deviceToken
     }
 
     func application(_ application: UIApplication,
@@ -34,6 +48,34 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         }
         completionHandler(.newData)
     }
+
+    // MARK: - MessagingDelegate
+
+    func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
+        guard let token = fcmToken else { return }
+        print("FCM token received: \(token.prefix(20))...")
+        Task { @MainActor in
+            await FirebaseService.shared.saveFCMToken(token)
+        }
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .badge, .sound])
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        completionHandler()
+    }
+}
+
+extension Notification.Name {
+    static let didReceiveInviteURL = Notification.Name("didReceiveInviteURL")
 }
 
 @main
@@ -44,7 +86,12 @@ struct PlayMeApp: App {
         WindowGroup {
             ContentView()
                 .onOpenURL { url in
-                    _ = Auth.auth().canHandle(url)
+                    if Auth.auth().canHandle(url) { return }
+                    NotificationCenter.default.post(
+                        name: .didReceiveInviteURL,
+                        object: nil,
+                        userInfo: ["url": url]
+                    )
                 }
         }
     }

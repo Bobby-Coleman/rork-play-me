@@ -1,9 +1,145 @@
 const { onRequest } = require("firebase-functions/v2/https");
+const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 
 admin.initializeApp();
+
+// --------------- Helpers ---------------
+
+async function getFCMToken(uid) {
+  const snap = await admin.firestore().collection("users").doc(uid).get();
+  return snap.exists ? snap.data().fcmToken || null : null;
+}
+
+async function getUserName(uid) {
+  const snap = await admin.firestore().collection("users").doc(uid).get();
+  if (!snap.exists) return "Someone";
+  const d = snap.data();
+  return d.firstName || d.username || "Someone";
+}
+
+async function sendPush(token, title, body, extraData = {}) {
+  if (!token) return;
+  try {
+    await admin.messaging().send({
+      token,
+      notification: { title, body },
+      data: extraData,
+      apns: { payload: { aps: { sound: "default", badge: 1 } } },
+    });
+  } catch (err) {
+    if (
+      err.code === "messaging/registration-token-not-registered" ||
+      err.code === "messaging/invalid-registration-token"
+    ) {
+      console.log(`Stale FCM token, skipping: ${err.code}`);
+    } else {
+      console.error("sendPush error:", err);
+    }
+  }
+}
+
+// --------------- Notification Triggers ---------------
+
+exports.onNewShare = onDocumentCreated("shares/{shareId}", async (event) => {
+  const data = event.data.data();
+  if (!data) return;
+
+  const recipientId = data.recipientId;
+  if (!recipientId) return;
+
+  const senderName = data.sender?.firstName || "Someone";
+  const songTitle = data.song?.title || "a song";
+
+  const token = await getFCMToken(recipientId);
+  await sendPush(token, "New Song 🎵", `${senderName} sent you "${songTitle}"`, {
+    type: "new_share",
+    shareId: event.params.shareId,
+  });
+});
+
+exports.onNewMessage = onDocumentCreated(
+  "conversations/{convId}/messages/{msgId}",
+  async (event) => {
+    const msgData = event.data.data();
+    if (!msgData) return;
+
+    const senderId = msgData.senderId;
+    const convId = event.params.convId;
+
+    const convSnap = await admin
+      .firestore()
+      .collection("conversations")
+      .doc(convId)
+      .get();
+    if (!convSnap.exists) return;
+
+    const convData = convSnap.data();
+    const participants = convData.participants || [];
+    const names = convData.participantNames || {};
+    const senderName = names[senderId] || "Someone";
+    const text =
+      (msgData.text || "").length > 80
+        ? msgData.text.substring(0, 80) + "…"
+        : msgData.text || "";
+
+    for (const uid of participants) {
+      if (uid === senderId) continue;
+      const token = await getFCMToken(uid);
+      await sendPush(token, senderName, text || "Sent a message", {
+        type: "new_message",
+        conversationId: convId,
+      });
+    }
+  }
+);
+
+exports.onNewLike = onDocumentCreated(
+  "users/{userId}/likes/{shareId}",
+  async (event) => {
+    const likerId = event.params.userId;
+    const shareId = event.params.shareId;
+
+    if (shareId.startsWith("song_")) return;
+
+    const shareSnap = await admin
+      .firestore()
+      .collection("shares")
+      .doc(shareId)
+      .get();
+    if (!shareSnap.exists) return;
+
+    const shareData = shareSnap.data();
+    const senderId = shareData.senderId;
+    if (!senderId || senderId === likerId) return;
+
+    const likerName = await getUserName(likerId);
+    const songTitle = shareData.song?.title || "a song";
+
+    const token = await getFCMToken(senderId);
+    await sendPush(token, "PlayMe", `${likerName} liked "${songTitle}"`, {
+      type: "like",
+      shareId,
+    });
+  }
+);
+
+exports.onNewFriend = onDocumentCreated(
+  "users/{userId}/friends/{friendId}",
+  async (event) => {
+    const adderId = event.params.userId;
+    const friendId = event.params.friendId;
+
+    const adderName = await getUserName(adderId);
+    const token = await getFCMToken(friendId);
+    await sendPush(token, "PlayMe", `${adderName} added you on PlayMe`, {
+      type: "friend_added",
+      friendId: adderId,
+    });
+  }
+);
 
 const spotifyClientSecret = defineSecret("SPOTIFY_CLIENT_SECRET");
 

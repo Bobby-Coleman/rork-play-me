@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import UserNotifications
 import WidgetKit
 
 @Observable
@@ -23,6 +25,7 @@ class AppState {
             if let user = currentUser {
                 UserDefaults.standard.set(user.id, forKey: "currentUserId")
                 UserDefaults.standard.set(user.firstName, forKey: "currentUserFirstName")
+                UserDefaults.standard.set(user.lastName, forKey: "currentUserLastName")
                 UserDefaults.standard.set(user.username, forKey: "currentUserUsername")
                 UserDefaults.standard.set(user.phone, forKey: "currentUserPhone")
             }
@@ -40,7 +43,16 @@ class AppState {
             UserDefaults.standard.set(Array(likedShareIds), forKey: "likedShareIds")
         }
     }
-    var conversations: [Conversation] = []
+    var conversations: [Conversation] = [] {
+        didSet {
+            let count = conversations.reduce(0) { $0 + $1.unreadCount }
+            UNUserNotificationCenter.current().setBadgeCount(count)
+        }
+    }
+
+    var totalUnreadCount: Int {
+        conversations.reduce(0) { $0 + $1.unreadCount }
+    }
     var phoneNumber: String = ""
     var showSentToast = false
     var isLoading = false
@@ -61,8 +73,9 @@ class AppState {
         if let id = UserDefaults.standard.string(forKey: "currentUserId"),
            let firstName = UserDefaults.standard.string(forKey: "currentUserFirstName"),
            let username = UserDefaults.standard.string(forKey: "currentUserUsername") {
+            let lastName = UserDefaults.standard.string(forKey: "currentUserLastName") ?? ""
             let phone = UserDefaults.standard.string(forKey: "currentUserPhone") ?? ""
-            currentUser = AppUser(id: id, firstName: firstName, username: username, phone: phone)
+            currentUser = AppUser(id: id, firstName: firstName, lastName: lastName, username: username, phone: phone)
         }
     }
 
@@ -100,13 +113,13 @@ class AppState {
 
         isBackendAvailable = true
         currentUser = AppUser(id: uid, firstName: profile.firstName,
+                              lastName: profile.lastName,
                               username: profile.username, phone: profile.phone)
         return true
     }
 
-    func register(username: String, firstName: String? = nil) async -> Bool {
+    func register(username: String, firstName: String, lastName: String = "") async -> Bool {
         registrationError = nil
-        let displayName = firstName ?? username
         let firebase = FirebaseService.shared
 
         guard firebase.isSignedIn, let uid = firebase.firebaseUID else {
@@ -116,7 +129,8 @@ class AppState {
 
         let claimed = await firebase.claimUsernameAndCreateProfile(
             username: username,
-            firstName: displayName,
+            firstName: firstName,
+            lastName: lastName,
             phone: phoneNumber
         )
 
@@ -126,7 +140,7 @@ class AppState {
         }
 
         isBackendAvailable = true
-        currentUser = AppUser(id: uid, firstName: displayName, username: username.lowercased(), phone: phoneNumber)
+        currentUser = AppUser(id: uid, firstName: firstName, lastName: lastName, username: username.lowercased(), phone: phoneNumber)
         return true
     }
 
@@ -147,7 +161,7 @@ class AppState {
 
         if let uid = firebase.firebaseUID, currentUser?.id != uid {
             let oldUser = currentUser!
-            currentUser = AppUser(id: uid, firstName: oldUser.firstName, username: oldUser.username, phone: oldUser.phone)
+            currentUser = AppUser(id: uid, firstName: oldUser.firstName, lastName: oldUser.lastName, username: oldUser.username, phone: oldUser.phone)
         }
 
         if let profile = await firebase.loadUserProfile() {
@@ -155,6 +169,7 @@ class AppState {
             currentUser = AppUser(
                 id: uid,
                 firstName: profile.firstName,
+                lastName: profile.lastName,
                 username: profile.username,
                 phone: profile.phone
             )
@@ -185,6 +200,7 @@ class AppState {
         }
 
         await loadConversations()
+        syncWidgetWithLatestReceivedShare()
         isLoading = false
     }
 
@@ -193,12 +209,11 @@ class AppState {
 
         let share = SongShare(
             song: song,
-            sender: AppUser(id: user.id, firstName: user.firstName, username: user.username, phone: user.phone),
+            sender: AppUser(id: user.id, firstName: user.firstName, lastName: user.lastName, username: user.username, phone: user.phone),
             recipient: friend,
             note: note?.isEmpty == true ? nil : note
         )
         sentShares.insert(share, at: 0)
-        updateWidgetData(share: share)
 
         Task { await FirebaseService.shared.saveShare(share) }
 
@@ -242,6 +257,13 @@ class AppState {
             searchResults = []
         }
         isSearchingSongs = false
+    }
+
+    func refreshFriends() async {
+        let serverFriends = await FirebaseService.shared.loadFriends()
+        if !serverFriends.isEmpty {
+            friends = serverFriends
+        }
     }
 
     func searchFriends(query: String) -> [AppUser] {
@@ -297,10 +319,12 @@ class AppState {
         FirebaseService.shared.signOut()
         UserDefaults.standard.removeObject(forKey: "currentUserId")
         UserDefaults.standard.removeObject(forKey: "currentUserFirstName")
+        UserDefaults.standard.removeObject(forKey: "currentUserLastName")
         UserDefaults.standard.removeObject(forKey: "currentUserUsername")
         UserDefaults.standard.removeObject(forKey: "currentUserPhone")
         UserDefaults.standard.removeObject(forKey: "likedShareIds")
         UserDefaults.standard.removeObject(forKey: "preferredMusicService")
+        clearWidgetSharedState()
     }
 
     func refreshShares() async {
@@ -321,6 +345,8 @@ class AppState {
         if !serverLikes.isEmpty {
             likedShareIds = serverLikes
         }
+
+        syncWidgetWithLatestReceivedShare()
     }
 
     private func mapShare(_ response: APIShareResponse) -> SongShare? {
@@ -329,8 +355,8 @@ class AppState {
               let recipientResp = response.recipient else { return nil }
 
         let song = Song(id: songResp.id, title: songResp.title, artist: songResp.artist, albumArtURL: songResp.albumArtURL, duration: songResp.duration)
-        let sender = AppUser(id: senderResp.id, firstName: senderResp.firstName, username: senderResp.username, phone: senderResp.phone)
-        let recipient = AppUser(id: recipientResp.id, firstName: recipientResp.firstName, username: recipientResp.username, phone: recipientResp.phone)
+        let sender = AppUser(id: senderResp.id, firstName: senderResp.firstName, username: senderResp.username, phone: "")
+        let recipient = AppUser(id: recipientResp.id, firstName: recipientResp.firstName, username: recipientResp.username, phone: "")
 
         return SongShare(
             id: response.id,
@@ -344,7 +370,7 @@ class AppState {
 
     private func loadSampleShares() async {
         guard let user = currentUser else { return }
-        let me = AppUser(id: user.id, firstName: user.firstName, username: user.username, phone: user.phone)
+        let me = AppUser(id: user.id, firstName: user.firstName, lastName: user.lastName, username: user.username, phone: user.phone)
         let molly = MockData.friends[0]
 
         var feedSong = MockData.songs[0]
@@ -360,14 +386,65 @@ class AppState {
         sentShares = []
     }
 
-    private func updateWidgetData(share: SongShare) {
-        let defaults = UserDefaults(suiteName: "group.app.rork.playme.shared")
-        defaults?.set(share.song.title, forKey: "widgetSongTitle")
-        defaults?.set(share.song.artist, forKey: "widgetSongArtist")
-        defaults?.set(share.song.albumArtURL, forKey: "widgetAlbumArtURL")
-        defaults?.set(share.sender.initials, forKey: "widgetSenderInitials")
-        defaults?.set(share.note, forKey: "widgetNote")
-        defaults?.set(share.id, forKey: "widgetShareId")
+    private static let widgetAppGroup = "group.app.rork.playme.shared"
+
+    /// Home screen widget shows the latest song **sent to you**, not songs you sent.
+    private func syncWidgetWithLatestReceivedShare() {
+        let defaults = UserDefaults(suiteName: Self.widgetAppGroup)
+        guard let latest = receivedShares.max(by: { $0.timestamp < $1.timestamp }) else {
+            Self.clearWidgetUserDefaults(defaults)
+            WidgetCenter.shared.reloadAllTimelines()
+            return
+        }
+        defaults?.set(latest.song.title, forKey: "widgetSongTitle")
+        defaults?.set(latest.song.artist, forKey: "widgetSongArtist")
+        defaults?.set(latest.sender.firstName, forKey: "widgetSenderFirstName")
+        if let note = latest.note, !note.isEmpty {
+            defaults?.set(note, forKey: "widgetNote")
+        } else {
+            defaults?.removeObject(forKey: "widgetNote")
+        }
+        defaults?.set(latest.id, forKey: "widgetShareId")
+
+        Task.detached {
+            await Self.downloadWidgetAlbumArt(urlString: latest.song.albumArtURL)
+        }
+    }
+
+    private static func downloadWidgetAlbumArt(urlString: String) async {
+        guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: widgetAppGroup) else { return }
+        let imageFile = containerURL.appendingPathComponent("widgetAlbumArt.jpg")
+
+        guard let url = URL(string: urlString), !urlString.isEmpty else {
+            try? FileManager.default.removeItem(at: imageFile)
+            await MainActor.run { WidgetCenter.shared.reloadAllTimelines() }
+            return
+        }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            try data.write(to: imageFile, options: .atomic)
+        } catch {
+            print("Widget album art download failed: \(error.localizedDescription)")
+        }
+        await MainActor.run { WidgetCenter.shared.reloadAllTimelines() }
+    }
+
+    private func clearWidgetSharedState() {
+        let defaults = UserDefaults(suiteName: Self.widgetAppGroup)
+        Self.clearWidgetUserDefaults(defaults)
         WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    private static func clearWidgetUserDefaults(_ defaults: UserDefaults?) {
+        let keys = [
+            "widgetSongTitle", "widgetSongArtist",
+            "widgetSenderFirstName", "widgetNote", "widgetShareId",
+        ]
+        keys.forEach { defaults?.removeObject(forKey: $0) }
+
+        if let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: widgetAppGroup) {
+            try? FileManager.default.removeItem(at: containerURL.appendingPathComponent("widgetAlbumArt.jpg"))
+        }
     }
 }

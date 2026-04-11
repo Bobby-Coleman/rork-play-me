@@ -1,12 +1,14 @@
 import WidgetKit
 import SwiftUI
 
+private let widgetAppGroupId = "group.app.rork.playme.shared"
+
 nonisolated struct SongEntry: TimelineEntry {
     let date: Date
     let songTitle: String
     let songArtist: String
-    let albumArtURL: String
-    let senderInitials: String
+    let albumImage: UIImage?
+    let senderFirstName: String
     let note: String?
     let shareId: String?
 }
@@ -17,8 +19,8 @@ nonisolated struct SongProvider: TimelineProvider {
             date: .now,
             songTitle: "Can't Help Myself",
             songArtist: "Kita Alexander",
-            albumArtURL: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&h=600&fit=crop",
-            senderInitials: "MJ",
+            albumImage: nil,
+            senderFirstName: "Molly",
             note: "this song reminds me of you",
             shareId: nil
         )
@@ -35,20 +37,25 @@ nonisolated struct SongProvider: TimelineProvider {
     }
 
     private func loadEntry() -> SongEntry {
-        let defaults = UserDefaults(suiteName: "group.app.rork.playme.shared")
+        let defaults = UserDefaults(suiteName: widgetAppGroupId)
         let title = defaults?.string(forKey: "widgetSongTitle") ?? "Play Me"
-        let artist = defaults?.string(forKey: "widgetSongArtist") ?? "Send a song to get started"
-        let artURL = defaults?.string(forKey: "widgetAlbumArtURL") ?? ""
-        let initials = defaults?.string(forKey: "widgetSenderInitials") ?? ""
+        let artist = defaults?.string(forKey: "widgetSongArtist") ?? "Open the app to see songs"
+        let firstName = defaults?.string(forKey: "widgetSenderFirstName") ?? ""
         let note = defaults?.string(forKey: "widgetNote")
         let shareId = defaults?.string(forKey: "widgetShareId")
+
+        var albumImage: UIImage? = nil
+        if let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: widgetAppGroupId) {
+            let imageFile = containerURL.appendingPathComponent("widgetAlbumArt.jpg")
+            albumImage = UIImage(contentsOfFile: imageFile.path)
+        }
 
         return SongEntry(
             date: .now,
             songTitle: title,
             songArtist: artist,
-            albumArtURL: artURL,
-            senderInitials: initials,
+            albumImage: albumImage,
+            senderFirstName: firstName,
             note: note,
             shareId: shareId
         )
@@ -59,65 +66,82 @@ struct PlayMeWidgetView: View {
     var entry: SongEntry
     @Environment(\.widgetFamily) var family
 
+    private var isSmall: Bool { family == .systemSmall }
+
+    private var noteSize: CGFloat { isSmall ? 10 : 12 }
+    private var noteLineLimit: Int { isSmall ? 4 : 6 }
+    private var bubbleSize: CGFloat { isSmall ? 22 : 28 }
+
     var body: some View {
-        ZStack {
-            if !entry.albumArtURL.isEmpty, let url = URL(string: entry.albumArtURL) {
-                Color.black
-                    .overlay {
-                        AsyncImage(url: url) { phase in
-                            if let image = phase.image {
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            }
-                        }
-                        .allowsHitTesting(false)
+        ZStack(alignment: .bottomLeading) {
+            Color.clear
+
+            if !entry.senderFirstName.isEmpty || (entry.note != nil && !(entry.note!.isEmpty)) {
+                HStack(alignment: .bottom, spacing: 5) {
+                    if !entry.senderFirstName.isEmpty {
+                        senderBubble
                     }
-                    .clipped()
 
-                LinearGradient(
-                    colors: [.clear, .black.opacity(0.7), .black.opacity(0.85)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            } else {
-                Color.black
-            }
-
-            VStack(alignment: .leading, spacing: 0) {
-                if !entry.senderInitials.isEmpty {
-                    Text(entry.senderInitials)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 24, height: 24)
-                        .background(.white.opacity(0.25))
-                        .clipShape(Circle())
+                    if let note = entry.note, !note.isEmpty {
+                        Text(note)
+                            .font(.system(size: noteSize, weight: .medium))
+                            .foregroundStyle(.white)
+                            .lineLimit(noteLineLimit)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 3)
+                            .background(Color(white: 0.22))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                            )
+                    }
                 }
-
-                Spacer()
-
-                Text(entry.songTitle)
-                    .font(.system(size: family == .systemSmall ? 13 : 15, weight: .bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-
-                Text(entry.songArtist)
-                    .font(.system(size: family == .systemSmall ? 10 : 12))
-                    .foregroundStyle(.white.opacity(0.7))
-                    .lineLimit(1)
-
-                if let note = entry.note, !note.isEmpty {
-                    Text(note)
-                        .font(.system(size: family == .systemSmall ? 9 : 11))
-                        .foregroundStyle(.white.opacity(0.5))
-                        .lineLimit(1)
-                        .padding(.top, 2)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 2)
+                .padding(.trailing, 2)
+                .padding(.bottom, 0)
+                .ignoresSafeArea(edges: .bottom)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .containerBackground(.black, for: .widget)
-        .widgetURL(URL(string: "playme://share/\(entry.shareId ?? "")"))
+        .containerBackground(for: .widget) {
+            fullBleedAlbumBackground
+        }
+        .widgetURL(widgetDeepLink)
+    }
+
+    private var widgetDeepLink: URL? {
+        if let id = entry.shareId, !id.isEmpty {
+            return URL(string: "playme://share/\(id)")
+        }
+        return URL(string: "playme://")
+    }
+
+    @ViewBuilder
+    private var fullBleedAlbumBackground: some View {
+        if let uiImage = entry.albumImage {
+            Image(uiImage: uiImage)
+                .resizable()
+                .scaledToFill()
+        } else {
+            Color(white: 0.08)
+        }
+    }
+
+    private var senderBubble: some View {
+        Text(entry.senderFirstName.prefix(1).uppercased())
+            .font(.system(size: bubbleSize * 0.5, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .frame(width: bubbleSize, height: bubbleSize)
+            .background(Color.black.opacity(0.7))
+            .clipShape(Circle())
+            .overlay {
+                Circle()
+                    .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
+            }
     }
 }
 
@@ -129,8 +153,8 @@ struct PlayMeWidget: Widget {
             PlayMeWidgetView(entry: entry)
         }
         .configurationDisplayName("Play Me")
-        .description("See the latest song sent to you.")
-        .supportedFamilies([.systemSmall])
+        .description("Latest song someone sent you, their note, and who sent it.")
+        .supportedFamilies([.systemSmall, .systemMedium])
         .containerBackgroundRemovable(false)
     }
 }

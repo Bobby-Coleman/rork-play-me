@@ -27,6 +27,8 @@
 	<array>
 		<string>spotify</string>
 	</array>
+	<key>NSContactsUsageDescription</key>
+	<string>PlayMe uses your contacts to help you find and invite friends.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

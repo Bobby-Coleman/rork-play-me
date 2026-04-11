@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		8491A0A32F8841230088392D /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 8491A0A22F8841230088392D /* FirebaseMessaging */; };
 		XX3DF24C364CC9BFC26E41XX /* PlayMeWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = XX8D76BE4CCED1AB217465XX /* PlayMeWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		XXFB01A1E3C4D5B6A7F8E9XX /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = XXFB01A2E3C4D5B6A7F8E9XX /* FirebaseAuth */; };
 		XXFB01A3E3C4D5B6A7F8E9XX /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = XXFB01A4E3C4D5B6A7F8E9XX /* FirebaseFirestore */; };
@@ -108,6 +109,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8491A0A32F8841230088392D /* FirebaseMessaging in Frameworks */,
 				XXFB01A1E3C4D5B6A7F8E9XX /* FirebaseAuth in Frameworks */,
 				XXFB01A3E3C4D5B6A7F8E9XX /* FirebaseFirestore in Frameworks */,
 			);
@@ -145,6 +147,7 @@
 				105FC5962E9EAD3200EA8BCF /* PlayMeUITests */,
 				105FC57B2E9EAD3100EA8BCF /* Products */,
 				XX7DD80A4CD0ED2A772BF9XX /* PlayMeWidget */,
+				8491A0A12F8841230088392D /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -157,6 +160,13 @@
 				XX8D76BE4CCED1AB217465XX /* PlayMeWidget.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		8491A0A12F8841230088392D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -183,6 +193,7 @@
 			packageProductDependencies = (
 				XXFB01A2E3C4D5B6A7F8E9XX /* FirebaseAuth */,
 				XXFB01A4E3C4D5B6A7F8E9XX /* FirebaseFirestore */,
+				8491A0A22F8841230088392D /* FirebaseMessaging */,
 			);
 			productName = PlayMe;
 			productReference = 105FC57A2E9EAD3100EA8BCF /* PlayMe.app */;
@@ -784,6 +795,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		8491A0A22F8841230088392D /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
 		XXFB01A2E3C4D5B6A7F8E9XX /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var appState = AppState()
     @State private var showSendSheet = false
+    @State private var showAddFriends = false
     @State private var selectedTab: Int = 0
 
     var body: some View {
@@ -25,7 +26,7 @@ struct ContentView: View {
     private var mainTabView: some View {
         TabView(selection: $selectedTab) {
             Tab(value: 0) {
-                HomeFeedView(shares: appState.receivedShares, appState: appState, onSendSong: { showSendSheet = true })
+                HomeFeedView(shares: appState.receivedShares, appState: appState, onSendSong: { showSendSheet = true }, onAddFriends: { showAddFriends = true })
             } label: {
                 Image(systemName: "house.fill")
                 Text("Home")
@@ -44,6 +45,7 @@ struct ContentView: View {
                 Image(systemName: "bubble.left.and.bubble.right.fill")
                 Text("Messages")
             }
+            .badge(appState.totalUnreadCount)
 
             Tab(value: 3) {
                 ProfileView(appState: appState)
@@ -68,6 +70,17 @@ struct ContentView: View {
             SendSongSheet(appState: appState)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showAddFriends) {
+            AddFriendsView(appState: appState)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .didReceiveInviteURL)) { notification in
+            guard let url = notification.userInfo?["url"] as? URL else { return }
+            if url.path.contains("/invite/") {
+                showAddFriends = true
+            }
         }
     }
 }
