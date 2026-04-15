@@ -5,13 +5,16 @@ struct OnboardingInviteView: View {
     let username: String
     let onContinue: () -> Void
 
-    @State private var contacts: [SimpleContact] = []
+    @State private var allContacts: [SimpleContact] = []
     @State private var contactsGranted = false
     @State private var contactsDenied = false
+    @State private var visibleContactCount = 20
     @State private var inviteRecipient: [String] = []
     @State private var showMessageCompose = false
     @State private var showShareSheet = false
     @State private var searchText = ""
+
+    @FocusState private var searchFocused: Bool
 
     private var inviteURL: String {
         let base = Bundle.main.object(forInfoDictionaryKey: "InviteBaseURL") as? String
@@ -23,14 +26,24 @@ struct OnboardingInviteView: View {
         "I found this app where we can send songs to each other's home screen you should add me \(inviteURL)"
     }
 
+    private var isActive: Bool { !searchText.isEmpty }
+
     private var filteredContacts: [SimpleContact] {
-        guard !searchText.isEmpty else { return contacts }
+        guard isActive else { return [] }
         let q = searchText.lowercased()
-        return contacts.filter {
+        return allContacts.filter {
             $0.firstName.lowercased().contains(q) ||
             $0.lastName.lowercased().contains(q) ||
             $0.phoneNumber.contains(q)
         }
+    }
+
+    private var paginatedContacts: [SimpleContact] {
+        Array(allContacts.prefix(visibleContactCount))
+    }
+
+    private var hasMoreContacts: Bool {
+        visibleContactCount < allContacts.count
     }
 
     var body: some View {
@@ -49,6 +62,32 @@ struct OnboardingInviteView: View {
                     .foregroundStyle(.white.opacity(0.5))
                     .multilineTextAlignment(.center)
                     .padding(.bottom, 20)
+
+                // MARK: - Search bar
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.white.opacity(0.4))
+                    TextField("Search your contacts", text: $searchText)
+                        .foregroundStyle(.white)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .focused($searchFocused)
+
+                    if isActive {
+                        Button("Cancel") {
+                            searchText = ""
+                            searchFocused = false
+                        }
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.08))
+                .clipShape(.rect(cornerRadius: 10))
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
 
                 // MARK: - Share your PlayMe link
                 VStack(alignment: .leading, spacing: 0) {
@@ -82,25 +121,37 @@ struct OnboardingInviteView: View {
                             .padding(.horizontal, 20)
                             .padding(.bottom, 8)
 
-                        HStack(spacing: 10) {
-                            Image(systemName: "magnifyingglass")
-                                .foregroundStyle(.white.opacity(0.4))
-                            TextField("Search your contacts", text: $searchText)
-                                .foregroundStyle(.white)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.08))
-                        .clipShape(.rect(cornerRadius: 10))
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 8)
-
                         ScrollView {
                             LazyVStack(spacing: 0) {
-                                ForEach(filteredContacts) { contact in
-                                    contactRow(contact)
+                                if isActive {
+                                    ForEach(filteredContacts) { contact in
+                                        contactRow(contact)
+                                    }
+                                    if filteredContacts.isEmpty {
+                                        Text("No matching contacts")
+                                            .font(.system(size: 14))
+                                            .foregroundStyle(.white.opacity(0.3))
+                                            .padding(.top, 12)
+                                    }
+                                } else {
+                                    ForEach(paginatedContacts) { contact in
+                                        contactRow(contact)
+                                    }
+
+                                    if hasMoreContacts {
+                                        Button {
+                                            visibleContactCount = min(visibleContactCount + 20, allContacts.count)
+                                        } label: {
+                                            Text("Show more")
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundStyle(.white.opacity(0.6))
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.vertical, 12)
+                                                .background(Color.white.opacity(0.06))
+                                                .clipShape(.rect(cornerRadius: 10))
+                                        }
+                                        .padding(.top, 8)
+                                    }
                                 }
                             }
                             .padding(.horizontal, 20)
@@ -149,7 +200,7 @@ struct OnboardingInviteView: View {
             contactsGranted = granted
             contactsDenied = !granted
             if granted {
-                contacts = ContactsService.shared.fetchContacts()
+                allContacts = ContactsService.shared.fetchContacts()
             }
         }
         .sheet(isPresented: $showMessageCompose) {

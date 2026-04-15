@@ -10,12 +10,15 @@ struct AddFriendsView: View {
     @State private var isSearching = false
     @State private var addedIds: Set<String> = []
 
-    @State private var contacts: [SimpleContact] = []
+    @State private var allContacts: [SimpleContact] = []
     @State private var contactsLoaded = false
+    @State private var visibleContactCount = 20
 
     @State private var showMessageCompose = false
     @State private var messageRecipients: [String] = []
     @State private var showShareSheet = false
+
+    @FocusState private var searchFocused: Bool
 
     private var inviteURL: String {
         let base = Bundle.main.object(forInfoDictionaryKey: "InviteBaseURL") as? String
@@ -28,6 +31,26 @@ struct AddFriendsView: View {
         "I found this app where we can send songs to each other's home screen you should add me \(inviteURL)"
     }
 
+    private var isActive: Bool { !searchText.isEmpty }
+
+    private var filteredContacts: [SimpleContact] {
+        guard isActive else { return [] }
+        let q = searchText.lowercased()
+        return allContacts.filter {
+            $0.firstName.lowercased().contains(q) ||
+            $0.lastName.lowercased().contains(q) ||
+            $0.phoneNumber.contains(q)
+        }
+    }
+
+    private var paginatedContacts: [SimpleContact] {
+        Array(allContacts.prefix(visibleContactCount))
+    }
+
+    private var hasMoreContacts: Bool {
+        visibleContactCount < allContacts.count
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -35,109 +58,55 @@ struct AddFriendsView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        // MARK: - Search users
-                        sectionHeader("Search users")
 
+                        // MARK: - Header
+                        Text("\(appState.friends.count) friends")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 4)
+                            .padding(.bottom, 2)
+
+                        Text("Add your friends")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .frame(maxWidth: .infinity)
+                            .padding(.bottom, 16)
+
+                        // MARK: - Search bar
                         HStack(spacing: 10) {
                             Image(systemName: "magnifyingglass")
                                 .foregroundStyle(.white.opacity(0.4))
-                            TextField("Search by username", text: $searchText)
+                            TextField("Search or add friends", text: $searchText)
                                 .foregroundStyle(.white)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
+                                .focused($searchFocused)
                                 .onChange(of: searchText) { _, newValue in
                                     performSearch(newValue)
                                 }
+
+                            if isActive {
+                                Button("Cancel") {
+                                    searchText = ""
+                                    searchResults = []
+                                    searchFocused = false
+                                }
+                                .font(.system(size: 15))
+                                .foregroundStyle(.white.opacity(0.6))
+                            }
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(Color.white.opacity(0.08))
                         .clipShape(.rect(cornerRadius: 10))
                         .padding(.horizontal, 20)
-                        .padding(.bottom, 12)
+                        .padding(.bottom, 16)
 
-                        if isSearching {
-                            ProgressView()
-                                .tint(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 12)
-                        } else if !searchResults.isEmpty {
-                            LazyVStack(spacing: 0) {
-                                ForEach(searchResults) { user in
-                                    userRow(user)
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                        } else if !searchText.isEmpty && !isSearching {
-                            Text("No users found")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.white.opacity(0.3))
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 12)
-                        }
-
-                        Divider()
-                            .background(Color.white.opacity(0.06))
-                            .padding(.vertical, 16)
-
-                        // MARK: - Share link
-                        sectionHeader("Share your Play Me link")
-
-                        shareRow(icon: "message.fill", color: .green, title: "Messages") {
-                            messageRecipients = []
-                            showMessageCompose = true
-                        }
-
-                        Divider().background(Color.white.opacity(0.06)).padding(.leading, 62)
-
-                        shareRow(icon: "square.and.arrow.up", color: .gray, title: "Other apps") {
-                            showShareSheet = true
-                        }
-
-                        Divider()
-                            .background(Color.white.opacity(0.06))
-                            .padding(.vertical, 16)
-
-                        // MARK: - Contacts
-                        sectionHeader("Your contacts")
-
-                        if contactsLoaded {
-                            LazyVStack(spacing: 0) {
-                                ForEach(contacts) { contact in
-                                    contactRow(contact)
-                                }
-                            }
-                            .padding(.horizontal, 20)
-
-                            if contacts.isEmpty {
-                                Text("No contacts with phone numbers found")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(.white.opacity(0.3))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.top, 12)
-                            }
+                        if isActive {
+                            searchContent
                         } else {
-                            Button {
-                                Task {
-                                    let granted = await ContactsService.shared.requestAccess()
-                                    if granted {
-                                        contacts = ContactsService.shared.fetchContacts()
-                                    }
-                                    contactsLoaded = true
-                                }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "person.crop.circle")
-                                    Text("Allow contacts access")
-                                }
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(Color.white.opacity(0.08))
-                                .clipShape(.rect(cornerRadius: 10))
-                            }
-                            .padding(.horizontal, 20)
+                            browseContent
                         }
                     }
                     .padding(.top, 8)
@@ -159,7 +128,7 @@ struct AddFriendsView: View {
         .task {
             let granted = await ContactsService.shared.requestAccess()
             if granted {
-                contacts = ContactsService.shared.fetchContacts()
+                allContacts = ContactsService.shared.fetchContacts()
             }
             contactsLoaded = true
         }
@@ -176,15 +145,164 @@ struct AddFriendsView: View {
         }
     }
 
+    // MARK: - Search active content
+
+    private var searchContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !filteredContacts.isEmpty {
+                sectionHeader("Your contacts", icon: "person.crop.rectangle.stack")
+
+                LazyVStack(spacing: 0) {
+                    ForEach(filteredContacts) { contact in
+                        contactRow(contact)
+                    }
+                }
+                .padding(.horizontal, 20)
+
+                Divider()
+                    .background(Color.white.opacity(0.06))
+                    .padding(.vertical, 12)
+            }
+
+            if isSearching {
+                sectionHeader("Add by username", icon: "at")
+                ProgressView()
+                    .tint(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 12)
+            } else if !searchResults.isEmpty {
+                sectionHeader("Add by username", icon: "at")
+
+                LazyVStack(spacing: 0) {
+                    ForEach(searchResults) { user in
+                        userRow(user)
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+
+            if !isSearching && filteredContacts.isEmpty && searchResults.isEmpty {
+                Text("No results found")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white.opacity(0.3))
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 20)
+            }
+
+            Divider()
+                .background(Color.white.opacity(0.06))
+                .padding(.vertical, 12)
+
+            shareLinkSection
+        }
+    }
+
+    // MARK: - Browse (no search) content
+
+    private var browseContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Share link first
+            shareLinkSection
+
+            Divider()
+                .background(Color.white.opacity(0.06))
+                .padding(.vertical, 12)
+
+            // Contacts
+            sectionHeader("Your contacts", icon: "person.crop.rectangle.stack")
+
+            if contactsLoaded {
+                if allContacts.isEmpty {
+                    Text("No contacts with phone numbers found")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white.opacity(0.3))
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 12)
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(paginatedContacts) { contact in
+                            contactRow(contact)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+
+                    if hasMoreContacts {
+                        Button {
+                            visibleContactCount = min(visibleContactCount + 20, allContacts.count)
+                        } label: {
+                            Text("Show more")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.6))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color.white.opacity(0.06))
+                                .clipShape(.rect(cornerRadius: 10))
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                    }
+                }
+            } else {
+                Button {
+                    Task {
+                        let granted = await ContactsService.shared.requestAccess()
+                        if granted {
+                            allContacts = ContactsService.shared.fetchContacts()
+                        }
+                        contactsLoaded = true
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "person.crop.circle")
+                        Text("Allow contacts access")
+                    }
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(.rect(cornerRadius: 10))
+                }
+                .padding(.horizontal, 20)
+            }
+        }
+    }
+
+    // MARK: - Share link section
+
+    private var shareLinkSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("Share your Play Me link", icon: "square.and.arrow.up")
+
+            shareRow(icon: "message.fill", color: .green, title: "Messages") {
+                messageRecipients = []
+                showMessageCompose = true
+            }
+
+            Divider().background(Color.white.opacity(0.06)).padding(.leading, 62)
+
+            shareRow(icon: "square.and.arrow.up", color: .gray, title: "Other apps") {
+                showShareSheet = true
+            }
+        }
+    }
+
     // MARK: - Subviews
 
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.5))
-            .textCase(.uppercase)
-            .padding(.horizontal, 20)
-            .padding(.bottom, 8)
+    private func sectionHeader(_ title: String, icon: String? = nil) -> some View {
+        HStack(spacing: 6) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.5))
+                .textCase(.uppercase)
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 8)
     }
 
     private func userRow(_ user: AppUser) -> some View {
@@ -231,17 +349,7 @@ struct AddFriendsView: View {
                         await appState.refreshFriends()
                     }
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .bold))
-                        Text("Add")
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color(red: 0.76, green: 0.38, blue: 0.35))
-                    .clipShape(.capsule)
+                    addButtonLabel("Add")
                 }
             }
         }
@@ -295,20 +403,24 @@ struct AddFriendsView: View {
                 messageRecipients = [contact.phoneNumber]
                 showMessageCompose = true
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .bold))
-                    Text("Invite")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color(red: 0.76, green: 0.38, blue: 0.35))
-                .clipShape(.capsule)
+                addButtonLabel("Invite")
             }
         }
         .padding(.vertical, 8)
+    }
+
+    private func addButtonLabel(_ text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "plus")
+                .font(.system(size: 11, weight: .bold))
+            Text(text)
+                .font(.system(size: 13, weight: .semibold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+        .clipShape(.capsule)
     }
 
     // MARK: - Search

@@ -329,10 +329,25 @@ private func externalURL(for song: Song, service: MusicService, resolvedSpotifyU
         let query = "\(song.title) \(song.artist)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         return URL(string: "https://music.apple.com/search?term=\(query)")
     case .spotify:
+        if let trackID = spotifyTrackID(from: resolvedSpotifyURL) {
+            let nativeURI = URL(string: "spotify:track:\(trackID)")!
+            if UIApplication.shared.canOpenURL(nativeURI) {
+                return nativeURI
+            }
+        }
         if let resolved = resolvedSpotifyURL, let url = URL(string: resolved) {
             return url
         }
         let query = "\(song.title) \(song.artist)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         return URL(string: "https://open.spotify.com/search/\(query)")
     }
+}
+
+private func spotifyTrackID(from urlString: String?) -> String? {
+    guard let urlString, let url = URL(string: urlString) else { return nil }
+    let parts = url.pathComponents
+    guard let trackIndex = parts.firstIndex(of: "track"),
+          trackIndex + 1 < parts.count else { return nil }
+    let trackID = parts[trackIndex + 1]
+    return trackID.isEmpty ? nil : trackID
 }
