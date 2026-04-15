@@ -29,85 +29,88 @@ struct SongCardView: View {
             Color.black.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                VStack(spacing: 4) {
-                    Text("\(share.sender.firstName.uppercased()) SENT YOU A SONG")
-                        .font(.system(size: 12, weight: .bold))
-                        .tracking(1.5)
-                        .foregroundStyle(.white.opacity(0.5))
+                Spacer(minLength: 0)
 
-                    Text(share.song.title)
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(.white)
+                VStack(spacing: 0) {
+                    VStack(spacing: 4) {
+                        Text("\(share.sender.firstName.uppercased()) SENT YOU A SONG")
+                            .font(.system(size: 12, weight: .bold))
+                            .tracking(1.5)
+                            .foregroundStyle(.white.opacity(0.5))
 
-                    Text(share.song.artist)
-                        .font(.system(size: 15))
-                        .foregroundStyle(.white.opacity(0.6))
-                }
-                .padding(.top, 16)
-                .padding(.bottom, 20)
+                        Text(share.song.title)
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(.white)
 
-                Color.clear
-                    .frame(maxWidth: .infinity)
-                    .frame(height: UIScreen.main.bounds.width - 48)
-                    .overlay {
-                        AsyncImage(url: URL(string: share.song.albumArtURL)) { phase in
-                            if let image = phase.image {
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } else if phase.error != nil {
-                                Color(.systemGray5)
-                            } else {
-                                Color(.systemGray6)
-                                    .overlay { ProgressView().tint(.white) }
+                        Text(share.song.artist)
+                            .font(.system(size: 15))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                    .padding(.top, 16)
+                    .padding(.bottom, 20)
+
+                    Color.clear
+                        .frame(maxWidth: .infinity)
+                        .frame(height: UIScreen.main.bounds.width - 48)
+                        .overlay {
+                            AsyncImage(url: URL(string: share.song.albumArtURL)) { phase in
+                                if let image = phase.image {
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                } else if phase.error != nil {
+                                    Color(.systemGray5)
+                                } else {
+                                    Color(.systemGray6)
+                                        .overlay { ProgressView().tint(.white) }
+                                }
                             }
+                            .allowsHitTesting(false)
                         }
-                        .allowsHitTesting(false)
-                    }
-                    .clipShape(.rect(cornerRadius: 16))
-                    .overlay(alignment: .topTrailing) {
-                        Button {
-                            onToggleLike()
-                        } label: {
-                            Image(systemName: isLiked ? "heart.fill" : "heart")
-                                .font(.system(size: 20, weight: .medium))
-                                .foregroundStyle(isLiked ? .pink : .white.opacity(0.8))
-                                .padding(10)
-                                .background(.ultraThinMaterial)
-                                .clipShape(Circle())
+                        .clipShape(.rect(cornerRadius: 16))
+                        .overlay(alignment: .topTrailing) {
+                            Button {
+                                onToggleLike()
+                            } label: {
+                                Image(systemName: isLiked ? "heart.fill" : "heart")
+                                    .font(.system(size: 20, weight: .medium))
+                                    .foregroundStyle(isLiked ? .pink : .white.opacity(0.8))
+                                    .padding(10)
+                                    .background(.ultraThinMaterial)
+                                    .clipShape(Circle())
+                            }
+                            .sensoryFeedback(.impact(weight: .medium), trigger: isLiked)
+                            .padding(12)
                         }
-                        .sensoryFeedback(.impact(weight: .medium), trigger: isLiked)
-                        .padding(12)
+                        .shadow(color: .white.opacity(0.05), radius: 20, y: 10)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 12)
+
+                    HStack(spacing: 6) {
+                        Text(share.sender.firstName)
+                            .font(.system(size: 13, weight: .medium))
+                        Text("·")
+                        Text(share.timestamp, format: .dateTime.month(.abbreviated).day())
                     }
-                    .shadow(color: .white.opacity(0.05), radius: 20, y: 10)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 12)
+                    .foregroundStyle(.white.opacity(0.5))
+                    .font(.system(size: 13))
+                    .padding(.bottom, 8)
 
-                HStack(spacing: 6) {
-                    Text(share.sender.firstName)
-                        .font(.system(size: 13, weight: .medium))
-                    Text("·")
-                    Text(share.timestamp, format: .dateTime.month(.abbreviated).day())
-                }
-                .foregroundStyle(.white.opacity(0.5))
-                .font(.system(size: 13))
-                .padding(.bottom, 8)
+                    if let note = share.note {
+                        Text("\"\(note)\"")
+                            .font(.system(size: 15))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .italic()
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                            .padding(.bottom, 12)
+                    }
 
-                if let note = share.note {
-                    Text("\"\(note)\"")
-                        .font(.system(size: 15))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .italic()
-                        .multilineTextAlignment(.center)
+                    playerControls
                         .padding(.horizontal, 32)
                         .padding(.bottom, 12)
                 }
-
-                playerControls
-                    .padding(.horizontal, 32)
-                    .padding(.bottom, 12)
-
-                Spacer(minLength: 60)
+                .padding(.bottom, 80)
             }
         }
         .overlay(alignment: .bottom) {

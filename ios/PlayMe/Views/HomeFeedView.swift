@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct HomeFeedView: View {
     let shares: [SongShare]
@@ -6,16 +7,17 @@ struct HomeFeedView: View {
     let onSendSong: () -> Void
     var onAddFriends: () -> Void = {}
 
-    @State private var currentIndex: Int = 0
+    @State private var visibleShareId: String?
+    private let scrollHaptic = UIImpactFeedbackGenerator(style: .soft)
 
     var body: some View {
-        ZStack(alignment: .top) {
+        Group {
             if shares.isEmpty {
                 emptyState
             } else {
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 0) {
-                        ForEach(Array(shares.enumerated()), id: \.element.id) { index, share in
+                        ForEach(shares) { share in
                             SongCardView(
                                 share: share,
                                 isLiked: appState.isLiked(shareId: share.id),
@@ -23,16 +25,28 @@ struct HomeFeedView: View {
                                 onToggleLike: { appState.toggleLike(shareId: share.id) }
                             )
                             .containerRelativeFrame(.vertical)
+                            .id(share.id)
                         }
                     }
                     .scrollTargetLayout()
                 }
                 .scrollTargetBehavior(.paging)
+                .scrollPosition(id: $visibleShareId)
                 .scrollIndicators(.hidden)
                 .ignoresSafeArea(.keyboard)
+                .onChange(of: visibleShareId) { oldValue, newValue in
+                    guard let newValue, let oldValue, newValue != oldValue else { return }
+                    scrollHaptic.prepare()
+                    scrollHaptic.impactOccurred(intensity: 0.65)
+                }
             }
-
-            addFriendsPill
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack {
+                Spacer(minLength: 0)
+                addFriendsPill
+                Spacer(minLength: 0)
+            }
         }
     }
 
@@ -52,6 +66,7 @@ struct HomeFeedView: View {
             .clipShape(.capsule)
         }
         .padding(.top, 8)
+        .padding(.bottom, 8)
     }
 
     private var emptyState: some View {
