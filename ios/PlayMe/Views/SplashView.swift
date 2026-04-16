@@ -7,20 +7,27 @@ struct SplashView: View {
         CGSize(width: CGFloat.random(in: -30...30), height: CGFloat.random(in: -30...30))
     }
 
-    private let albumCovers = Array(MockData.songs.prefix(6))
+    private let albumCoverURLs: [String] = [
+        "https://i.scdn.co/image/ab67616d0000b2738863bc11d2aa12b54f5aeb36",
+        "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&h=600&fit=crop",
+        "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=600&h=600&fit=crop",
+        "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&h=600&fit=crop",
+        "https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=600&h=600&fit=crop",
+        "https://images.unsplash.com/photo-1571330735066-03aaa9429d89?w=600&h=600&fit=crop",
+    ]
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            ForEach(Array(albumCovers.enumerated()), id: \.element.id) { index, song in
+            ForEach(Array(albumCoverURLs.enumerated()), id: \.offset) { index, urlString in
                 let positions: [(x: CGFloat, y: CGFloat)] = [
                     (-80, -280), (100, -220), (-60, -100),
                     (120, -40), (-100, 80), (80, 160)
                 ]
                 let pos = positions[index % positions.count]
 
-                AsyncImage(url: URL(string: song.albumArtURL)) { phase in
+                AsyncImage(url: URL(string: urlString)) { phase in
                     if let image = phase.image {
                         image
                             .resizable()

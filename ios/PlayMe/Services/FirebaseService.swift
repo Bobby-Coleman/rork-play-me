@@ -13,28 +13,26 @@ class FirebaseService {
     private let db = Firestore.firestore()
     private var verificationID: String?
 
-    private static var utcDayFormatter: DateFormatter {
+    private static var localDayFormatter: DateFormatter {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.timeZone = .current
         f.dateFormat = "yyyy-MM-dd"
         return f
     }
 
-    /// Current calendar date in UTC as `yyyy-MM-dd`.
-    private static func utcDateString(for date: Date = Date()) -> String {
-        Self.utcDayFormatter.string(from: date)
+    private static func localDateString(for date: Date = Date()) -> String {
+        Self.localDayFormatter.string(from: date)
     }
 
-    /// Previous UTC calendar date as `yyyy-MM-dd`.
-    private static func utcYesterdayDateString(from date: Date = Date()) -> String {
+    private static func localYesterdayDateString(from date: Date = Date()) -> String {
         var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        cal.timeZone = .current
         let start = cal.startOfDay(for: date)
         guard let y = cal.date(byAdding: .day, value: -1, to: start) else {
-            return Self.utcDateString(for: date)
+            return Self.localDateString(for: date)
         }
-        return Self.utcDayFormatter.string(from: y)
+        return Self.localDayFormatter.string(from: y)
     }
 
     init() {
@@ -504,9 +502,9 @@ class FirebaseService {
                 }
 
                 if song != nil {
-                    let today = Self.utcDateString()
-                    let yesterday = Self.utcYesterdayDateString()
-                    let lastDay = data["songStreakLastUtcDay"] as? String
+                    let today = Self.localDateString()
+                    let yesterday = Self.localYesterdayDateString()
+                    let lastDay = data["songStreakLastDay"] as? String
                     let count = data["songStreakCount"] as? Int ?? 0
 
                     if lastDay != today {
@@ -519,7 +517,7 @@ class FirebaseService {
                             newCount = 1
                         }
                         updates["songStreakCount"] = newCount
-                        updates["songStreakLastUtcDay"] = today
+                        updates["songStreakLastDay"] = today
                     }
                 }
 

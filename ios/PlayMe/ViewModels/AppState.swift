@@ -33,7 +33,7 @@ class AppState {
     }
 
     var friends: [AppUser] = []
-    var songs: [Song] = MockData.songs
+    var songs: [Song] = []
     var searchResults: [Song] = []
     var isSearchingSongs: Bool = false
     var receivedShares: [SongShare] = []
@@ -181,18 +181,10 @@ class AppState {
         }
 
         let serverFriends = await firebase.loadFriends()
-        if !serverFriends.isEmpty {
-            friends = serverFriends
-        } else if friends.isEmpty {
-            friends = MockData.friends
-        }
+        friends = serverFriends
 
         let serverReceived = await firebase.loadReceivedShares()
-        if !serverReceived.isEmpty {
-            receivedShares = serverReceived
-        } else if receivedShares.isEmpty {
-            await loadSampleShares()
-        }
+        receivedShares = serverReceived
 
         let serverSent = await firebase.loadSentShares()
         if !serverSent.isEmpty {
@@ -379,20 +371,7 @@ class AppState {
     }
 
     private func loadSampleShares() async {
-        guard let user = currentUser else { return }
-        let me = AppUser(id: user.id, firstName: user.firstName, lastName: user.lastName, username: user.username, phone: user.phone)
-        let molly = MockData.friends[0]
-
-        var feedSong = MockData.songs[0]
-        if let results = try? await MusicSearchService.shared.search(term: "Blinding Lights The Weeknd", limit: 1),
-           let realSong = results.first {
-            feedSong = realSong
-        }
-
-        receivedShares = [
-            SongShare(song: feedSong, sender: molly, recipient: me, note: "this song reminds me of you", timestamp: Date().addingTimeInterval(-300)),
-        ]
-
+        receivedShares = []
         sentShares = []
     }
 

@@ -87,7 +87,7 @@ struct ChatView: View {
                         .clipShape(.rect(cornerRadius: 18))
                 }
 
-                Text(message.timestamp, format: .dateTime.hour().minute())
+                Text(formattedTimestamp(message.timestamp))
                     .font(.system(size: 10))
                     .foregroundStyle(.white.opacity(0.2))
             }
@@ -160,6 +160,35 @@ struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(Color.black)
+    }
+
+    private func formattedTimestamp(_ date: Date) -> String {
+        let cal = Calendar.current
+        let now = Date()
+
+        let timeFmt = DateFormatter()
+        timeFmt.dateFormat = "h:mm a"
+
+        if cal.isDateInToday(date) {
+            return timeFmt.string(from: date)
+        }
+        if cal.isDateInYesterday(date) {
+            return "Yesterday \(timeFmt.string(from: date))"
+        }
+        let daysAgo = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: now)).day ?? 7
+        if daysAgo < 7 {
+            let dayFmt = DateFormatter()
+            dayFmt.dateFormat = "EEE"
+            return "\(dayFmt.string(from: date)) \(timeFmt.string(from: date))"
+        }
+        if cal.component(.year, from: date) == cal.component(.year, from: now) {
+            let dateFmt = DateFormatter()
+            dateFmt.dateFormat = "MMM d"
+            return "\(dateFmt.string(from: date)), \(timeFmt.string(from: date))"
+        }
+        let fullFmt = DateFormatter()
+        fullFmt.dateFormat = "MMM d, yyyy"
+        return fullFmt.string(from: date)
     }
 
     private func sendMessage() {
