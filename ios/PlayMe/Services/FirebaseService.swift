@@ -13,6 +13,30 @@ class FirebaseService {
     private let db = Firestore.firestore()
     private var verificationID: String?
 
+    private static var utcDayFormatter: DateFormatter {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }
+
+    /// Current calendar date in UTC as `yyyy-MM-dd`.
+    private static func utcDateString(for date: Date = Date()) -> String {
+        Self.utcDayFormatter.string(from: date)
+    }
+
+    /// Previous UTC calendar date as `yyyy-MM-dd`.
+    private static func utcYesterdayDateString(from date: Date = Date()) -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let start = cal.startOfDay(for: date)
+        guard let y = cal.date(byAdding: .day, value: -1, to: start) else {
+            return Self.utcDateString(for: date)
+        }
+        return Self.utcDayFormatter.string(from: y)
+    }
+
     init() {
         if let user = Auth.auth().currentUser {
             firebaseUID = user.uid
@@ -405,6 +429,7 @@ class FirebaseService {
                 "lastMessageTimestamp": FieldValue.serverTimestamp(),
                 "unreadCount_\(uid)": 0,
                 "unreadCount_\(friendId)": 0,
+                "songStreakCount": 0,
             ]
             try await ref.setData(data)
             print("FirebaseService: conversation \(convId) created successfully")
@@ -415,7 +440,8 @@ class FirebaseService {
                 participantNames: names,
                 lastMessageText: "",
                 lastMessageTimestamp: Date(),
-                unreadCount: 0
+                unreadCount: 0,
+                songStreakCount: 0
             )
         } catch {
             print("FirebaseService: getOrCreateConversation FAILED: \(error)")
@@ -454,17 +480,54 @@ class FirebaseService {
             try await convRef.collection("messages").addDocument(data: msgData)
             print("FirebaseService: message added to \(conversationId)")
 
-            let convDoc = try await convRef.getDocument()
-            let participants = convDoc.data()?["participants"] as? [String] ?? []
-            var updates: [String: Any] = [
-                "lastMessageText": text,
-                "lastMessageTimestamp": FieldValue.serverTimestamp(),
-            ]
-            for p in participants where p != uid {
-                updates["unreadCount_\(p)"] = FieldValue.increment(Int64(1))
+            let result = try await db.runTransaction { transaction, errorPointer -> Any? in
+                let snapshot: DocumentSnapshot
+                do {
+                    snapshot = try transaction.getDocument(convRef)
+                } catch let e as NSError {
+                    errorPointer?.pointee = e
+                    return nil
+                }
+                guard let data = snapshot.data() else {
+                    let err = NSError(domain: "PlayMe", code: -2, userInfo: [NSLocalizedDescriptionKey: "Missing conversation"])
+                    errorPointer?.pointee = err
+                    return nil
+                }
+
+                let participants = data["participants"] as? [String] ?? []
+                var updates: [String: Any] = [
+                    "lastMessageText": text,
+                    "lastMessageTimestamp": FieldValue.serverTimestamp(),
+                ]
+                for p in participants where p != uid {
+                    updates["unreadCount_\(p)"] = FieldValue.increment(Int64(1))
+                }
+
+                if song != nil {
+                    let today = Self.utcDateString()
+                    let yesterday = Self.utcYesterdayDateString()
+                    let lastDay = data["songStreakLastUtcDay"] as? String
+                    let count = data["songStreakCount"] as? Int ?? 0
+
+                    if lastDay != today {
+                        let newCount: Int
+                        if lastDay == nil || (lastDay?.isEmpty ?? true) {
+                            newCount = 1
+                        } else if lastDay == yesterday {
+                            newCount = count + 1
+                        } else {
+                            newCount = 1
+                        }
+                        updates["songStreakCount"] = newCount
+                        updates["songStreakLastUtcDay"] = today
+                    }
+                }
+
+                transaction.updateData(updates, forDocument: convRef)
+                return NSNumber(value: true)
             }
-            try await convRef.updateData(updates)
-            print("FirebaseService: conversation \(conversationId) updated")
+            _ = result
+            print("FirebaseService: conversation \(conversationId) updated (transaction)")
         } catch {
             print("FirebaseService: sendMessage FAILED: \(error)")
         }
@@ -546,6 +609,7 @@ class FirebaseService {
 
         let uid = firebaseUID ?? ""
         let unread = data["unreadCount_\(uid)"] as? Int ?? 0
+        let streak = data["songStreakCount"] as? Int ?? 0
 
         return Conversation(
             id: id,
@@ -553,7 +617,8 @@ class FirebaseService {
             participantNames: names,
             lastMessageText: lastText,
             lastMessageTimestamp: lastTs,
-            unreadCount: unread
+            unreadCount: unread,
+            songStreakCount: streak
         )
     }
 

@@ -7,6 +7,8 @@ struct Conversation: Identifiable, Hashable, Sendable {
     let lastMessageText: String
     let lastMessageTimestamp: Date
     let unreadCount: Int
+    /// Consecutive UTC days with at least one song message from either participant.
+    let songStreakCount: Int
 
     func friendName(currentUserId: String) -> String {
         for (uid, name) in participantNames where uid != currentUserId {
