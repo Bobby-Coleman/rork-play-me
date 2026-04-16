@@ -207,8 +207,10 @@ class AppState {
     func sendSong(_ song: Song, to friend: AppUser, note: String?) async {
         guard let user = currentUser else { return }
 
+        let enrichedSong = await enrichSongWithSpotifyURI(song)
+
         let share = SongShare(
-            song: song,
+            song: enrichedSong,
             sender: AppUser(id: user.id, firstName: user.firstName, lastName: user.lastName, username: user.username, phone: user.phone),
             recipient: friend,
             note: note?.isEmpty == true ? nil : note
@@ -220,7 +222,7 @@ class AppState {
         let firebase = FirebaseService.shared
         if let conv = await firebase.getOrCreateConversation(with: friend.id, friendName: friend.firstName) {
             let messageText = note?.isEmpty == false ? note! : "Sent you a song"
-            await firebase.sendMessage(conversationId: conv.id, text: messageText, song: song)
+            await firebase.sendMessage(conversationId: conv.id, text: messageText, song: enrichedSong)
             await loadConversations()
         }
 
@@ -229,6 +231,14 @@ class AppState {
             try? await Task.sleep(for: .seconds(2))
             showSentToast = false
         }
+    }
+
+    private func enrichSongWithSpotifyURI(_ song: Song) async -> Song {
+        if song.spotifyURI != nil { return song }
+        guard let appleMusicURL = song.appleMusicURL else { return song }
+        guard let resolvedURL = await MusicSearchService.shared.resolveSpotifyURL(appleMusicURL: appleMusicURL) else { return song }
+        guard let trackID = SpotifyDeepLinkResolver.spotifyTrackID(fromSpotifyURL: resolvedURL) else { return song }
+        return song.with(spotifyURI: "spotify:track:\(trackID)")
     }
 
     func loadConversations() async {

@@ -9,6 +9,7 @@ struct ChatView: View {
     @State private var newMessageText: String = ""
     @State private var listener: ListenerRegistration?
     @State private var isSending: Bool = false
+    @State private var sheetSong: Song?
 
     private var currentUID: String {
         FirebaseService.shared.firebaseUID ?? ""
@@ -60,6 +61,9 @@ struct ChatView: View {
             listener?.remove()
             listener = nil
         }
+        .sheet(item: $sheetSong) { song in
+            SongDetailSheet(song: song, appState: appState, share: nil)
+        }
     }
 
     private func messageBubble(_ message: ChatMessage) -> some View {
@@ -93,36 +97,42 @@ struct ChatView: View {
     }
 
     private func inlineSongCard(_ song: Song) -> some View {
-        HStack(spacing: 10) {
-            AsyncImage(url: URL(string: song.albumArtURL)) { phase in
-                if let image = phase.image {
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } else {
-                    Color(.systemGray5)
+        Button {
+            sheetSong = song
+        } label: {
+            HStack(spacing: 10) {
+                AsyncImage(url: URL(string: song.albumArtURL)) { phase in
+                    if let image = phase.image {
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else {
+                        Color(.systemGray5)
+                    }
                 }
-            }
-            .frame(width: 44, height: 44)
-            .clipShape(.rect(cornerRadius: 6))
+                .frame(width: 44, height: 44)
+                .clipShape(.rect(cornerRadius: 6))
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(song.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                Text(song.artist)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.5))
-                    .lineLimit(1)
-            }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(song.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(song.artist)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
 
-            Spacer()
+                Spacer()
+            }
+            .padding(8)
+            .background(Color.white.opacity(0.08))
+            .clipShape(.rect(cornerRadius: 12))
+            .frame(maxWidth: 240)
+            .contentShape(.rect)
         }
-        .padding(8)
-        .background(Color.white.opacity(0.08))
-        .clipShape(.rect(cornerRadius: 12))
-        .frame(maxWidth: 240)
+        .buttonStyle(.plain)
     }
 
     private var inputBar: some View {

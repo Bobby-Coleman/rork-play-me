@@ -443,6 +443,7 @@ class FirebaseService {
                 "artist": song.artist,
                 "albumArtURL": song.albumArtURL,
                 "duration": song.duration,
+                "spotifyURI": song.spotifyURI as Any,
                 "previewURL": song.previewURL as Any,
                 "appleMusicURL": song.appleMusicURL as Any,
             ]
@@ -576,6 +577,7 @@ class FirebaseService {
                 artist: songData["artist"] as? String ?? "",
                 albumArtURL: songData["albumArtURL"] as? String ?? "",
                 duration: songData["duration"] as? String ?? "",
+                spotifyURI: songData["spotifyURI"] as? String,
                 previewURL: songData["previewURL"] as? String,
                 appleMusicURL: songData["appleMusicURL"] as? String
             )

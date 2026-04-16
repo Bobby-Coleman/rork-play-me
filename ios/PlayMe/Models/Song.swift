@@ -20,4 +20,17 @@ nonisolated struct Song: Identifiable, Hashable, Sendable {
         self.previewURL = previewURL
         self.appleMusicURL = appleMusicURL
     }
+
+    func with(spotifyURI: String?) -> Song {
+        Song(
+            id: id,
+            title: title,
+            artist: artist,
+            albumArtURL: albumArtURL,
+            duration: duration,
+            spotifyURI: spotifyURI ?? self.spotifyURI,
+            previewURL: previewURL,
+            appleMusicURL: appleMusicURL
+        )
+    }
 }

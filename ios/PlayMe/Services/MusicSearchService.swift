@@ -77,22 +77,30 @@ actor MusicSearchService {
             return cached
         }
 
-        guard let encoded = appleMusicURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://api.song.link/v1-alpha.1/links?url=\(encoded)") else {
-            return nil
-        }
+        guard var components = URLComponents(string: "https://api.song.link/v1-alpha.1/links") else { return nil }
+        components.queryItems = [URLQueryItem(name: "url", value: appleMusicURL)]
+        guard let url = components.url else { return nil }
 
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            guard let http = response as? HTTPURLResponse else {
+                print("[SongLink] No HTTP response for \(appleMusicURL)")
+                return nil
+            }
+            guard (200...299).contains(http.statusCode) else {
+                print("[SongLink] HTTP \(http.statusCode) for \(appleMusicURL)")
                 return nil
             }
             let decoded = try JSONDecoder().decode(SonglinkResponse.self, from: data)
             if let spotifyURL = decoded.linksByPlatform?["spotify"]?.url {
                 songlinkCache[appleMusicURL] = spotifyURL
+                print("[SongLink] Resolved \(appleMusicURL) -> \(spotifyURL)")
                 return spotifyURL
             }
-        } catch {}
+            print("[SongLink] No Spotify platform in response for \(appleMusicURL)")
+        } catch {
+            print("[SongLink] Error resolving \(appleMusicURL): \(error)")
+        }
 
         return nil
     }

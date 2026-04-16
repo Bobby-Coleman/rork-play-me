@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SongDetailSheet: View {
     let song: Song
@@ -301,9 +302,8 @@ struct SongDetailSheet: View {
 @MainActor
 func openInServiceButton(song: Song, service: MusicService, resolvedSpotifyURL: String? = nil) -> some View {
     Button {
-        let url = externalURL(for: song, service: service, resolvedSpotifyURL: resolvedSpotifyURL)
-        if let url {
-            UIApplication.shared.open(url)
+        Task {
+            await openInService(song: song, service: service, resolvedSpotifyURL: resolvedSpotifyURL)
         }
     } label: {
         HStack(spacing: 6) {
@@ -320,34 +320,54 @@ func openInServiceButton(song: Song, service: MusicService, resolvedSpotifyURL: 
     }
 }
 
-private func externalURL(for song: Song, service: MusicService, resolvedSpotifyURL: String? = nil) -> URL? {
+@MainActor
+private func openInService(song: Song, service: MusicService, resolvedSpotifyURL: String?) async {
     switch service {
     case .appleMusic:
-        if let appleMusicURL = song.appleMusicURL, let url = URL(string: appleMusicURL) {
-            return url
+        if let url = appleMusicURL(for: song) {
+            _ = await openURL(url)
         }
-        let query = "\(song.title) \(song.artist)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        return URL(string: "https://music.apple.com/search?term=\(query)")
+
     case .spotify:
-        if let trackID = spotifyTrackID(from: resolvedSpotifyURL) {
-            let nativeURI = URL(string: "spotify:track:\(trackID)")!
-            if UIApplication.shared.canOpenURL(nativeURI) {
-                return nativeURI
+        var candidateResolvedURL = resolvedSpotifyURL
+
+        if SpotifyDeepLinkResolver.spotifyTrackID(for: song, resolvedSpotifyURL: candidateResolvedURL) == nil,
+           let appleMusicURL = song.appleMusicURL {
+            candidateResolvedURL = await MusicSearchService.shared.resolveSpotifyURL(appleMusicURL: appleMusicURL)
+        }
+
+        if let trackURL = SpotifyDeepLinkResolver.trackURL(for: song, resolvedSpotifyURL: candidateResolvedURL) {
+            let openedInApp = await openURL(trackURL, universalLinksOnly: true)
+            if !openedInApp,
+               let uri = SpotifyDeepLinkResolver.trackURI(for: song, resolvedSpotifyURL: candidateResolvedURL) {
+                let openedViaURI = await openURL(uri)
+                if !openedViaURI {
+                    _ = await openURL(trackURL)
+                }
             }
+        } else if let searchURL = SpotifyDeepLinkResolver.spotifySearchURL(for: song) {
+            _ = await openURL(searchURL)
         }
-        if let resolved = resolvedSpotifyURL, let url = URL(string: resolved) {
-            return url
-        }
-        let query = "\(song.title) \(song.artist)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        return URL(string: "https://open.spotify.com/search/\(query)")
     }
 }
 
-private func spotifyTrackID(from urlString: String?) -> String? {
-    guard let urlString, let url = URL(string: urlString) else { return nil }
-    let parts = url.pathComponents
-    guard let trackIndex = parts.firstIndex(of: "track"),
-          trackIndex + 1 < parts.count else { return nil }
-    let trackID = parts[trackIndex + 1]
-    return trackID.isEmpty ? nil : trackID
+private func appleMusicURL(for song: Song) -> URL? {
+    if let appleMusicURL = song.appleMusicURL, let url = URL(string: appleMusicURL) {
+        return url
+    }
+
+    let query = "\(song.title) \(song.artist)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+    return URL(string: "https://music.apple.com/search?term=\(query)")
+}
+
+@MainActor
+private func openURL(_ url: URL, universalLinksOnly: Bool = false) async -> Bool {
+    await withCheckedContinuation { continuation in
+        let options: [UIApplication.OpenExternalURLOptionsKey: Any] = universalLinksOnly
+            ? [.universalLinksOnly: true]
+            : [:]
+        UIApplication.shared.open(url, options: options) { success in
+            continuation.resume(returning: success)
+        }
+    }
 }
