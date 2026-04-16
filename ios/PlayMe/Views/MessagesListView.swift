@@ -86,38 +86,46 @@ struct MessagesListView: View {
                             .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Group {
+                        if conversation.songStreakCount > 0 {
+                            HStack(spacing: 3) {
+                                Image(systemName: "flame.fill")
+                                    .font(.system(size: 11))
+                                Text("\(conversation.songStreakCount)")
+                                    .font(.system(size: 13, weight: .bold))
+                            }
+                            .foregroundStyle(.orange)
+                        } else {
+                            Text("start a streak")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.32))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                        }
+                    }
+                    .frame(minWidth: 72, alignment: .center)
+
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(conversation.lastMessageTimestamp, format: .relative(presentation: .named))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.25))
+
+                        if conversation.unreadCount > 0 {
+                            Text("\(conversation.unreadCount)")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                                .clipShape(.capsule)
+                        }
+                    }
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-
-            Group {
-                if conversation.songStreakCount > 0 {
-                    HStack(spacing: 3) {
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 11))
-                        Text("\(conversation.songStreakCount)")
-                            .font(.system(size: 13, weight: .bold))
-                    }
-                    .foregroundStyle(.orange)
-                }
-            }
-            .frame(minWidth: 32, alignment: .center)
-
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(conversation.lastMessageTimestamp, format: .relative(presentation: .named))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.25))
-
-                if conversation.unreadCount > 0 {
-                    Text("\(conversation.unreadCount)")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color(red: 0.76, green: 0.38, blue: 0.35))
-                        .clipShape(.capsule)
-                }
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Button {
                 quickSendRecipient = recipientAppUser(for: conversation)
