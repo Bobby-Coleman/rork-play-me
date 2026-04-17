@@ -141,7 +141,31 @@ class AppState {
 
         isBackendAvailable = true
         currentUser = AppUser(id: uid, firstName: firstName, lastName: lastName, username: username.lowercased(), phone: phoneNumber)
+
+        await processReferralIfNeeded(currentUID: uid)
+
         return true
+    }
+
+    func processReferralIfNeeded(currentUID: String) async {
+        guard let referrerId = DeepLinkService.shared.pendingReferrerId,
+              !referrerId.isEmpty,
+              referrerId != currentUID else {
+            DeepLinkService.shared.clearPendingReferrer()
+            return
+        }
+
+        if let profile = await FirebaseService.shared.fetchUserProfile(uid: referrerId) {
+            await FirebaseService.shared.addFriend(
+                friendUID: referrerId,
+                friendUsername: profile.username,
+                friendFirstName: profile.firstName,
+                friendLastName: profile.lastName
+            )
+            await refreshFriends()
+        }
+
+        DeepLinkService.shared.clearPendingReferrer()
     }
 
     func loadData() async {

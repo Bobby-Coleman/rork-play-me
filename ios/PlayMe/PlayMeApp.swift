@@ -3,11 +3,18 @@ import FirebaseAuth
 import FirebaseCore
 import FirebaseMessaging
 import UserNotifications
+import ChottuLinkSDK
 
-class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate, ChottuLinkDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         FirebaseApp.configure()
+
+        let config = CLConfiguration(
+            apiKey: "c_app_3GyFRIbGUgB7iWYwMPEOM2Q7ogTMxPSf",
+            delegate: self
+        )
+        ChottuLink.initialize(config: config)
 
         UNUserNotificationCenter.current().delegate = self
         Messaging.messaging().delegate = self
@@ -22,6 +29,41 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         application.registerForRemoteNotifications()
 
         return true
+    }
+
+    // MARK: - ChottuLinkDelegate
+
+    func chottuLink(didResolveDeepLink link: URL, metadata: [String: Any]?) {
+        print("[ChottuLink] resolved link: \(link.absoluteString)")
+
+        guard let components = URLComponents(url: link, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems else { return }
+
+        let referrerId = queryItems.first(where: { $0.name == "referringUserId" })?.value
+        let referrerUsername = queryItems.first(where: { $0.name == "referringUsername" })?.value
+
+        if let referrerId, !referrerId.isEmpty {
+            DeepLinkService.shared.pendingReferrerId = referrerId
+            DeepLinkService.shared.pendingReferrerUsername = referrerUsername
+
+            NotificationCenter.default.post(
+                name: .didReceiveDeepLink,
+                object: nil,
+                userInfo: ["referringUserId": referrerId, "referringUsername": referrerUsername ?? ""]
+            )
+        }
+    }
+
+    func chottuLink(didFailToResolveDeepLink originalURL: URL?, error: any Error) {
+        print("[ChottuLink] failed to resolve: \(error.localizedDescription)")
+    }
+
+    func chottuLink(didInitializeWith configuration: CLConfiguration) {
+        print("[ChottuLink] SDK initialized")
+    }
+
+    func chottuLink(didFailToInitializeWith error: any Error) {
+        print("[ChottuLink] init failed: \(error.localizedDescription)")
     }
 
     func application(_ application: UIApplication,
@@ -75,7 +117,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 }
 
 extension Notification.Name {
-    static let didReceiveInviteURL = Notification.Name("didReceiveInviteURL")
+    static let didReceiveDeepLink = Notification.Name("didReceiveDeepLink")
 }
 
 @main
@@ -87,11 +129,7 @@ struct PlayMeApp: App {
             ContentView()
                 .onOpenURL { url in
                     if Auth.auth().canHandle(url) { return }
-                    NotificationCenter.default.post(
-                        name: .didReceiveInviteURL,
-                        object: nil,
-                        userInfo: ["url": url]
-                    )
+                    ChottuLink.handleLink(url)
                 }
         }
     }

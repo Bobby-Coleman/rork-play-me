@@ -1,5 +1,6 @@
 import SwiftUI
 import MessageUI
+import FirebaseAuth
 
 struct OnboardingInviteView: View {
     let username: String
@@ -9,21 +10,18 @@ struct OnboardingInviteView: View {
     @State private var contactsGranted = false
     @State private var contactsDenied = false
     @State private var visibleContactCount = 20
-    @State private var inviteRecipient: [String] = []
-    @State private var showMessageCompose = false
+    @State private var messageRecipient: MessageRecipient?
     @State private var showShareSheet = false
     @State private var searchText = ""
+    @State private var inviteLink: String = ""
 
     @FocusState private var searchFocused: Bool
 
-    private var inviteURL: String {
-        let base = Bundle.main.object(forInfoDictionaryKey: "InviteBaseURL") as? String
-            ?? "https://rork-play-me.web.app"
-        return "\(base)/invite/u/\(username)"
-    }
-
     private var inviteBody: String {
-        "I found this app where we can send songs to each other's home screen you should add me \(inviteURL)"
+        let link = inviteLink.isEmpty
+            ? DeepLinkService.publicTestFlightInviteURL
+            : inviteLink
+        return "I found this app where we can send songs to each other's home screen you should add me \(link)"
     }
 
     private var isActive: Bool { !searchText.isEmpty }
@@ -50,70 +48,72 @@ struct OnboardingInviteView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                Text("Find your friends!")
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.top, 24)
-                    .padding(.bottom, 4)
-
-                Text("Invite friends so you can send\nsongs to each other")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.5))
-                    .multilineTextAlignment(.center)
-                    .padding(.bottom, 20)
-
-                // MARK: - Search bar
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.white.opacity(0.4))
-                    TextField("Search your contacts", text: $searchText)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
+                    Text("Find your friends!")
+                        .font(.system(size: 26, weight: .bold))
                         .foregroundStyle(.white)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .focused($searchFocused)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 24)
+                        .padding(.bottom, 4)
 
-                    if isActive {
-                        Button("Cancel") {
-                            searchText = ""
-                            searchFocused = false
-                        }
-                        .font(.system(size: 15))
-                        .foregroundStyle(.white.opacity(0.6))
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Color.white.opacity(0.08))
-                .clipShape(.rect(cornerRadius: 10))
-                .padding(.horizontal, 20)
-                .padding(.bottom, 12)
-
-                // MARK: - Share your PlayMe link
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Share your Play Me link")
-                        .font(.system(size: 13, weight: .semibold))
+                    Text("Invite friends so you can send\nsongs to each other")
+                        .font(.system(size: 14))
                         .foregroundStyle(.white.opacity(0.5))
-                        .textCase(.uppercase)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 8)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, 20)
 
-                    shareRow(icon: "message.fill", color: .green, title: "Messages") {
-                        inviteRecipient = []
-                        showMessageCompose = true
+                    // MARK: - Search bar
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.white.opacity(0.4))
+                        TextField("Search your contacts", text: $searchText)
+                            .foregroundStyle(.white)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .submitLabel(.search)
+                            .focused($searchFocused)
+
+                        if isActive {
+                            Button("Cancel") {
+                                searchText = ""
+                                searchFocused = false
+                            }
+                            .font(.system(size: 15))
+                            .foregroundStyle(.white.opacity(0.6))
+                        }
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(.rect(cornerRadius: 10))
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
 
-                    Divider().background(Color.white.opacity(0.06)).padding(.leading, 62)
-
-                    shareRow(icon: "square.and.arrow.up", color: .gray, title: "Other apps") {
-                        showShareSheet = true
-                    }
-                }
-                .padding(.bottom, 16)
-
-                // MARK: - Contacts
-                if contactsGranted {
+                    // MARK: - Share your PlayMe link
                     VStack(alignment: .leading, spacing: 0) {
+                        Text("Share your Play Me link")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .textCase(.uppercase)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 8)
+
+                        shareRow(icon: "message.fill", color: .green, title: "Messages") {
+                            messageRecipient = MessageRecipient(numbers: [])
+                        }
+
+                        Divider().background(Color.white.opacity(0.06)).padding(.leading, 62)
+
+                        shareRow(icon: "square.and.arrow.up", color: .gray, title: "Other apps") {
+                            showShareSheet = true
+                        }
+                    }
+                    .padding(.bottom, 16)
+
+                    // MARK: - Contacts (single scroll column — no nested ScrollView)
+                    if contactsGranted {
                         Text("Your contacts")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.5))
@@ -121,59 +121,65 @@ struct OnboardingInviteView: View {
                             .padding(.horizontal, 20)
                             .padding(.bottom, 8)
 
-                        ScrollView {
-                            LazyVStack(spacing: 0) {
-                                if isActive {
-                                    ForEach(filteredContacts) { contact in
-                                        contactRow(contact)
-                                    }
-                                    if filteredContacts.isEmpty {
-                                        Text("No matching contacts")
-                                            .font(.system(size: 14))
-                                            .foregroundStyle(.white.opacity(0.3))
-                                            .padding(.top, 12)
-                                    }
-                                } else {
-                                    ForEach(paginatedContacts) { contact in
-                                        contactRow(contact)
-                                    }
+                        Group {
+                            if isActive {
+                                ForEach(filteredContacts) { contact in
+                                    contactRow(contact)
+                                }
+                                if filteredContacts.isEmpty {
+                                    Text("No matching contacts")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(.white.opacity(0.3))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.top, 12)
+                                }
+                            } else {
+                                ForEach(paginatedContacts) { contact in
+                                    contactRow(contact)
+                                }
 
-                                    if hasMoreContacts {
-                                        Button {
-                                            visibleContactCount = min(visibleContactCount + 20, allContacts.count)
-                                        } label: {
-                                            Text("Show more")
-                                                .font(.system(size: 14, weight: .semibold))
-                                                .foregroundStyle(.white.opacity(0.6))
-                                                .frame(maxWidth: .infinity)
-                                                .padding(.vertical, 12)
-                                                .background(Color.white.opacity(0.06))
-                                                .clipShape(.rect(cornerRadius: 10))
-                                        }
-                                        .padding(.top, 8)
+                                if hasMoreContacts {
+                                    Button {
+                                        visibleContactCount = min(visibleContactCount + 20, allContacts.count)
+                                    } label: {
+                                        Text("Show more")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundStyle(.white.opacity(0.6))
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(Color.white.opacity(0.06))
+                                            .clipShape(.rect(cornerRadius: 10))
                                     }
+                                    .padding(.top, 8)
                                 }
                             }
-                            .padding(.horizontal, 20)
                         }
+                        .padding(.horizontal, 20)
+                    } else if contactsDenied {
+                        VStack(spacing: 12) {
+                            Image(systemName: "person.crop.circle.badge.xmark")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.white.opacity(0.3))
+                            Text("Contacts access was denied.\nYou can enable it in Settings.")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.white.opacity(0.5))
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 40)
+                        .padding(.horizontal, 20)
+                    } else {
+                        ProgressView()
+                            .tint(.white.opacity(0.6))
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 48)
                     }
-                } else if contactsDenied {
-                    VStack(spacing: 12) {
-                        Image(systemName: "person.crop.circle.badge.xmark")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.white.opacity(0.3))
-                        Text("Contacts access was denied.\nYou can enable it in Settings.")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.white.opacity(0.5))
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(.top, 24)
-                    Spacer()
-                } else {
-                    Spacer()
-                }
 
-                // MARK: - Bottom buttons
+                    Color.clear.frame(height: 24)
+                }
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 8) {
                     Button(action: onContinue) {
                         Text("Continue")
@@ -184,7 +190,6 @@ struct OnboardingInviteView: View {
                             .background(.white)
                             .clipShape(.rect(cornerRadius: 25))
                     }
-                    .padding(.horizontal, 20)
 
                     Button(action: onContinue) {
                         Text("testing skip")
@@ -192,10 +197,30 @@ struct OnboardingInviteView: View {
                             .foregroundStyle(.white.opacity(0.3))
                     }
                 }
-                .padding(.bottom, 24)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 12)
+                .frame(maxWidth: .infinity)
+                .background(Color.black.opacity(0.94))
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .keyboard) {
+                HStack {
+                    Spacer(minLength: 0)
+                    Button("Done") {
+                        searchFocused = false
+                    }
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                }
             }
         }
         .task {
+            if let uid = Auth.auth().currentUser?.uid {
+                inviteLink = await DeepLinkService.shared.createInviteLink(userId: uid, username: username) ?? ""
+            }
+
             let granted = await ContactsService.shared.requestAccess()
             contactsGranted = granted
             contactsDenied = !granted
@@ -203,12 +228,13 @@ struct OnboardingInviteView: View {
                 allContacts = ContactsService.shared.fetchContacts()
             }
         }
-        .sheet(isPresented: $showMessageCompose) {
+        .sheet(item: $messageRecipient) { recipient in
             if MessageComposeView.canSendText {
                 MessageComposeView(
-                    recipients: inviteRecipient,
+                    recipients: recipient.numbers,
                     body: inviteBody
-                ) { showMessageCompose = false }
+                ) { messageRecipient = nil }
+                .ignoresSafeArea()
             }
         }
         .sheet(isPresented: $showShareSheet) {
@@ -264,8 +290,7 @@ struct OnboardingInviteView: View {
             Spacer()
 
             Button {
-                inviteRecipient = [contact.phoneNumber]
-                showMessageCompose = true
+                messageRecipient = MessageRecipient(numbers: [contact.phoneNumber])
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "plus")
@@ -282,6 +307,11 @@ struct OnboardingInviteView: View {
         }
         .padding(.vertical, 8)
     }
+}
+
+private struct MessageRecipient: Identifiable {
+    let id = UUID()
+    let numbers: [String]
 }
 
 // MARK: - Share Sheet (UIActivityViewController)

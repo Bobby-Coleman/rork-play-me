@@ -8,5 +8,9 @@
 	<array>
 		<string>group.app.rork.playme.shared</string>
 	</array>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:playme.chottu.link</string>
+	</array>
 </dict>
 </plist>

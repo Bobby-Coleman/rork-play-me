@@ -1,5 +1,6 @@
 import SwiftUI
 import MessageUI
+import FirebaseAuth
 
 struct AddFriendsView: View {
     let appState: AppState
@@ -14,21 +15,17 @@ struct AddFriendsView: View {
     @State private var contactsLoaded = false
     @State private var visibleContactCount = 20
 
-    @State private var showMessageCompose = false
-    @State private var messageRecipients: [String] = []
+    @State private var messageRecipient: MessageRecipient?
     @State private var showShareSheet = false
+    @State private var inviteLink: String = ""
 
     @FocusState private var searchFocused: Bool
 
-    private var inviteURL: String {
-        let base = Bundle.main.object(forInfoDictionaryKey: "InviteBaseURL") as? String
-            ?? "https://rork-play-me.web.app"
-        let username = appState.currentUser?.username ?? ""
-        return "\(base)/invite/u/\(username)"
-    }
-
     private var inviteBody: String {
-        "I found this app where we can send songs to each other's home screen you should add me \(inviteURL)"
+        let link = inviteLink.isEmpty
+            ? DeepLinkService.publicTestFlightInviteURL
+            : inviteLink
+        return "I found this app where we can send songs to each other's home screen you should add me \(link)"
     }
 
     private var isActive: Bool { !searchText.isEmpty }
@@ -126,18 +123,24 @@ struct AddFriendsView: View {
             .toolbarBackground(.visible, for: .navigationBar)
         }
         .task {
+            if let uid = Auth.auth().currentUser?.uid,
+               let username = appState.currentUser?.username {
+                inviteLink = await DeepLinkService.shared.createInviteLink(userId: uid, username: username) ?? ""
+            }
+
             let granted = await ContactsService.shared.requestAccess()
             if granted {
                 allContacts = ContactsService.shared.fetchContacts()
             }
             contactsLoaded = true
         }
-        .sheet(isPresented: $showMessageCompose) {
+        .sheet(item: $messageRecipient) { recipient in
             if MessageComposeView.canSendText {
                 MessageComposeView(
-                    recipients: messageRecipients,
+                    recipients: recipient.numbers,
                     body: inviteBody
-                ) { showMessageCompose = false }
+                ) { messageRecipient = nil }
+                .ignoresSafeArea()
             }
         }
         .sheet(isPresented: $showShareSheet) {
@@ -275,8 +278,7 @@ struct AddFriendsView: View {
             sectionHeader("Share your Play Me link", icon: "square.and.arrow.up")
 
             shareRow(icon: "message.fill", color: .green, title: "Messages") {
-                messageRecipients = []
-                showMessageCompose = true
+                messageRecipient = MessageRecipient(numbers: [])
             }
 
             Divider().background(Color.white.opacity(0.06)).padding(.leading, 62)
@@ -400,8 +402,7 @@ struct AddFriendsView: View {
             Spacer()
 
             Button {
-                messageRecipients = [contact.phoneNumber]
-                showMessageCompose = true
+                messageRecipient = MessageRecipient(numbers: [contact.phoneNumber])
             } label: {
                 addButtonLabel("Invite")
             }
@@ -438,4 +439,9 @@ struct AddFriendsView: View {
             isSearching = false
         }
     }
+}
+
+private struct MessageRecipient: Identifiable {
+    let id = UUID()
+    let numbers: [String]
 }

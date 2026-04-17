@@ -217,6 +217,20 @@ class FirebaseService {
         }
     }
 
+    func fetchUserProfile(uid: String) async -> (username: String, firstName: String, lastName: String)? {
+        do {
+            let doc = try await db.collection("users").document(uid).getDocument()
+            guard let data = doc.data() else { return nil }
+            let username = data["username"] as? String ?? ""
+            let firstName = data["firstName"] as? String ?? username
+            let lastName = data["lastName"] as? String ?? ""
+            return (username: username, firstName: firstName, lastName: lastName)
+        } catch {
+            print("FirebaseService: fetch user profile failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     // MARK: - Likes
 
     func saveLike(shareId: String) async {

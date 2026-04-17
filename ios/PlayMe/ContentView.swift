@@ -76,10 +76,17 @@ struct ContentView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .didReceiveInviteURL)) { notification in
-            guard let url = notification.userInfo?["url"] as? URL else { return }
-            if url.path.contains("/invite/") {
-                showAddFriends = true
+        .onReceive(NotificationCenter.default.publisher(for: .didReceiveDeepLink)) { notification in
+            guard let data = notification.userInfo as? [String: Any],
+                  let referrerId = data["referringUserId"] as? String,
+                  !referrerId.isEmpty,
+                  let currentUID = appState.currentUser?.id,
+                  referrerId != currentUID else { return }
+
+            DeepLinkService.shared.pendingReferrerId = referrerId
+            DeepLinkService.shared.pendingReferrerUsername = data["referringUsername"] as? String
+            Task {
+                await appState.processReferralIfNeeded(currentUID: currentUID)
             }
         }
     }
