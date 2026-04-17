@@ -24,6 +24,27 @@ struct SongCardView: View {
         isCurrentSong && audioPlayer.isPlaying
     }
 
+    /// True when the current user is the sender of this share. Keeps parity
+    /// with `SongDetailSheet` so a sent song never prompts a self-reply.
+    private var viewerIsSender: Bool {
+        guard let me = appState.currentUser?.id else { return false }
+        return share.sender.id == me
+    }
+
+    /// The person on the other side of the share — the recipient when the
+    /// viewer is the sender, the sender otherwise.
+    private var otherParty: AppUser {
+        viewerIsSender ? share.recipient : share.sender
+    }
+
+    private var headerLabel: String {
+        if viewerIsSender {
+            return "YOU SENT \(share.recipient.firstName.uppercased()) A SONG"
+        } else {
+            return "\(share.sender.firstName.uppercased()) SENT YOU A SONG"
+        }
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -33,7 +54,7 @@ struct SongCardView: View {
 
                 VStack(spacing: 0) {
                     VStack(spacing: 4) {
-                        Text("\(share.sender.firstName.uppercased()) SENT YOU A SONG")
+                        Text(headerLabel)
                             .font(.system(size: 12, weight: .bold))
                             .tracking(1.5)
                             .foregroundStyle(.white.opacity(0.5))
@@ -87,7 +108,7 @@ struct SongCardView: View {
                         .padding(.bottom, 12)
 
                     HStack(spacing: 6) {
-                        Text(share.sender.firstName)
+                        Text(viewerIsSender ? "You" : share.sender.firstName)
                             .font(.system(size: 13, weight: .medium))
                         Text("·")
                         Text(share.timestamp, format: .dateTime.month(.abbreviated).day())
@@ -207,7 +228,7 @@ struct SongCardView: View {
                 .transition(.opacity)
             } else {
                 HStack(spacing: 8) {
-                    TextField("Reply to \(share.sender.firstName)...", text: $replyText)
+                    TextField(viewerIsSender ? "Message \(otherParty.firstName)..." : "Reply to \(otherParty.firstName)...", text: $replyText)
                         .font(.system(size: 14))
                         .foregroundStyle(.white)
                         .tint(.white)
@@ -246,6 +267,15 @@ struct SongCardView: View {
     private func sendReply() {
         let text = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        let other = otherParty
+        // Defensive guard: never allow a self-conversation, which would crash
+        // downstream when creating a conversation with [uid, uid].
+        if let me = appState.currentUser?.id, other.id == me {
+            print("SongCardView: refusing to send reply to self (uid=\(me))")
+            replyText = ""
+            isReplyFocused = false
+            return
+        }
         isSendingReply = true
         let capturedText = text
         replyText = ""
@@ -254,8 +284,8 @@ struct SongCardView: View {
         Task {
             var success = false
             if let conv = await FirebaseService.shared.getOrCreateConversation(
-                with: share.sender.id,
-                friendName: share.sender.firstName
+                with: other.id,
+                friendName: other.firstName
             ) {
                 await appState.sendMessage(conversationId: conv.id, text: capturedText, song: share.song)
                 success = true
