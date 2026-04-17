@@ -343,6 +343,20 @@ class FirebaseService {
 
     // MARK: - Friends
 
+    /// Remove a bidirectional friendship. Deletes both sides so neither user
+    /// sees the other in their friends list anymore.
+    func removeFriend(friendUID: String) async {
+        guard let uid = firebaseUID else { return }
+        do {
+            try await db.collection("users").document(uid).collection("friends")
+                .document(friendUID).delete()
+            try await db.collection("users").document(friendUID).collection("friends")
+                .document(uid).delete()
+        } catch {
+            print("FirebaseService: remove friend failed: \(error.localizedDescription)")
+        }
+    }
+
     func addFriend(friendUID: String, friendUsername: String, friendFirstName: String, friendLastName: String = "") async {
         guard let uid = firebaseUID else { return }
         do {

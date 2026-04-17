@@ -19,6 +19,8 @@ struct AddFriendsView: View {
     @State private var showShareSheet = false
     @State private var inviteLink: String = ""
 
+    @State private var showFriendsList: Bool = true
+
     @FocusState private var searchFocused: Bool
 
     private var inviteBody: String {
@@ -69,6 +71,11 @@ struct AddFriendsView: View {
                             .foregroundStyle(.white.opacity(0.5))
                             .frame(maxWidth: .infinity)
                             .padding(.bottom, 16)
+
+                        if !appState.friends.isEmpty {
+                            yourFriendsSection
+                                .padding(.bottom, 16)
+                        }
 
                         // MARK: - Search bar
                         HStack(spacing: 10) {
@@ -268,6 +275,82 @@ struct AddFriendsView: View {
                 }
                 .padding(.horizontal, 20)
             }
+        }
+    }
+
+    // MARK: - Your Friends (collapsible)
+
+    private var yourFriendsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("Your Friends", icon: "person.2.fill")
+
+            if showFriendsList {
+                LazyVStack(spacing: 0) {
+                    ForEach(appState.friends) { friend in
+                        friendRow(friend)
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showFriendsList.toggle()
+                }
+            } label: {
+                Text(showFriendsList ? "Show less" : "Show more")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(.capsule)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 12)
+        }
+    }
+
+    private func friendRow(_ friend: AppUser) -> some View {
+        HStack(spacing: 14) {
+            Text(friend.initials)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .background(Color.white.opacity(0.12))
+                .clipShape(Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color(red: 0.96, green: 0.62, blue: 0.14), lineWidth: 2)
+                )
+
+            Text(friend.firstName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+
+            Spacer()
+
+            Button {
+                removeFriend(friend)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func removeFriend(_ friend: AppUser) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            appState.friends.removeAll { $0.id == friend.id }
+        }
+        Task {
+            await FirebaseService.shared.removeFriend(friendUID: friend.id)
         }
     }
 
