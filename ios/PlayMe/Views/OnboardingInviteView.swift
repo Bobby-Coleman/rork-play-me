@@ -3,6 +3,7 @@ import MessageUI
 import FirebaseAuth
 
 struct OnboardingInviteView: View {
+    let appState: AppState
     let username: String
     let onContinue: () -> Void
 
@@ -291,21 +292,36 @@ struct OnboardingInviteView: View {
 
             Button {
                 messageRecipient = MessageRecipient(numbers: [contact.phoneNumber])
+                recordInvitedContact(contact)
             } label: {
                 HStack(spacing: 4) {
-                    Image(systemName: "plus")
+                    Image(systemName: alreadyInvited(contact) ? "checkmark" : "plus")
                         .font(.system(size: 11, weight: .bold))
-                    Text("Invite")
+                    Text(alreadyInvited(contact) ? "Invited" : "Invite")
                         .font(.system(size: 13, weight: .semibold))
                 }
                 .foregroundStyle(.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                .background(
+                    alreadyInvited(contact)
+                        ? Color.white.opacity(0.18)
+                        : Color(red: 0.76, green: 0.38, blue: 0.35)
+                )
                 .clipShape(.capsule)
             }
         }
         .padding(.vertical, 8)
+    }
+
+    private func alreadyInvited(_ contact: SimpleContact) -> Bool {
+        appState.invitedContacts.contains(where: { $0.id == contact.id })
+    }
+
+    private func recordInvitedContact(_ contact: SimpleContact) {
+        if !alreadyInvited(contact) {
+            appState.invitedContacts.append(contact)
+        }
     }
 }
 

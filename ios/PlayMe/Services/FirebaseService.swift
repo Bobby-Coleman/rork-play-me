@@ -117,6 +117,9 @@ class FirebaseService {
     func claimUsernameAndCreateProfile(username: String, firstName: String, lastName: String = "", phone: String) async -> Bool {
         guard let uid = firebaseUID else { return false }
         let lowered = username.lowercased()
+        // Store phone in canonical E.164 so the server-side claim trigger
+        // (onUserProfileCreated) matches the same key used by saveQueuedShare.
+        let normalizedPhone = PhoneNormalizer.normalize(phone) ?? phone
         let usernameRef = db.collection("usernames").document(lowered)
         let userRef = db.collection("users").document(uid)
 
@@ -146,7 +149,7 @@ class FirebaseService {
                     "username": lowered,
                     "firstName": firstName,
                     "lastName": lastName,
-                    "phone": phone,
+                    "phone": normalizedPhone,
                     "createdAt": FieldValue.serverTimestamp(),
                     "updatedAt": FieldValue.serverTimestamp(),
                 ], forDocument: userRef, merge: true)
@@ -399,6 +402,96 @@ class FirebaseService {
         } catch {
             print("FirebaseService: search users failed: \(error.localizedDescription)")
             return []
+        }
+    }
+
+    // MARK: - Pending Shares (queued for not-yet-signed-up contacts)
+
+    enum QueuedShareError: Error, LocalizedError {
+        case notSignedIn
+        case invalidPhone
+        case writeFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .notSignedIn: return "Please sign in to send a song."
+            case .invalidPhone: return "We couldn't read that contact's phone number."
+            case .writeFailed(let msg): return msg
+            }
+        }
+    }
+
+    /// Queue a song to be delivered when a contact with `phoneE164` signs up.
+    /// Stored at `pendingShares/{phoneE164}/shares/{autoId}`. Idempotent by
+    /// document ID — callers can retry with the same payload.
+    func saveQueuedShare(
+        phoneE164: String,
+        contactDisplayName: String,
+        song: Song,
+        note: String?
+    ) async -> Result<String, QueuedShareError> {
+        guard let uid = firebaseUID else { return .failure(.notSignedIn) }
+
+        let senderFirst = UserDefaults.standard.string(forKey: "currentUserFirstName") ?? ""
+        let senderLast = UserDefaults.standard.string(forKey: "currentUserLastName") ?? ""
+        let senderUsername = UserDefaults.standard.string(forKey: "currentUserUsername") ?? ""
+
+        let collection = db.collection("pendingShares")
+            .document(phoneE164)
+            .collection("shares")
+        // Deterministic doc ref so retries are safe; the server-side claim
+        // function mirrors this ID onto shares/{id} for end-to-end idempotency.
+        let ref = collection.document()
+
+        let data: [String: Any] = [
+            "senderId": uid,
+            "senderFirstName": senderFirst,
+            "senderLastName": senderLast,
+            "senderUsername": senderUsername,
+            "contactDisplayName": contactDisplayName,
+            "note": note as Any,
+            "createdAt": FieldValue.serverTimestamp(),
+            "delivered": false,
+            "song": [
+                "id": song.id,
+                "title": song.title,
+                "artist": song.artist,
+                "albumArtURL": song.albumArtURL,
+                "duration": song.duration,
+                "spotifyURI": song.spotifyURI as Any,
+                "previewURL": song.previewURL as Any,
+                "appleMusicURL": song.appleMusicURL as Any,
+            ],
+        ]
+
+        do {
+            try await ref.setData(data)
+            print("FirebaseService: event=pending_share_queued phoneE164=\(phoneE164) senderId=\(uid) id=\(ref.documentID)")
+            return .success(ref.documentID)
+        } catch {
+            print("FirebaseService: event=pending_share_queue_failed phoneE164=\(phoneE164) senderId=\(uid) error=\(error.localizedDescription)")
+            return .failure(.writeFailed(error.localizedDescription))
+        }
+    }
+
+    /// Ask the server to run the pending-shares claim for the current user.
+    /// Writes a `claimRequests/{id}` doc that triggers the `onClaimRequest`
+    /// Cloud Function — clients never read `pendingShares` directly.
+    ///
+    /// Safe to call on every app foreground / loadData: the trigger deletes
+    /// the request doc when done, and the claim itself is idempotent.
+    func requestPendingSharesClaim() async {
+        guard let uid = firebaseUID else { return }
+        let reqId = "\(uid)_\(Int(Date().timeIntervalSince1970))"
+        let ref = db.collection("claimRequests").document(reqId)
+        do {
+            try await ref.setData([
+                "uid": uid,
+                "createdAt": FieldValue.serverTimestamp(),
+            ])
+            print("FirebaseService: event=pending_share_claim_requested uid=\(uid) reqId=\(reqId)")
+        } catch {
+            print("FirebaseService: event=pending_share_claim_request_failed uid=\(uid) error=\(error.localizedDescription)")
         }
     }
 

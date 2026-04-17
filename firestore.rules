@@ -50,5 +50,24 @@ service cloud.firestore {
           && request.resource.data.senderId == request.auth.uid;
       }
     }
+
+    // Songs queued for contacts who haven't signed up yet. Clients may only
+    // CREATE shares they personally sent; reads/updates/deletes happen
+    // exclusively from Cloud Functions via the admin SDK.
+    match /pendingShares/{phone}/shares/{shareId} {
+      allow create: if request.auth != null
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.keys().hasAll(['senderId', 'song', 'createdAt']);
+      allow read, update, delete: if false;
+    }
+
+    // Claim-retry requests: a signed-in user asks the server to re-run the
+    // pending-shares fan-out for their own UID. Processed and deleted by the
+    // onClaimRequest Cloud Function.
+    match /claimRequests/{reqId} {
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid;
+      allow read, update, delete: if false;
+    }
   }
 }

@@ -6,6 +6,23 @@ const crypto = require("crypto");
 
 admin.initializeApp();
 
+// --------------- Phone Normalization ---------------
+
+// Mirror of ios/PlayMe/Utilities/PhoneNormalizer.swift so the server key
+// matches what the client writes. US-centric fallback, accepts any raw form.
+function normalizeE164(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const hadPlus = trimmed.startsWith("+");
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits) return null;
+  if (hadPlus) return `+${digits}`;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return `+${digits}`;
+}
+
 // --------------- Helpers ---------------
 
 async function getFCMToken(uid) {
@@ -138,6 +155,271 @@ exports.onNewFriend = onDocumentCreated(
       type: "friend_added",
       friendId: adderId,
     });
+  }
+);
+
+// --------------- Pending Shares: server-side claim ---------------
+
+function conversationIdFor(uidA, uidB) {
+  const [a, b] = [uidA, uidB].sort();
+  return `${a}_${b}`;
+}
+
+// Fans out every queued pending-share for the given phone into the recipient's
+// feed, creates bidirectional friendships, a DM conversation + first message,
+// deletes the pending docs, and pushes a "magic moment" notification.
+// Idempotent: each pending doc maps to a deterministic shares/{pendingDocId}.
+async function claimPendingSharesForUser(uid, phoneE164) {
+  if (!uid || !phoneE164) {
+    console.log("claimPendingSharesForUser: missing uid or phone", {
+      uid,
+      phoneE164,
+    });
+    return { count: 0 };
+  }
+
+  const db = admin.firestore();
+  const baseRef = db
+    .collection("pendingShares")
+    .doc(phoneE164)
+    .collection("shares");
+
+  const snap = await baseRef.get();
+  if (snap.empty) {
+    console.log(
+      JSON.stringify({
+        event: "pending_share_claim_skipped",
+        reason: "empty",
+        uid,
+        phoneE164,
+      })
+    );
+    return { count: 0 };
+  }
+
+  // Resolve the new user's own profile once to stamp onto friend / conversation docs.
+  const meSnap = await db.collection("users").doc(uid).get();
+  const me = meSnap.exists ? meSnap.data() : {};
+  const myUsername = me.username || "";
+  const myFirstName = me.firstName || "";
+  const myLastName = me.lastName || "";
+
+  const myToken = await getFCMToken(uid);
+
+  let claimed = 0;
+  const pushPromises = [];
+
+  for (const doc of snap.docs) {
+    const data = doc.data();
+    const senderId = data.senderId;
+    const songData = data.song;
+
+    if (!senderId || !songData) {
+      try {
+        await doc.ref.delete();
+      } catch (_) {}
+      continue;
+    }
+
+    const senderFirstName = data.senderFirstName || "";
+    const senderLastName = data.senderLastName || "";
+    const senderUsername = data.senderUsername || "";
+    const note = typeof data.note === "string" ? data.note : null;
+
+    const song = {
+      id: songData.id || doc.id,
+      title: songData.title || "",
+      artist: songData.artist || "",
+      albumArtURL: songData.albumArtURL || "",
+      duration: songData.duration || "",
+      spotifyURI: songData.spotifyURI || null,
+      previewURL: songData.previewURL || null,
+      appleMusicURL: songData.appleMusicURL || null,
+    };
+
+    const batch = db.batch();
+
+    const shareRef = db.collection("shares").doc(doc.id);
+    batch.set(shareRef, {
+      senderId,
+      recipientId: uid,
+      recipientUsername: myUsername,
+      note,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      song,
+      sender: {
+        id: senderId,
+        firstName: senderFirstName,
+        lastName: senderLastName,
+        username: senderUsername,
+      },
+      recipient: {
+        id: uid,
+        firstName: myFirstName,
+        lastName: myLastName,
+        username: myUsername,
+      },
+      claimedFromPending: true,
+    });
+
+    // Bidirectional friendship with merge so we don't clobber addedAt if re-run.
+    batch.set(
+      db.collection("users").doc(uid).collection("friends").doc(senderId),
+      {
+        username: senderUsername,
+        firstName: senderFirstName,
+        lastName: senderLastName,
+        addedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    batch.set(
+      db.collection("users").doc(senderId).collection("friends").doc(uid),
+      {
+        username: myUsername,
+        firstName: myFirstName,
+        lastName: myLastName,
+        addedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    // Conversation doc (deterministic pair ID). merge:true keeps existing fields
+    // if a conversation already exists between these two users.
+    const convId = conversationIdFor(uid, senderId);
+    const convRef = db.collection("conversations").doc(convId);
+    const participants = [uid, senderId].sort();
+    const messageText = note && note.length > 0 ? note : "Sent you a song";
+
+    batch.set(
+      convRef,
+      {
+        participants,
+        participantNames: {
+          [uid]: myFirstName,
+          [senderId]: senderFirstName,
+        },
+        lastMessageText: messageText,
+        lastMessageTimestamp: admin.firestore.FieldValue.serverTimestamp(),
+        [`unreadCount_${uid}`]: admin.firestore.FieldValue.increment(1),
+        [`unreadCount_${senderId}`]: 0,
+      },
+      { merge: true }
+    );
+
+    // First message: use deterministic ID (pending doc id) so retries don't dupe.
+    const msgRef = convRef.collection("messages").doc(doc.id);
+    batch.set(msgRef, {
+      senderId,
+      text: messageText,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      song,
+    });
+
+    batch.delete(doc.ref);
+
+    try {
+      await batch.commit();
+      claimed += 1;
+
+      // Fire a magic-moment push to the new user for every claimed share.
+      pushPromises.push(
+        sendPush(
+          myToken,
+          "PlayMe",
+          `${senderFirstName || "A friend"} sent you "${song.title || "a song"}"`,
+          {
+            type: "new_share",
+            shareId: doc.id,
+            claimedFromPending: "true",
+          }
+        )
+      );
+
+      console.log(
+        JSON.stringify({
+          event: "pending_share_claimed",
+          uid,
+          phoneE164,
+          senderId,
+          pendingDocId: doc.id,
+        })
+      );
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          event: "pending_share_claim_failed",
+          uid,
+          phoneE164,
+          senderId,
+          pendingDocId: doc.id,
+          error: err.message,
+        })
+      );
+    }
+  }
+
+  await Promise.all(pushPromises);
+  return { count: claimed };
+}
+
+// Primary claim path: fires when a user profile doc is created at signup.
+exports.onUserProfileCreated = onDocumentCreated(
+  "users/{uid}",
+  async (event) => {
+    const data = event.data?.data();
+    if (!data) return;
+    const uid = event.params.uid;
+    const phoneE164 = normalizeE164(data.phone);
+    if (!phoneE164) {
+      console.log("onUserProfileCreated: no phone to normalize for", uid);
+      return;
+    }
+    console.log(
+      JSON.stringify({
+        event: "pending_share_trigger_user_created",
+        uid,
+        phoneE164,
+      })
+    );
+    await claimPendingSharesForUser(uid, phoneE164);
+  }
+);
+
+// Fallback / retry path: signed-in clients write a claimRequest doc on every
+// app launch so that shares queued AFTER signup still get claimed.
+exports.onClaimRequest = onDocumentCreated(
+  "claimRequests/{reqId}",
+  async (event) => {
+    const data = event.data?.data();
+    if (!data) return;
+    const uid = data.uid;
+    if (!uid) return;
+
+    const db = admin.firestore();
+    const userSnap = await db.collection("users").doc(uid).get();
+    if (!userSnap.exists) {
+      console.log("onClaimRequest: no user profile for", uid);
+      await event.data.ref.delete().catch(() => {});
+      return;
+    }
+
+    const phoneE164 = normalizeE164(userSnap.data().phone);
+    if (!phoneE164) {
+      await event.data.ref.delete().catch(() => {});
+      return;
+    }
+
+    console.log(
+      JSON.stringify({
+        event: "pending_share_trigger_claim_request",
+        uid,
+        phoneE164,
+        reqId: event.params.reqId,
+      })
+    );
+    await claimPendingSharesForUser(uid, phoneE164);
+    await event.data.ref.delete().catch(() => {});
   }
 );
 

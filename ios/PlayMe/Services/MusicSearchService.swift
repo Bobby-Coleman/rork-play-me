@@ -48,6 +48,17 @@ nonisolated struct SonglinkPlatformLink: Codable, Sendable {
     let url: String?
 }
 
+nonisolated struct iTunesArtistSearchResponse: Codable, Sendable {
+    let resultCount: Int
+    let results: [iTunesArtist]
+}
+
+nonisolated struct iTunesArtist: Codable, Sendable {
+    let artistId: Int
+    let artistName: String
+    let primaryGenreName: String?
+}
+
 actor MusicSearchService {
     static let shared = MusicSearchService()
 
@@ -64,6 +75,53 @@ actor MusicSearchService {
 
         let (data, response) = try await URLSession.shared.data(from: url)
 
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            return []
+        }
+
+        let decoded = try JSONDecoder().decode(iTunesSearchResponse.self, from: data)
+        return decoded.results.map { $0.toSong() }
+    }
+
+    /// Search for artists only, used by the onboarding favorite-artists picker.
+    func searchArtists(term: String, limit: Int = 10) async throws -> [iTunesArtist] {
+        guard !term.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+
+        guard let encoded = term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "\(baseURL)?term=\(encoded)&media=music&entity=musicArtist&limit=\(limit)") else {
+            return []
+        }
+
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            return []
+        }
+
+        let decoded = try JSONDecoder().decode(iTunesArtistSearchResponse.self, from: data)
+        // Deduplicate by artistName; iTunes sometimes returns the same artist multiple times.
+        var seen = Set<String>()
+        var out: [iTunesArtist] = []
+        for artist in decoded.results {
+            let key = artist.artistName.lowercased()
+            if seen.insert(key).inserted {
+                out.append(artist)
+            }
+        }
+        return out
+    }
+
+    /// Fetch top tracks for a specific artist via iTunes `attribute=artistTerm`.
+    /// Used by SongSuggestionsService to assemble the first-send song carousel.
+    func topTracks(forArtist artist: String, limit: Int = 6) async throws -> [Song] {
+        let trimmed = artist.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return [] }
+
+        guard let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "\(baseURL)?term=\(encoded)&media=music&entity=song&attribute=artistTerm&limit=\(limit)") else {
+            return []
+        }
+
+        let (data, response) = try await URLSession.shared.data(from: url)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             return []
         }

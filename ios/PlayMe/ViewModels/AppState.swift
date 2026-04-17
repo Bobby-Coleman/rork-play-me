@@ -58,6 +58,21 @@ class AppState {
     var isLoading = false
     var isBackendAvailable = false
     var registrationError: String? = nil
+    /// Transient success toast for queued-share-to-pending-contact sends.
+    /// e.g. "We'll deliver to Holli when she joins."
+    var queuedContactToast: String? = nil
+    /// Transient error banner if a queued-share write failed (permission
+    /// denied, bad phone, network). Surfaced in SendFirstSongView.
+    var queuedContactError: String? = nil
+
+    // MARK: - Onboarding-only state (cleared after onboarding completes)
+    var favoriteArtists: [String] = []
+    var recentListeningSong: Song? = nil
+    var recentListeningArtist: String? = nil
+    /// Contacts the user texted invites to during OnboardingInviteView.
+    /// Surfaced in the SendFirstSongView friend carousel so first songs can be
+    /// queued for them via `sendSongToPendingContact`.
+    var invitedContacts: [SimpleContact] = []
 
     var likedShares: [SongShare] {
         (receivedShares + sentShares).filter { likedShareIds.contains($0.id) }
@@ -115,6 +130,10 @@ class AppState {
         currentUser = AppUser(id: uid, firstName: profile.firstName,
                               lastName: profile.lastName,
                               username: profile.username, phone: profile.phone)
+
+        // Ask the server to fan out any pending-shares waiting on this phone.
+        // The Cloud Function reads users/{uid}.phone and runs the claim.
+        await firebase.requestPendingSharesClaim()
         return true
     }
 
@@ -141,6 +160,12 @@ class AppState {
 
         isBackendAvailable = true
         currentUser = AppUser(id: uid, firstName: firstName, lastName: lastName, username: username.lowercased(), phone: phoneNumber)
+
+        // The `onUserProfileCreated` Cloud Function will fire automatically from
+        // the users/{uid} doc creation in `claimUsernameAndCreateProfile`. We
+        // also write a claimRequest as belt-and-suspenders in case the trigger
+        // missed (e.g. if the profile doc already existed from a prior signup).
+        await firebase.requestPendingSharesClaim()
 
         await processReferralIfNeeded(currentUID: uid)
 
@@ -218,6 +243,11 @@ class AppState {
         await loadConversations()
         syncWidgetWithLatestReceivedShare()
         isLoading = false
+
+        // Late-arriving queued shares (friend queued a song AFTER this user
+        // signed up) need a retry. The claimRequest doc triggers the server
+        // fan-out, and is cheap enough to run on every foreground.
+        Task { await firebase.requestPendingSharesClaim() }
     }
 
     func sendSong(_ song: Song, to friend: AppUser, note: String?) async {
@@ -246,6 +276,50 @@ class AppState {
         Task {
             try? await Task.sleep(for: .seconds(2))
             showSentToast = false
+        }
+    }
+
+    /// Queue a song for a contact who hasn't signed up yet. Written to
+    /// `pendingShares/{e164}/shares/{id}`; fanned out by the
+    /// `onUserProfileCreated` / `onClaimRequest` Cloud Functions the moment
+    /// that contact finishes their own signup.
+    @discardableResult
+    func sendSongToPendingContact(_ song: Song, contact: SimpleContact, note: String?) async -> Bool {
+        guard currentUser != nil else { return false }
+        guard let e164 = PhoneNormalizer.normalize(contact.phoneNumber) else {
+            print("AppState: event=pending_share_queue_failed reason=invalid_phone raw=\(contact.phoneNumber)")
+            queuedContactError = "We couldn't read \(contact.firstName)'s phone number."
+            clearQueuedContactFeedbackSoon()
+            return false
+        }
+        print("AppState: event=pending_share_queue_attempt contact=\(contact.fullName) raw=\(contact.phoneNumber) normalized=\(e164)")
+
+        let enriched = await enrichSongWithSpotifyURI(song)
+        let result = await FirebaseService.shared.saveQueuedShare(
+            phoneE164: e164,
+            contactDisplayName: contact.fullName,
+            song: enriched,
+            note: note?.isEmpty == true ? nil : note
+        )
+        switch result {
+        case .success:
+            let firstName = contact.firstName.isEmpty ? contact.fullName : contact.firstName
+            queuedContactToast = "We'll deliver to \(firstName) when they join."
+            clearQueuedContactFeedbackSoon()
+            return true
+        case .failure(let err):
+            queuedContactError = err.errorDescription ?? "We couldn't queue that song. Try again."
+            clearQueuedContactFeedbackSoon()
+            return false
+        }
+    }
+
+    private func clearQueuedContactFeedbackSoon() {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard let self else { return }
+            self.queuedContactToast = nil
+            self.queuedContactError = nil
         }
     }
 
