@@ -33,6 +33,11 @@ class AppState {
     }
 
     var friends: [AppUser] = []
+    /// UIDs the current user has blocked. Synced from Firestore on foreground;
+    /// reads + list views filter against this set client-side so blocked users
+    /// disappear from feeds, search results, and conversation rows.
+    var blockedUserIds: Set<String> = []
+    var notificationsEnabled: Bool = true
     var songs: [Song] = []
     var searchResults: [Song] = []
     var isSearchingSongs: Bool = false
@@ -66,9 +71,6 @@ class AppState {
     var queuedContactError: String? = nil
 
     // MARK: - Onboarding-only state (cleared after onboarding completes)
-    var favoriteArtists: [String] = []
-    var recentListeningSong: Song? = nil
-    var recentListeningArtist: String? = nil
     /// Contacts the user texted invites to during OnboardingInviteView.
     /// Surfaced in the SendFirstSongView friend carousel so first songs can be
     /// queued for them via `sendSongToPendingContact`.
@@ -230,9 +232,13 @@ class AppState {
         }
 
         let serverFriends = await firebase.loadFriends()
-        friends = serverFriends
+        blockedUserIds = await firebase.loadBlockedUserIds()
+        friends = serverFriends.filter { !blockedUserIds.contains($0.id) }
+
+        notificationsEnabled = await firebase.loadNotificationsEnabled()
 
         let serverReceived = await firebase.loadReceivedShares()
+            .filter { !blockedUserIds.contains($0.sender.id) }
         receivedShares = serverReceived
 
         let serverSent = await firebase.loadSentShares()
@@ -334,7 +340,11 @@ class AppState {
     func loadConversations() async {
         let firebase = FirebaseService.shared
         guard firebase.isSignedIn else { return }
-        conversations = await firebase.loadConversations()
+        let uid = firebase.firebaseUID ?? ""
+        let loaded = await firebase.loadConversations()
+        conversations = loaded.filter { convo in
+            !blockedUserIds.contains(convo.friendId(currentUserId: uid))
+        }
     }
 
     func sendMessage(conversationId: String, text: String, song: Song? = nil) async {
@@ -360,9 +370,93 @@ class AppState {
     }
 
     func refreshFriends() async {
-        let serverFriends = await FirebaseService.shared.loadFriends()
+        let firebase = FirebaseService.shared
+        blockedUserIds = await firebase.loadBlockedUserIds()
+        let serverFriends = await firebase.loadFriends()
         if !serverFriends.isEmpty {
-            friends = serverFriends
+            friends = serverFriends.filter { !blockedUserIds.contains($0.id) }
+        }
+    }
+
+    // MARK: - Blocking
+
+    func blockUser(_ user: AppUser) async {
+        await FirebaseService.shared.blockUser(user.id)
+        blockedUserIds.insert(user.id)
+        friends.removeAll { $0.id == user.id }
+        receivedShares.removeAll { $0.sender.id == user.id }
+        conversations.removeAll { convo in
+            let uid = FirebaseService.shared.firebaseUID ?? ""
+            return convo.friendId(currentUserId: uid) == user.id
+        }
+    }
+
+    func unblockUser(_ uid: String) async {
+        await FirebaseService.shared.unblockUser(uid)
+        blockedUserIds.remove(uid)
+    }
+
+    func isBlocked(_ uid: String) -> Bool {
+        blockedUserIds.contains(uid)
+    }
+
+    // MARK: - Reports
+
+    /// Fire-and-forget report submission. Returns true if the write succeeded
+    /// so the UI can show a confirmation toast.
+    @discardableResult
+    func reportUser(_ targetUid: String, reason: String, note: String? = nil) async -> Bool {
+        await FirebaseService.shared.submitReport(
+            targetUid: targetUid,
+            targetType: .user,
+            targetId: nil,
+            reason: reason,
+            note: note
+        )
+    }
+
+    @discardableResult
+    func reportShare(_ share: SongShare, reason: String, note: String? = nil) async -> Bool {
+        await FirebaseService.shared.submitReport(
+            targetUid: share.sender.id,
+            targetType: .share,
+            targetId: share.id,
+            reason: reason,
+            note: note
+        )
+    }
+
+    @discardableResult
+    func reportMessage(senderUid: String, conversationId: String, messageId: String, reason: String, note: String? = nil) async -> Bool {
+        await FirebaseService.shared.submitReport(
+            targetUid: senderUid,
+            targetType: .message,
+            targetId: "\(conversationId)/\(messageId)",
+            reason: reason,
+            note: note
+        )
+    }
+
+    // MARK: - Notification prefs
+
+    func setNotificationsEnabled(_ enabled: Bool) async {
+        notificationsEnabled = enabled
+        await FirebaseService.shared.setNotificationsEnabled(enabled)
+    }
+
+    // MARK: - Account Deletion
+
+    /// Deletes the user's Firebase Auth account and all associated Firestore
+    /// data via the `deleteAccount` Cloud Function. On success we fall through
+    /// to the local logout cleanup so the app returns to onboarding.
+    func deleteAccount() async -> Result<Void, FirebaseService.DeleteAccountError> {
+        let result = await FirebaseService.shared.deleteAccount()
+        switch result {
+        case .success:
+            logout()
+            return .success(())
+        case .failure(let err):
+            return .failure(err)
         }
     }
 
@@ -377,6 +471,7 @@ class AppState {
     func searchAllUsers(query: String) async -> [AppUser] {
         if FirebaseService.shared.isSignedIn {
             let results = await FirebaseService.shared.searchUsers(query: query)
+                .filter { !blockedUserIds.contains($0.id) }
             if !results.isEmpty { return results }
         }
         return searchFriends(query: query)
@@ -409,6 +504,7 @@ class AppState {
     func logout() {
         currentUser = nil
         friends = []
+        blockedUserIds = []
         receivedShares = []
         sentShares = []
         likedShareIds = []
@@ -431,7 +527,10 @@ class AppState {
         let firebase = FirebaseService.shared
         guard firebase.isSignedIn else { return }
 
+        blockedUserIds = await firebase.loadBlockedUserIds()
+
         let serverReceived = await firebase.loadReceivedShares()
+            .filter { !blockedUserIds.contains($0.sender.id) }
         if !serverReceived.isEmpty {
             receivedShares = serverReceived
         }

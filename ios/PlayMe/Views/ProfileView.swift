@@ -7,10 +7,11 @@ enum ProfileTab: String, CaseIterable {
 }
 
 struct ProfileView: View {
-    let appState: AppState
+    @Bindable var appState: AppState
 
     @State private var selectedTab: ProfileTab = .received
     @State private var detailShare: SongShare?
+    @State private var showSettings: Bool = false
 
     private var user: AppUser? { appState.currentUser }
 
@@ -23,6 +24,35 @@ struct ProfileView: View {
     }
 
     var body: some View {
+        NavigationStack {
+            profileContent
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showSettings = true
+                        } label: {
+                            Image(systemName: "gearshape.fill")
+                                .font(.system(size: 17))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                        .accessibilityLabel("Settings")
+                    }
+                }
+                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbarBackground(.black, for: .navigationBar)
+                .sheet(isPresented: $showSettings) {
+                    NavigationStack {
+                        SettingsView(appState: appState)
+                    }
+                    .presentationBackground(.black)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+                }
+        }
+    }
+
+    private var profileContent: some View {
         ScrollView {
             VStack(spacing: 20) {
                 VStack(spacing: 10) {
@@ -90,23 +120,7 @@ struct ProfileView: View {
                     }
                 }
 
-                Button(role: .destructive) {
-                    appState.logout()
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                        Text("Sign Out")
-                    }
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.red.opacity(0.8))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color.white.opacity(0.05))
-                    .clipShape(.rect(cornerRadius: 12))
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 40)
+                Color.clear.frame(height: 40)
             }
         }
         .scrollIndicators(.hidden)

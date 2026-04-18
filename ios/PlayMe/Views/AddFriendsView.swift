@@ -20,6 +20,9 @@ struct AddFriendsView: View {
     @State private var inviteLink: String = ""
 
     @State private var showFriendsList: Bool = true
+    @State private var reportTarget: ReportTarget?
+    @State private var showReportedToast: Bool = false
+    @State private var pendingBlock: AppUser?
 
     @FocusState private var searchFocused: Bool
 
@@ -153,6 +156,48 @@ struct AddFriendsView: View {
         .sheet(isPresented: $showShareSheet) {
             ShareSheetView(items: [inviteBody])
         }
+        .sheet(item: $reportTarget) { target in
+            ReportSheet(target: target, appState: appState) {
+                withAnimation { showReportedToast = true }
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    withAnimation { showReportedToast = false }
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .overlay(alignment: .top) {
+            if showReportedToast {
+                Text("Report submitted. Thanks for keeping PlayMe safe.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.9))
+                    .clipShape(.capsule)
+                    .padding(.top, 50)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .alert("Block \(pendingBlock?.firstName ?? "user")?", isPresented: blockAlertBinding) {
+            Button("Cancel", role: .cancel) { pendingBlock = nil }
+            Button("Block", role: .destructive) {
+                if let user = pendingBlock {
+                    Task { await appState.blockUser(user) }
+                }
+                pendingBlock = nil
+            }
+        } message: {
+            Text("They won't be able to send you songs or messages, and you won't see their content.")
+        }
+    }
+
+    private var blockAlertBinding: Binding<Bool> {
+        Binding(
+            get: { pendingBlock != nil },
+            set: { if !$0 { pendingBlock = nil } }
+        )
     }
 
     // MARK: - Search active content
@@ -331,11 +376,27 @@ struct AddFriendsView: View {
 
             Spacer()
 
-            Button {
-                removeFriend(friend)
+            Menu {
+                Button(role: .destructive) {
+                    removeFriend(friend)
+                } label: {
+                    Label("Unfriend", systemImage: "person.badge.minus")
+                }
+
+                Button(role: .destructive) {
+                    pendingBlock = friend
+                } label: {
+                    Label("Block", systemImage: "hand.raised.fill")
+                }
+
+                Button {
+                    reportTarget = .user(friend)
+                } label: {
+                    Label("Report", systemImage: "flag.fill")
+                }
             } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .semibold))
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.5))
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())

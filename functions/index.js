@@ -1,5 +1,6 @@
 const { onRequest } = require("firebase-functions/v2/https");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const functionsV1 = require("firebase-functions/v1");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
@@ -37,6 +38,35 @@ async function getUserName(uid) {
   return d.firstName || d.username || "Someone";
 }
 
+// True when `recipientUid` has disabled all notifications from their Settings
+// screen. Missing flag defaults to enabled.
+async function notificationsEnabledFor(recipientUid) {
+  if (!recipientUid) return false;
+  const snap = await admin
+    .firestore()
+    .collection("users")
+    .doc(recipientUid)
+    .get();
+  if (!snap.exists) return false;
+  const enabled = snap.data().notificationsEnabled;
+  return enabled === undefined ? true : enabled === true;
+}
+
+// True when `recipientUid` has added `senderUid` to their blocked subcollection.
+// A block fully silences pushes in either direction — callers should also check
+// the inverse (blocker pushing to blocked) when relevant.
+async function isBlockedBy(recipientUid, senderUid) {
+  if (!recipientUid || !senderUid) return false;
+  const snap = await admin
+    .firestore()
+    .collection("users")
+    .doc(recipientUid)
+    .collection("blocked")
+    .doc(senderUid)
+    .get();
+  return snap.exists;
+}
+
 async function sendPush(token, title, body, extraData = {}) {
   if (!token) return;
   try {
@@ -66,6 +96,15 @@ exports.onNewShare = onDocumentCreated("shares/{shareId}", async (event) => {
 
   const recipientId = data.recipientId;
   if (!recipientId) return;
+
+  const senderId = data.senderId || data.sender?.id;
+  if (senderId && (await isBlockedBy(recipientId, senderId))) {
+    console.log(
+      `onNewShare: skipping push \u2014 ${senderId} is blocked by ${recipientId}`
+    );
+    return;
+  }
+  if (!(await notificationsEnabledFor(recipientId))) return;
 
   const senderName = data.sender?.firstName || "Someone";
   const songTitle = data.song?.title || "a song";
@@ -104,6 +143,13 @@ exports.onNewMessage = onDocumentCreated(
 
     for (const uid of participants) {
       if (uid === senderId) continue;
+      if (await isBlockedBy(uid, senderId)) {
+        console.log(
+          `onNewMessage: skipping push \u2014 ${senderId} is blocked by ${uid}`
+        );
+        continue;
+      }
+      if (!(await notificationsEnabledFor(uid))) continue;
       const token = await getFCMToken(uid);
       await sendPush(token, senderName, text || "Sent a message", {
         type: "new_message",
@@ -132,6 +178,14 @@ exports.onNewLike = onDocumentCreated(
     const senderId = shareData.senderId;
     if (!senderId || senderId === likerId) return;
 
+    if (await isBlockedBy(senderId, likerId)) {
+      console.log(
+        `onNewLike: skipping push \u2014 ${likerId} is blocked by ${senderId}`
+      );
+      return;
+    }
+    if (!(await notificationsEnabledFor(senderId))) return;
+
     const likerName = await getUserName(likerId);
     const songTitle = shareData.song?.title || "a song";
 
@@ -149,6 +203,14 @@ exports.onNewFriend = onDocumentCreated(
     const adderId = event.params.userId;
     const friendId = event.params.friendId;
 
+    if (await isBlockedBy(friendId, adderId)) {
+      console.log(
+        `onNewFriend: skipping push \u2014 ${adderId} is blocked by ${friendId}`
+      );
+      return;
+    }
+    if (!(await notificationsEnabledFor(friendId))) return;
+
     const adderName = await getUserName(adderId);
     const token = await getFCMToken(friendId);
     await sendPush(token, "PlayMe", `${adderName} added you on PlayMe`, {
@@ -157,6 +219,224 @@ exports.onNewFriend = onDocumentCreated(
     });
   }
 );
+
+// --------------- Account Deletion (cascade cleanup) ---------------
+
+const DELETED_USER_NAME = "Deleted user";
+const DELETED_USERNAME_LABEL = "deleted";
+
+// Commits a write batch in chunks of 450 — below the 500-op Firestore limit
+// with some headroom so a caller can append a couple of final writes.
+async function commitBatched(db, ops) {
+  for (let i = 0; i < ops.length; i += 450) {
+    const batch = db.batch();
+    for (const op of ops.slice(i, i + 450)) {
+      op(batch);
+    }
+    await batch.commit();
+  }
+}
+
+// Anonymize this user's authored content instead of hard-deleting, so other
+// users' conversation / share history stays intact. Deletes uniqueness index,
+// subcollections, queued pending-shares keyed by their phone, and mirrored
+// friend rows on every friend's side.
+async function cascadeDeleteUser(uid) {
+  if (!uid) return { ok: false, reason: "missing_uid" };
+
+  const db = admin.firestore();
+  const userRef = db.collection("users").doc(uid);
+  const userSnap = await userRef.get();
+  const userData = userSnap.exists ? userSnap.data() : {};
+  const username = userData.username;
+  const phone = userData.phone ? normalizeE164(userData.phone) : null;
+
+  console.log(
+    JSON.stringify({
+      event: "cascade_delete_begin",
+      uid,
+      username: username || null,
+      phone: phone || null,
+    })
+  );
+
+  // 1) Release the username uniqueness index so the name can be reused.
+  if (username) {
+    try {
+      await db.collection("usernames").doc(username).delete();
+    } catch (err) {
+      console.error("cascadeDeleteUser: username delete failed:", err.message);
+    }
+  }
+
+  // 2) Delete own likes subcollection.
+  try {
+    const likes = await userRef.collection("likes").get();
+    const ops = likes.docs.map((d) => (b) => b.delete(d.ref));
+    await commitBatched(db, ops);
+  } catch (err) {
+    console.error("cascadeDeleteUser: likes delete failed:", err.message);
+  }
+
+  // 3) Delete own blocked subcollection.
+  try {
+    const blocked = await userRef.collection("blocked").get();
+    const ops = blocked.docs.map((d) => (b) => b.delete(d.ref));
+    await commitBatched(db, ops);
+  } catch (err) {
+    console.error("cascadeDeleteUser: blocked delete failed:", err.message);
+  }
+
+  // 4) Delete own friends + mirrored rows on every friend's side.
+  try {
+    const friends = await userRef.collection("friends").get();
+    const ops = [];
+    for (const f of friends.docs) {
+      ops.push((b) => b.delete(f.ref));
+      ops.push((b) =>
+        b.delete(db.collection("users").doc(f.id).collection("friends").doc(uid))
+      );
+    }
+    await commitBatched(db, ops);
+  } catch (err) {
+    console.error("cascadeDeleteUser: friends delete failed:", err.message);
+  }
+
+  // 5) Purge pending-shares queued for this user's phone (if any).
+  if (phone) {
+    try {
+      const phoneRef = db.collection("pendingShares").doc(phone);
+      const pending = await phoneRef.collection("shares").get();
+      const ops = pending.docs.map((d) => (b) => b.delete(d.ref));
+      await commitBatched(db, ops);
+      await phoneRef.delete().catch(() => {});
+    } catch (err) {
+      console.error(
+        "cascadeDeleteUser: pendingShares delete failed:",
+        err.message
+      );
+    }
+  }
+
+  // 6) Anonymize shares authored by this user. Receivers keep their history
+  //    but the sender is now "Deleted user". We also clear shares addressed
+  //    TO this user so the sender's "Sent" tab hides personal info.
+  try {
+    const sent = await db
+      .collection("shares")
+      .where("senderId", "==", uid)
+      .get();
+    const sentOps = sent.docs.map((d) => (b) =>
+      b.update(d.ref, {
+        "sender.firstName": DELETED_USER_NAME,
+        "sender.lastName": "",
+        "sender.username": DELETED_USERNAME_LABEL,
+      })
+    );
+    await commitBatched(db, sentOps);
+
+    const received = await db
+      .collection("shares")
+      .where("recipientId", "==", uid)
+      .get();
+    const recvOps = received.docs.map((d) => (b) =>
+      b.update(d.ref, {
+        "recipient.firstName": DELETED_USER_NAME,
+        "recipient.lastName": "",
+        "recipient.username": DELETED_USERNAME_LABEL,
+        recipientUsername: DELETED_USERNAME_LABEL,
+      })
+    );
+    await commitBatched(db, recvOps);
+  } catch (err) {
+    console.error(
+      "cascadeDeleteUser: shares anonymize failed:",
+      err.message
+    );
+  }
+
+  // 7) Anonymize participantNames in any conversations the user is part of.
+  try {
+    const convos = await db
+      .collection("conversations")
+      .where("participants", "array-contains", uid)
+      .get();
+    const ops = convos.docs.map((d) => (b) =>
+      b.update(d.ref, { [`participantNames.${uid}`]: DELETED_USER_NAME })
+    );
+    await commitBatched(db, ops);
+  } catch (err) {
+    console.error(
+      "cascadeDeleteUser: conversations anonymize failed:",
+      err.message
+    );
+  }
+
+  // 8) Finally, delete the user profile doc itself (drops fcmToken, phone,
+  //    notificationsEnabled flag, etc).
+  try {
+    await userRef.delete();
+  } catch (err) {
+    console.error("cascadeDeleteUser: user doc delete failed:", err.message);
+  }
+
+  console.log(
+    JSON.stringify({ event: "cascade_delete_complete", uid })
+  );
+
+  return { ok: true };
+}
+
+// Auth "user deleted" trigger \u2014 fires for EVERY Auth user deletion,
+// including deletes performed from the Firebase Console. Runs the Firestore
+// cascade so the username uniqueness index is released and the user's
+// records are cleaned up. Uses the v1 API because Firebase Functions v2 does
+// not yet expose a user-deleted trigger.
+exports.onAuthUserDeleted = functionsV1.auth.user().onDelete(async (user) => {
+  if (!user || !user.uid) return;
+  try {
+    await cascadeDeleteUser(user.uid);
+  } catch (err) {
+    console.error("onAuthUserDeleted: cascade failed:", err);
+  }
+});
+
+// In-app "Delete Account" endpoint. The client sends its Firebase ID token in
+// the Authorization header; we verify it, run the cascade, then delete the
+// Auth user itself (which also fires beforeUserDeleted as a safety net).
+exports.deleteAccount = onRequest(async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  const authHeader = req.get("Authorization") || "";
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!match) {
+    res.status(401).json({ error: "Missing bearer token" });
+    return;
+  }
+
+  let uid;
+  try {
+    const decoded = await admin.auth().verifyIdToken(match[1]);
+    uid = decoded.uid;
+  } catch (err) {
+    console.error("deleteAccount: token verification failed:", err.message);
+    res.status(401).json({ error: "Invalid token" });
+    return;
+  }
+
+  try {
+    await cascadeDeleteUser(uid);
+    await admin.auth().deleteUser(uid);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("deleteAccount: failed:", err);
+    res.status(500).json({ error: "Delete failed", details: err.message });
+  }
+});
 
 // --------------- Pending Shares: server-side claim ---------------
 

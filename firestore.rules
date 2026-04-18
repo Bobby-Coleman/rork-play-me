@@ -2,6 +2,18 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // True when `recipient` has added `sender` to their blocked subcollection.
+    // Used to forbid blocked users from writing into the blocker's inboxes.
+    function isBlockedBy(recipient, sender) {
+      return exists(/databases/$(database)/documents/users/$(recipient)/blocked/$(sender));
+    }
+
+    // For 2-person DMs, returns the non-sender participant uid.
+    function otherParticipant(convId, senderUid) {
+      let p = get(/databases/$(database)/documents/conversations/$(convId)).data.participants;
+      return p[0] == senderUid ? p[1] : p[0];
+    }
+
     match /users/{userId} {
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == userId;
@@ -11,6 +23,21 @@ service cloud.firestore {
       }
 
       match /friends/{friendId} {
+        // Owner has full access to their own list. Peers (the "other user"
+        // in the friendship) may CREATE and DELETE their own mirrored row —
+        // this is what makes bidirectional add/unfriend work from a single
+        // client — but cannot read each other's friend lists or overwrite
+        // arbitrary fields.
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow write: if request.auth != null && request.auth.uid == userId;
+        allow create: if request.auth != null
+          && request.auth.uid == friendId
+          && !isBlockedBy(userId, request.auth.uid);
+        allow delete: if request.auth != null && request.auth.uid == friendId;
+      }
+
+      // Only the owner can read or mutate their own blocked list.
+      match /blocked/{blockedId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
@@ -28,7 +55,9 @@ service cloud.firestore {
 
     match /shares/{shareId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null && request.resource.data.senderId == request.auth.uid;
+      allow create: if request.auth != null
+        && request.resource.data.senderId == request.auth.uid
+        && !isBlockedBy(request.resource.data.recipientId, request.auth.uid);
       allow update, delete: if request.auth != null &&
         (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid);
     }
@@ -47,7 +76,9 @@ service cloud.firestore {
         allow read: if request.auth != null
           && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participants;
         allow create: if request.auth != null
-          && request.resource.data.senderId == request.auth.uid;
+          && request.resource.data.senderId == request.auth.uid
+          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participants
+          && !isBlockedBy(otherParticipant(convId, request.auth.uid), request.auth.uid);
       }
     }
 
@@ -67,6 +98,16 @@ service cloud.firestore {
     match /claimRequests/{reqId} {
       allow create: if request.auth != null
         && request.resource.data.uid == request.auth.uid;
+      allow read, update, delete: if false;
+    }
+
+    // User reports (App Store Guideline 1.2 UGC requirement). Anyone signed
+    // in can submit a report; only Cloud Functions / admins can read or
+    // moderate them.
+    match /reports/{reportId} {
+      allow create: if request.auth != null
+        && request.resource.data.reporterUid == request.auth.uid
+        && request.resource.data.keys().hasAll(['reporterUid', 'targetUid', 'targetType', 'createdAt']);
       allow read, update, delete: if false;
     }
   }

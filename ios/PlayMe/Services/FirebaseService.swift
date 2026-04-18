@@ -419,6 +419,224 @@ class FirebaseService {
         }
     }
 
+    // MARK: - Blocking
+
+    /// Block another user. Writes `users/{me}/blocked/{uid}` and also deletes
+    /// any bidirectional friendship so the blocked user no longer appears in
+    /// either party's friends list.
+    func blockUser(_ targetUID: String) async {
+        guard let uid = firebaseUID, targetUID != uid else { return }
+        do {
+            try await db.collection("users").document(uid).collection("blocked")
+                .document(targetUID).setData([
+                    "blockedAt": FieldValue.serverTimestamp(),
+                ])
+            // Best-effort cleanup of either side of the friendship. Errors are
+            // non-fatal — the block itself is what matters.
+            try? await db.collection("users").document(uid).collection("friends")
+                .document(targetUID).delete()
+            try? await db.collection("users").document(targetUID).collection("friends")
+                .document(uid).delete()
+        } catch {
+            print("FirebaseService: block user failed: \(error.localizedDescription)")
+        }
+    }
+
+    func unblockUser(_ targetUID: String) async {
+        guard let uid = firebaseUID else { return }
+        do {
+            try await db.collection("users").document(uid).collection("blocked")
+                .document(targetUID).delete()
+        } catch {
+            print("FirebaseService: unblock user failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Loads the set of UIDs the current user has blocked, along with the
+    /// latest profile snapshot for each (for the "Blocked users" settings
+    /// screen).
+    func loadBlockedUsers() async -> [AppUser] {
+        guard let uid = firebaseUID else { return [] }
+        do {
+            let snapshot = try await db.collection("users").document(uid)
+                .collection("blocked").getDocuments()
+            var result: [AppUser] = []
+            for doc in snapshot.documents {
+                if let profile = await fetchUserProfile(uid: doc.documentID) {
+                    result.append(AppUser(
+                        id: doc.documentID,
+                        firstName: profile.firstName,
+                        lastName: profile.lastName,
+                        username: profile.username,
+                        phone: ""
+                    ))
+                } else {
+                    result.append(AppUser(
+                        id: doc.documentID,
+                        firstName: "User",
+                        lastName: "",
+                        username: "",
+                        phone: ""
+                    ))
+                }
+            }
+            return result
+        } catch {
+            print("FirebaseService: load blocked users failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func loadBlockedUserIds() async -> Set<String> {
+        guard let uid = firebaseUID else { return [] }
+        do {
+            let snapshot = try await db.collection("users").document(uid)
+                .collection("blocked").getDocuments()
+            return Set(snapshot.documents.map { $0.documentID })
+        } catch {
+            print("FirebaseService: load blocked ids failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    // MARK: - Reports
+
+    enum ReportTargetType: String {
+        case user
+        case share
+        case message
+    }
+
+    /// Submit a user/content report. Reports are write-only for clients and
+    /// readable only to the moderation backend (Cloud Functions / admins).
+    func submitReport(
+        targetUid: String,
+        targetType: ReportTargetType,
+        targetId: String?,
+        reason: String,
+        note: String?
+    ) async -> Bool {
+        guard let uid = firebaseUID else { return false }
+        var data: [String: Any] = [
+            "reporterUid": uid,
+            "targetUid": targetUid,
+            "targetType": targetType.rawValue,
+            "reason": reason,
+            "createdAt": FieldValue.serverTimestamp(),
+        ]
+        if let targetId { data["targetId"] = targetId }
+        if let note, !note.isEmpty { data["note"] = note }
+
+        do {
+            _ = try await db.collection("reports").addDocument(data: data)
+            return true
+        } catch {
+            print("FirebaseService: submit report failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    // MARK: - Notification preferences
+
+    /// Persists the user's master notifications toggle. The Cloud Function
+    /// push triggers read this flag and skip delivery when false.
+    func setNotificationsEnabled(_ enabled: Bool) async {
+        guard let uid = firebaseUID else { return }
+        do {
+            try await db.collection("users").document(uid)
+                .setData(["notificationsEnabled": enabled], merge: true)
+        } catch {
+            print("FirebaseService: set notifications flag failed: \(error.localizedDescription)")
+        }
+    }
+
+    func loadNotificationsEnabled() async -> Bool {
+        guard let uid = firebaseUID else { return true }
+        do {
+            let doc = try await db.collection("users").document(uid).getDocument()
+            return (doc.data()?["notificationsEnabled"] as? Bool) ?? true
+        } catch {
+            return true
+        }
+    }
+
+    // MARK: - Account Deletion
+
+    enum DeleteAccountError: Error, LocalizedError {
+        case notSignedIn
+        case tokenUnavailable
+        case network(String)
+        case serverRejected(Int, String)
+
+        var errorDescription: String? {
+            switch self {
+            case .notSignedIn: return "You're not signed in."
+            case .tokenUnavailable: return "Couldn't verify your session. Please sign in again."
+            case .network(let msg): return "Network error: \(msg)"
+            case .serverRejected(_, let msg): return msg
+            }
+        }
+    }
+
+    /// Region used when composing the deleteAccount endpoint URL. Matches the
+    /// default region of the other onRequest functions in this project.
+    private static let functionsRegion = "us-central1"
+
+    private static let cachedProjectId: String? = {
+        guard let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
+              let dict = NSDictionary(contentsOfFile: path),
+              let projectId = dict["PROJECT_ID"] as? String else { return nil }
+        return projectId
+    }()
+
+    private var deleteAccountEndpoint: URL? {
+        guard let projectId = Self.cachedProjectId else { return nil }
+        let urlString = "https://\(Self.functionsRegion)-\(projectId).cloudfunctions.net/deleteAccount"
+        return URL(string: urlString)
+    }
+
+    /// Calls the server-side `deleteAccount` HTTPS function with the current
+    /// user's Firebase ID token. The function runs the Firestore cascade and
+    /// then deletes the Auth user, which invalidates this client's session.
+    func deleteAccount() async -> Result<Void, DeleteAccountError> {
+        guard let user = Auth.auth().currentUser else { return .failure(.notSignedIn) }
+
+        let idToken: String
+        do {
+            idToken = try await user.getIDToken()
+        } catch {
+            return .failure(.tokenUnavailable)
+        }
+
+        guard let url = deleteAccountEndpoint else {
+            return .failure(.network("Missing Firebase project ID"))
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = "{}".data(using: .utf8)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard let http = response as? HTTPURLResponse else {
+                return .failure(.network("Invalid response"))
+            }
+            if http.statusCode != 200 {
+                let body = String(data: data, encoding: .utf8) ?? "Delete failed"
+                return .failure(.serverRejected(http.statusCode, body))
+            }
+            // Server has deleted the Auth user; make sure local state is cleared.
+            try? Auth.auth().signOut()
+            firebaseUID = nil
+            verificationID = nil
+            return .success(())
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
     // MARK: - Pending Shares (queued for not-yet-signed-up contacts)
 
     enum QueuedShareError: Error, LocalizedError {

@@ -10,6 +10,9 @@ struct ChatView: View {
     @State private var listener: ListenerRegistration?
     @State private var isSending: Bool = false
     @State private var sheetSong: Song?
+    @State private var reportTarget: ReportTarget?
+    @State private var showReportedToast: Bool = false
+    @State private var pendingBlock: AppUser?
 
     private var currentUID: String {
         FirebaseService.shared.firebaseUID ?? ""
@@ -17,6 +20,14 @@ struct ChatView: View {
 
     private var friendName: String {
         conversation.friendName(currentUserId: currentUID)
+    }
+
+    private var friendUID: String {
+        conversation.friendId(currentUserId: currentUID)
+    }
+
+    private var friendAsAppUser: AppUser {
+        AppUser(id: friendUID, firstName: friendName, lastName: "", username: "", phone: "")
     }
 
     var body: some View {
@@ -51,6 +62,25 @@ struct ChatView: View {
         .navigationTitle(friendName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button(role: .destructive) {
+                        pendingBlock = friendAsAppUser
+                    } label: {
+                        Label("Block \(friendName)", systemImage: "hand.raised.fill")
+                    }
+                    Button {
+                        reportTarget = .user(friendAsAppUser)
+                    } label: {
+                        Label("Report", systemImage: "flag.fill")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .foregroundStyle(.white)
+                }
+            }
+        }
         .onAppear {
             startListening()
             Task {
@@ -64,6 +94,48 @@ struct ChatView: View {
         .sheet(item: $sheetSong) { song in
             SongDetailSheet(song: song, appState: appState, share: nil)
         }
+        .sheet(item: $reportTarget) { target in
+            ReportSheet(target: target, appState: appState) {
+                withAnimation { showReportedToast = true }
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    withAnimation { showReportedToast = false }
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .overlay(alignment: .top) {
+            if showReportedToast {
+                Text("Report submitted. Thanks.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.9))
+                    .clipShape(.capsule)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .alert("Block \(pendingBlock?.firstName ?? friendName)?", isPresented: blockAlertBinding) {
+            Button("Cancel", role: .cancel) { pendingBlock = nil }
+            Button("Block", role: .destructive) {
+                if let user = pendingBlock {
+                    Task { await appState.blockUser(user) }
+                }
+                pendingBlock = nil
+            }
+        } message: {
+            Text("They won't be able to send you songs or messages, and you won't see their content.")
+        }
+    }
+
+    private var blockAlertBinding: Binding<Bool> {
+        Binding(
+            get: { pendingBlock != nil },
+            set: { if !$0 { pendingBlock = nil } }
+        )
     }
 
     private func messageBubble(_ message: ChatMessage) -> some View {

@@ -14,6 +14,9 @@ struct SongCardView: View {
     @State private var showSentConfirmation: Bool = false
     @State private var isSendingReply: Bool = false
     @State private var keyboardHeight: CGFloat = 0
+    @State private var reportTarget: ReportTarget?
+    @State private var showReportedToast: Bool = false
+    @State private var pendingBlock: AppUser?
     @FocusState private var isReplyFocused: Bool
 
     private var isCurrentSong: Bool {
@@ -103,6 +106,30 @@ struct SongCardView: View {
                             .sensoryFeedback(.impact(weight: .medium), trigger: isLiked)
                             .padding(12)
                         }
+                        .overlay(alignment: .topLeading) {
+                            if !viewerIsSender {
+                                Menu {
+                                    Button(role: .destructive) {
+                                        pendingBlock = share.sender
+                                    } label: {
+                                        Label("Block \(share.sender.firstName)", systemImage: "hand.raised.fill")
+                                    }
+                                    Button {
+                                        reportTarget = .share(share)
+                                    } label: {
+                                        Label("Report song", systemImage: "flag.fill")
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.85))
+                                        .padding(10)
+                                        .background(.ultraThinMaterial)
+                                        .clipShape(Circle())
+                                }
+                                .padding(12)
+                            }
+                        }
                         .shadow(color: .white.opacity(0.05), radius: 20, y: 10)
                         .padding(.horizontal, 24)
                         .padding(.bottom, 12)
@@ -161,6 +188,48 @@ struct SongCardView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(item: $reportTarget) { target in
+            ReportSheet(target: target, appState: appState) {
+                withAnimation { showReportedToast = true }
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    withAnimation { showReportedToast = false }
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .overlay(alignment: .top) {
+            if showReportedToast {
+                Text("Report submitted. Thanks.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.9))
+                    .clipShape(.capsule)
+                    .padding(.top, 40)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .alert("Block \(pendingBlock?.firstName ?? "user")?", isPresented: blockAlertBinding) {
+            Button("Cancel", role: .cancel) { pendingBlock = nil }
+            Button("Block", role: .destructive) {
+                if let user = pendingBlock {
+                    Task { await appState.blockUser(user) }
+                }
+                pendingBlock = nil
+            }
+        } message: {
+            Text("They won't be able to send you songs or messages, and you won't see their content.")
+        }
+    }
+
+    private var blockAlertBinding: Binding<Bool> {
+        Binding(
+            get: { pendingBlock != nil },
+            set: { if !$0 { pendingBlock = nil } }
+        )
     }
 
     private var playerControls: some View {
