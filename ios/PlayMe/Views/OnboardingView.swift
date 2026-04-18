@@ -54,39 +54,19 @@ struct OnboardingView: View {
                     withAnimation(.easeInOut(duration: 0.4)) { step = 6 }
                 }
             case 6:
-                FavoriteArtistsView(
-                    appState: appState,
-                    onContinue: {
-                        withAnimation(.easeInOut(duration: 0.4)) { step = 7 }
-                    },
-                    onSkip: {
-                        withAnimation(.easeInOut(duration: 0.4)) { step = 7 }
-                    }
-                )
-            case 7:
-                RecentlyListeningView(
-                    appState: appState,
-                    onContinue: {
-                        withAnimation(.easeInOut(duration: 0.4)) { step = 8 }
-                    },
-                    onSkip: {
-                        withAnimation(.easeInOut(duration: 0.4)) { step = 8 }
-                    }
-                )
-            case 8:
                 SendFirstSongView(
                     appState: appState,
                     onContinue: {
-                        withAnimation(.easeInOut(duration: 0.4)) { step = 9 }
+                        withAnimation(.easeInOut(duration: 0.4)) { step = 7 }
                     },
                     onSkip: {
-                        withAnimation(.easeInOut(duration: 0.4)) { step = 9 }
+                        withAnimation(.easeInOut(duration: 0.4)) { step = 7 }
                     },
                     onReopenInvites: {
                         withAnimation(.easeInOut(duration: 0.4)) { step = 5 }
                     }
                 )
-            case 9:
+            case 7:
                 WidgetInstructionsView { onComplete() }
             default:
                 EmptyView()

@@ -1,34 +1,68 @@
 import SwiftUI
 import MessageUI
 
-/// Onboarding step 8 — the payoff screen. The user:
-///   1. Picks one of ~10 auto-suggested songs (or taps "Search any song") based on
-///      the favorite artists + recent-listening inputs from the prior two steps.
-///   2. Types an optional message.
-///   3. Selects one or more friends from a horizontal carousel (union of real
-///      friends + contacts they text-invited on step 5).
-///   4. Taps Send.
+/// Onboarding "send your first song" screen (step 6). A single, collapsed flow:
+///   1. Big search bar with a placeholder that auto-rotates between three
+///      prompts every 3s (fades, stops the moment the user types).
+///   2. Horizontal carousel that either
+///        - shows live iTunes search results (debounced 300ms), or
+///        - while the field is empty, auto-rotates every 5s through curated
+///          "inspiration" vibe buckets (Top charts, Indie, Vintage rock,
+///          2000s throwbacks) at 70% opacity so it's clearly aspirational.
+///   3. Optional message field.
+///   4. Friend/contact carousel (real friends + text-invited contacts).
+///   5. Send.
 ///
-/// Sends to real friends go through `AppState.sendSong` (existing path).
-/// Sends to invited contacts are queued via `AppState.sendSongToPendingContact`
-/// and delivered the moment that contact finishes their own signup.
+/// Sends to real friends go through `AppState.sendSong`.
+/// Sends to invited contacts are queued via `sendSongToPendingContact` and
+/// delivered when that contact finishes their own signup.
 struct SendFirstSongView: View {
     let appState: AppState
     let onContinue: () -> Void
     let onSkip: () -> Void
     let onReopenInvites: () -> Void
 
-    @State private var suggestions: [Song] = []
-    @State private var isLoadingSuggestions = true
+    // Search
+    @State private var query: String = ""
+    @State private var searchResults: [Song] = []
+    @State private var isSearching = false
+    @State private var searchTask: Task<Void, Never>?
+    @FocusState private var searchFocused: Bool
+
+    // Rotating placeholder
+    @State private var placeholderIndex: Int = 0
+    @State private var placeholderTimer: Timer?
+
+    // Inspiration buckets
+    @State private var inspirationBuckets: [InspirationBucket] = []
+    @State private var inspirationIndex: Int = 0
+    @State private var inspirationTimer: Timer?
+    @State private var isLoadingInspiration = true
+
+    // Selection / send state
     @State private var selectedSong: Song?
     @State private var note: String = ""
-
     @State private var selectedFriendIds: Set<String> = []
     @State private var selectedContactIds: Set<String> = []
-
-    @State private var showSearchSheet = false
     @State private var showSentAnimation = false
     @State private var isSending = false
+
+    private let placeholders = [
+        "search a song you've been into lately...",
+        "search your favorite artist",
+        "search a song that means something to you"
+    ]
+
+    private let seedBuckets: [InspirationBucket] = [
+        InspirationBucket(id: "top", label: "Top charts", searchTerm: "top hits"),
+        InspirationBucket(id: "indie", label: "Indie favorites", searchTerm: "indie rock"),
+        InspirationBucket(id: "vintage", label: "Vintage rock", searchTerm: "classic rock"),
+        InspirationBucket(id: "y2k", label: "2000s throwbacks", searchTerm: "2000s hits")
+    ]
+
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespaces)
+    }
 
     private var hasAnyRecipient: Bool {
         !appState.friends.isEmpty || !appState.invitedContacts.isEmpty
@@ -42,6 +76,11 @@ struct SendFirstSongView: View {
         selectedSong != nil && totalSelected > 0 && hasAnyRecipient && !isSending
     }
 
+    private var currentInspirationBucket: InspirationBucket? {
+        guard !inspirationBuckets.isEmpty else { return nil }
+        return inspirationBuckets[inspirationIndex % inspirationBuckets.count]
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -52,12 +91,12 @@ struct SendFirstSongView: View {
                         .padding(.horizontal, 20)
                         .padding(.top, 16)
 
-                    songCarousel
-                        .padding(.top, 20)
-
-                    searchAnySongButton
+                    searchField
                         .padding(.horizontal, 20)
-                        .padding(.top, 12)
+                        .padding(.top, 16)
+
+                    carousel
+                        .padding(.top, 16)
 
                     noteField
                         .padding(.horizontal, 20)
@@ -93,65 +132,138 @@ struct SendFirstSongView: View {
             .animation(.spring(duration: 0.3), value: appState.queuedContactToast)
         }
         .animation(.spring(duration: 0.3), value: showSentAnimation)
-        .sheet(isPresented: $showSearchSheet) {
-            SongSearchPickerSheet(appState: appState) { picked in
-                selectSong(picked)
-                showSearchSheet = false
-            }
-        }
         .task {
-            await loadSuggestions()
+            await loadInspiration()
+        }
+        .onAppear {
+            startPlaceholderTimer()
+            startInspirationTimer()
+        }
+        .onDisappear {
+            placeholderTimer?.invalidate()
+            placeholderTimer = nil
+            inspirationTimer?.invalidate()
+            inspirationTimer = nil
+            searchTask?.cancel()
+        }
+        .onChange(of: query) { _, newValue in
+            handleQueryChange(newValue)
         }
     }
 
-    // MARK: - Sections
+    // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Send your first song")
                     .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(.white)
-                Spacer(minLength: 0)
-                Button("Skip", action: onSkip)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
+                Text("Pick a song, pick a friend, hit send. They'll get it on their home screen — even if they just got your invite and haven't joined yet.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .lineSpacing(2)
             }
-
-            Text("Pick a song, pick a friend, hit send. They'll get it on their home screen — even if they just got your invite and haven't joined yet.")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.5))
-                .lineSpacing(2)
+            Spacer(minLength: 12)
+            Button("Skip", action: onSkip)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.white.opacity(0.4))
         }
     }
 
-    private var songCarousel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Suggestions for you")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.5))
-                .textCase(.uppercase)
-                .padding(.horizontal, 20)
+    // MARK: - Search field (rotating placeholder overlay)
 
-            if isLoadingSuggestions {
-                HStack {
-                    Spacer()
-                    ProgressView()
-                        .tint(.white.opacity(0.6))
-                    Spacer()
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.5))
+
+            ZStack(alignment: .leading) {
+                if query.isEmpty {
+                    Text(placeholders[placeholderIndex])
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white.opacity(0.35))
+                        .lineLimit(1)
+                        .id(placeholderIndex)
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
                 }
-                .frame(height: 160)
-            } else if suggestions.isEmpty {
-                Text("Tap \"Search any song\" below to pick one.")
+
+                TextField("", text: $query)
+                    .font(.system(size: 15))
+                    .foregroundStyle(.white)
+                    .tint(.white)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .submitLabel(.search)
+                    .focused($searchFocused)
+            }
+
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                    searchResults = []
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
+        .background(Color.white.opacity(0.08))
+        .clipShape(.rect(cornerRadius: 14))
+        .animation(.easeInOut(duration: 0.35), value: placeholderIndex)
+    }
+
+    // MARK: - Carousel (live search OR inspiration)
+
+    @ViewBuilder
+    private var carousel: some View {
+        if !trimmedQuery.isEmpty {
+            searchResultsCarousel
+        } else if isLoadingInspiration {
+            HStack {
+                Spacer()
+                ProgressView().tint(.white.opacity(0.6))
+                Spacer()
+            }
+            .frame(height: 200)
+        } else if let bucket = currentInspirationBucket, !bucket.songs.isEmpty {
+            inspirationCarousel(bucket)
+        } else {
+            emptyCarouselHint
+        }
+    }
+
+    private var searchResultsCarousel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text("Results")
+                    .font(.system(size: 12, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(.white.opacity(0.5))
+                if isSearching {
+                    ProgressView().scaleEffect(0.6).tint(.white.opacity(0.5))
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+
+            if searchResults.isEmpty && !isSearching {
+                Text("No results for \"\(trimmedQuery)\"")
                     .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.white.opacity(0.35))
                     .padding(.horizontal, 20)
                     .frame(height: 160, alignment: .leading)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: 12) {
-                        ForEach(suggestions) { song in
-                            songCard(song)
+                        ForEach(searchResults) { song in
+                            songCard(song, inspiration: false)
                         }
                     }
                     .padding(.horizontal, 20)
@@ -160,8 +272,55 @@ struct SendFirstSongView: View {
         }
     }
 
-    private func songCard(_ song: Song) -> some View {
+    private func inspirationCarousel(_ bucket: InspirationBucket) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.5))
+                Text(bucket.label.uppercased())
+                    .font(.system(size: 12, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(.white.opacity(0.5))
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .id("inspiration-label-\(bucket.id)")
+            .transition(.opacity)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 12) {
+                    ForEach(bucket.songs) { song in
+                        songCard(song, inspiration: true)
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+            .id("inspiration-scroll-\(bucket.id)")
+            .transition(.opacity)
+        }
+        .animation(.easeInOut(duration: 0.45), value: bucket.id)
+    }
+
+    private var emptyCarouselHint: some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 10) {
+                Image(systemName: "music.note")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.white.opacity(0.18))
+                Text("Start typing to find a song")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.35))
+            }
+            Spacer()
+        }
+        .frame(height: 180)
+    }
+
+    private func songCard(_ song: Song, inspiration: Bool) -> some View {
         let isSelected = selectedSong?.id == song.id
+        let tileOpacity: Double = isSelected ? 1.0 : (inspiration ? 0.7 : 1.0)
         return Button {
             selectSong(song)
         } label: {
@@ -209,33 +368,13 @@ struct SendFirstSongView: View {
                     .lineLimit(1)
                     .frame(width: 140, alignment: .leading)
             }
+            .opacity(tileOpacity)
         }
         .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.2), value: isSelected)
     }
 
-    private var searchAnySongButton: some View {
-        Button {
-            showSearchSheet = true
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.7))
-                Text("Don't see it? Search any song")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.3))
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(Color.white.opacity(0.08))
-            .clipShape(.rect(cornerRadius: 10))
-        }
-        .buttonStyle(.plain)
-    }
+    // MARK: - Note + friends
 
     private var noteField: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -247,6 +386,7 @@ struct SendFirstSongView: View {
             TextField("Send a note with the song?", text: $note)
                 .font(.system(size: 14))
                 .foregroundStyle(.white)
+                .tint(.white)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
                 .background(Color.white.opacity(0.06))
@@ -417,6 +557,8 @@ struct SendFirstSongView: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: - Bottom bar
+
     private var bottomBar: some View {
         VStack(spacing: 8) {
             Button(action: send) {
@@ -491,14 +633,135 @@ struct SendFirstSongView: View {
         .padding(.horizontal, 20)
     }
 
+    // MARK: - Rotation timers
+
+    private func startPlaceholderTimer() {
+        placeholderTimer?.invalidate()
+        guard query.isEmpty else { return }
+        placeholderTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
+            Task { @MainActor in
+                guard query.isEmpty else { return }
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    placeholderIndex = (placeholderIndex + 1) % placeholders.count
+                }
+            }
+        }
+    }
+
+    private func startInspirationTimer() {
+        inspirationTimer?.invalidate()
+        // Don't auto-rotate once the user has selected a song — let the screen
+        // settle while they pick recipients.
+        guard selectedSong == nil else { return }
+        inspirationTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+            Task { @MainActor in
+                guard selectedSong == nil,
+                      query.isEmpty,
+                      !inspirationBuckets.isEmpty else { return }
+                withAnimation(.easeInOut(duration: 0.45)) {
+                    inspirationIndex = (inspirationIndex + 1) % inspirationBuckets.count
+                }
+            }
+        }
+    }
+
+    private func pauseInspirationRotation() {
+        inspirationTimer?.invalidate()
+        inspirationTimer = nil
+    }
+
+    // MARK: - Query + search
+
+    private func handleQueryChange(_ newValue: String) {
+        let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            searchTask?.cancel()
+            searchResults = []
+            isSearching = false
+            // Resume placeholder rotation on clear. Inspiration only resumes
+            // if no song is selected yet — we don't want to jitter the screen
+            // under the user's feet once they've picked.
+            startPlaceholderTimer()
+        } else {
+            // Stop placeholder rotation; the user is driving.
+            placeholderTimer?.invalidate()
+            placeholderTimer = nil
+            performSearch(trimmed)
+        }
+    }
+
+    private func performSearch(_ term: String) {
+        searchTask?.cancel()
+        isSearching = true
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            if Task.isCancelled { return }
+            do {
+                let songs = try await MusicSearchService.shared.search(term: term, limit: 20)
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    self.searchResults = songs
+                    self.isSearching = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.searchResults = []
+                    self.isSearching = false
+                }
+            }
+        }
+    }
+
+    // MARK: - Inspiration load
+
+    private func loadInspiration() async {
+        let loaded = await withTaskGroup(of: (String, [Song]).self) { group in
+            for bucket in seedBuckets {
+                group.addTask {
+                    let songs = (try? await MusicSearchService.shared.search(
+                        term: bucket.searchTerm,
+                        limit: 10
+                    )) ?? []
+                    return (bucket.id, songs)
+                }
+            }
+            var out: [String: [Song]] = [:]
+            for await (id, songs) in group {
+                out[id] = songs
+            }
+            return out
+        }
+
+        let filled = seedBuckets.compactMap { bucket -> InspirationBucket? in
+            let songs = loaded[bucket.id] ?? []
+            guard !songs.isEmpty else { return nil }
+            return InspirationBucket(
+                id: bucket.id,
+                label: bucket.label,
+                searchTerm: bucket.searchTerm,
+                songs: songs
+            )
+        }
+
+        await MainActor.run {
+            self.inspirationBuckets = filled
+            self.isLoadingInspiration = false
+            // If the timer was already running, it will just pick up the new
+            // buckets; if not (e.g. first load finished after onAppear), kick
+            // it off now.
+            if self.inspirationTimer == nil {
+                self.startInspirationTimer()
+            }
+        }
+    }
+
     // MARK: - Actions
 
     private func selectSong(_ song: Song) {
         selectedSong = song
-        if !suggestions.contains(where: { $0.id == song.id }) {
-            // Insert at the front so the manually-searched pick is visible in the carousel.
-            suggestions.insert(song, at: 0)
-        }
+        // Once they pick, stop rotating the inspiration carousel so the
+        // selected tile doesn't slide out from under them.
+        pauseInspirationRotation()
     }
 
     private func toggleFriend(_ id: String) {
@@ -514,23 +777,6 @@ struct SendFirstSongView: View {
             selectedContactIds.remove(id)
         } else {
             selectedContactIds.insert(id)
-        }
-    }
-
-    private func loadSuggestions() async {
-        isLoadingSuggestions = true
-        let picks = await SongSuggestionsService.shared.buildSuggestions(
-            favoriteArtists: appState.favoriteArtists,
-            recentArtist: appState.recentListeningArtist,
-            recentSong: appState.recentListeningSong,
-            limit: 10
-        )
-        suggestions = picks
-        isLoadingSuggestions = false
-
-        // If the user already has a "recently listening" song, preselect it.
-        if selectedSong == nil, let rec = appState.recentListeningSong {
-            selectedSong = rec
         }
     }
 
@@ -557,157 +803,16 @@ struct SendFirstSongView: View {
     }
 }
 
-// MARK: - Song search sheet (shared-style with SendSongSheet)
+// MARK: - Inspiration bucket
 
-/// Thin wrapper around iTunes search so the "search any song" path on the
-/// first-send screen reuses the same UX as the main SendSongSheet.
-private struct SongSearchPickerSheet: View {
-    let appState: AppState
-    let onPick: (Song) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var searchText: String = ""
-    @State private var results: [Song] = []
-    @State private var isSearching = false
-    @State private var searchTask: Task<Void, Never>?
-    @FocusState private var searchFocused: Bool
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
-
-                VStack(spacing: 0) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.white.opacity(0.4))
-                        TextField("Search songs or artists", text: $searchText)
-                            .foregroundStyle(.white)
-                            .autocorrectionDisabled()
-                            .focused($searchFocused)
-                            .onChange(of: searchText) { _, newValue in
-                                performSearch(newValue)
-                            }
-
-                        if !searchText.isEmpty {
-                            Button {
-                                searchText = ""
-                                results = []
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundStyle(.white.opacity(0.4))
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(.rect(cornerRadius: 12))
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
-
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            if isSearching {
-                                ProgressView()
-                                    .tint(.white)
-                                    .padding(.top, 48)
-                            } else if results.isEmpty && !searchText.isEmpty {
-                                Text("No results for \"\(searchText)\"")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(.white.opacity(0.3))
-                                    .padding(.top, 48)
-                            } else {
-                                ForEach(results) { song in
-                                    Button {
-                                        onPick(song)
-                                    } label: {
-                                        HStack(spacing: 12) {
-                                            AsyncImage(url: URL(string: song.albumArtURL)) { phase in
-                                                if let image = phase.image {
-                                                    image.resizable().aspectRatio(contentMode: .fill)
-                                                } else {
-                                                    Color.white.opacity(0.1)
-                                                }
-                                            }
-                                            .frame(width: 44, height: 44)
-                                            .clipShape(.rect(cornerRadius: 5))
-
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(song.title)
-                                                    .font(.system(size: 15, weight: .semibold))
-                                                    .foregroundStyle(.white)
-                                                    .lineLimit(1)
-                                                Text(song.artist)
-                                                    .font(.system(size: 12))
-                                                    .foregroundStyle(.white.opacity(0.5))
-                                                    .lineLimit(1)
-                                            }
-
-                                            Spacer()
-
-                                            Image(systemName: "plus.circle.fill")
-                                                .font(.system(size: 20))
-                                                .foregroundStyle(Color(red: 0.76, green: 0.38, blue: 0.35))
-                                        }
-                                        .padding(.vertical, 8)
-                                        .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .overlay(alignment: .bottom) {
-                                        Color.white.opacity(0.05).frame(height: 0.5)
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 8)
-                    }
-                    .scrollDismissesKeyboard(.interactively)
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .foregroundStyle(.white.opacity(0.7))
-                }
-            }
-            .toolbarBackground(.black, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-        }
-        .presentationBackground(.black)
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                searchFocused = true
-            }
-        }
-    }
-
-    private func performSearch(_ term: String) {
-        searchTask?.cancel()
-        let trimmed = term.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else {
-            results = []
-            isSearching = false
-            return
-        }
-        isSearching = true
-        searchTask = Task {
-            try? await Task.sleep(for: .milliseconds(300))
-            guard !Task.isCancelled else { return }
-            do {
-                let songs = try await MusicSearchService.shared.search(term: trimmed, limit: 25)
-                if Task.isCancelled { return }
-                await MainActor.run {
-                    self.results = songs
-                    self.isSearching = false
-                }
-            } catch {
-                await MainActor.run {
-                    self.results = []
-                    self.isSearching = false
-                }
-            }
-        }
-    }
+/// Curated "vibe" bucket shown in the pre-search carousel. We intentionally
+/// use iTunes search terms instead of the Apple RSS charts feed — the feed
+/// lacks preview URLs, which would force a second per-song lookup to make
+/// tiles playable/sendable. Search-term buckets deliver the same feel with
+/// the network surface we already have.
+private struct InspirationBucket: Identifiable {
+    let id: String
+    let label: String
+    let searchTerm: String
+    var songs: [Song] = []
 }
