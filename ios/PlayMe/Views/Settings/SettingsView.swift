@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// App-wide settings screen. Accessed from the gear icon in the Profile tab.
 /// Groups are ordered from most-used to most-destructive so Delete Account
@@ -8,6 +9,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var showDeleteConfirm: Bool = false
+    @State private var showNotificationsDeniedAlert: Bool = false
 
     private let privacyPolicyURL = URL(string: "https://rork.app/privacy")!
     private let termsURL = URL(string: "https://rork.app/terms")!
@@ -98,6 +100,16 @@ struct SettingsView: View {
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
         }
+        .alert("Notifications are off", isPresented: $showNotificationsDeniedAlert) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Turn on notifications for PlayMe in the Settings app to get alerts when friends share songs or message you.")
+        }
     }
 
     private var displayName: String {
@@ -111,7 +123,10 @@ struct SettingsView: View {
         Binding(
             get: { appState.notificationsEnabled },
             set: { newValue in
-                Task { await appState.setNotificationsEnabled(newValue) }
+                Task {
+                    let needsSettings = await appState.syncNotificationsToggleFromSettings(enabled: newValue)
+                    if needsSettings { showNotificationsDeniedAlert = true }
+                }
             }
         )
     }

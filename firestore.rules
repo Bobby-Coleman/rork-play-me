@@ -40,6 +40,12 @@ service cloud.firestore {
       match /blocked/{blockedId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
+
+      // Per-friend send counter used to rank the send-sheet chip row by
+      // interaction frequency. Entirely private to the owner.
+      match /sendStats/{friendId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
     }
 
     match /usernames/{username} {

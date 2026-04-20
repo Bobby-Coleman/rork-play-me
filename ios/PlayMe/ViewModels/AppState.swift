@@ -37,6 +37,11 @@ class AppState {
     /// reads + list views filter against this set client-side so blocked users
     /// disappear from feeds, search results, and conversation rows.
     var blockedUserIds: Set<String> = []
+    /// Per-friend send counter used to rank friends in the song send sheet by
+    /// interaction frequency. Keyed by recipient UID. Hydrated from Firestore
+    /// on `loadData()` and bumped optimistically inside `sendSong` so ordering
+    /// updates without a refetch.
+    var sendStats: [String: SendStat] = [:]
     var notificationsEnabled: Bool = true
     var songs: [Song] = []
     var searchResults: [Song] = []
@@ -57,6 +62,29 @@ class AppState {
 
     var totalUnreadCount: Int {
         conversations.reduce(0) { $0 + $1.unreadCount }
+    }
+
+    /// `friends` sorted by how often the current user has sent to them:
+    /// 1) send count descending, 2) most-recent send descending (nil last),
+    /// 3) first name ascending as the stable fallback. Used by the song send
+    /// sheet chip row.
+    var friendsRankedByActivity: [AppUser] {
+        friends.sorted { lhs, rhs in
+            let lhsStat = sendStats[lhs.id]
+            let rhsStat = sendStats[rhs.id]
+            let lhsCount = lhsStat?.count ?? 0
+            let rhsCount = rhsStat?.count ?? 0
+            if lhsCount != rhsCount { return lhsCount > rhsCount }
+
+            switch (lhsStat?.lastSentAt, rhsStat?.lastSentAt) {
+            case let (l?, r?) where l != r: return l > r
+            case (_?, nil): return true
+            case (nil, _?): return false
+            default: break
+            }
+
+            return lhs.firstName.localizedCaseInsensitiveCompare(rhs.firstName) == .orderedAscending
+        }
     }
     var phoneNumber: String = ""
     var showSentToast = false
@@ -234,6 +262,7 @@ class AppState {
         let serverFriends = await firebase.loadFriends()
         blockedUserIds = await firebase.loadBlockedUserIds()
         friends = serverFriends.filter { !blockedUserIds.contains($0.id) }
+        sendStats = await firebase.loadSendStats()
 
         notificationsEnabled = await firebase.loadNotificationsEnabled()
 
@@ -270,6 +299,12 @@ class AppState {
         sentShares.insert(share, at: 0)
 
         Task { await FirebaseService.shared.saveShare(share) }
+
+        // Bump the per-friend send counter: optimistically locally (so the
+        // chip row reorders immediately) and durably in Firestore.
+        let previousCount = sendStats[friend.id]?.count ?? 0
+        sendStats[friend.id] = SendStat(count: previousCount + 1, lastSentAt: Date())
+        Task { await FirebaseService.shared.incrementSendStat(friendUid: friend.id) }
 
         let firebase = FirebaseService.shared
         if let conv = await firebase.getOrCreateConversation(with: friend.id, friendName: friend.firstName) {
@@ -444,6 +479,36 @@ class AppState {
         await FirebaseService.shared.setNotificationsEnabled(enabled)
     }
 
+    /// Settings toggle: turns Firestore flag off immediately; turning on requests iOS permission first.
+    /// - Returns `true` only when the user asked for notifications but iOS is `.denied` (show “Open Settings”).
+    @discardableResult
+    func syncNotificationsToggleFromSettings(enabled: Bool) async -> Bool {
+        if !enabled {
+            await setNotificationsEnabled(false)
+            return false
+        }
+        let before = await NotificationPermission.currentAuthorizationStatus()
+        if before == .denied {
+            notificationsEnabled = false
+            await setNotificationsEnabled(false)
+            return true
+        }
+        let status = await NotificationPermission.requestAuthorizationAndRegister()
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            await setNotificationsEnabled(true)
+            return false
+        case .denied, .notDetermined:
+            notificationsEnabled = false
+            await setNotificationsEnabled(false)
+            return status == .denied
+        @unknown default:
+            notificationsEnabled = false
+            await setNotificationsEnabled(false)
+            return false
+        }
+    }
+
     // MARK: - Account Deletion
 
     /// Deletes the user's Firebase Auth account and all associated Firestore
@@ -505,6 +570,7 @@ class AppState {
         currentUser = nil
         friends = []
         blockedUserIds = []
+        sendStats = [:]
         receivedShares = []
         sentShares = []
         likedShareIds = []

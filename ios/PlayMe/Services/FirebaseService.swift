@@ -499,6 +499,45 @@ class FirebaseService {
         }
     }
 
+    // MARK: - Send Stats (per-friend send counter for activity ranking)
+
+    /// Atomically bump the caller's private send counter for a given recipient.
+    /// Used to rank friends in the send sheet chip row by interaction
+    /// frequency. Fire-and-forget on the call site; errors are only logged.
+    func incrementSendStat(friendUid: String) async {
+        guard let uid = firebaseUID else { return }
+        do {
+            try await db.collection("users").document(uid)
+                .collection("sendStats").document(friendUid)
+                .setData([
+                    "count": FieldValue.increment(Int64(1)),
+                    "lastSentAt": FieldValue.serverTimestamp(),
+                ], merge: true)
+        } catch {
+            print("FirebaseService: increment send stat failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// One-shot read of every sendStats entry for the current user.
+    func loadSendStats() async -> [String: SendStat] {
+        guard let uid = firebaseUID else { return [:] }
+        do {
+            let snapshot = try await db.collection("users").document(uid)
+                .collection("sendStats").getDocuments()
+            var result: [String: SendStat] = [:]
+            for doc in snapshot.documents {
+                let data = doc.data()
+                let count = (data["count"] as? Int) ?? Int((data["count"] as? Int64) ?? 0)
+                let lastSentAt = (data["lastSentAt"] as? Timestamp)?.dateValue()
+                result[doc.documentID] = SendStat(count: count, lastSentAt: lastSentAt)
+            }
+            return result
+        } catch {
+            print("FirebaseService: load send stats failed: \(error.localizedDescription)")
+            return [:]
+        }
+    }
+
     // MARK: - Reports
 
     enum ReportTargetType: String {

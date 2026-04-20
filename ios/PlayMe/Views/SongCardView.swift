@@ -48,12 +48,19 @@ struct SongCardView: View {
         }
     }
 
+    /// Full "First Last" for the sender; falls back to first name when the last name is missing.
+    private var senderFullName: String {
+        let trimmedLast = share.sender.lastName.trimmingCharacters(in: .whitespaces)
+        if trimmedLast.isEmpty { return share.sender.firstName }
+        return "\(share.sender.firstName) \(trimmedLast)"
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                Spacer(minLength: 0)
+                Spacer(minLength: 32)
 
                 VStack(spacing: 0) {
                     VStack(spacing: 4) {
@@ -135,7 +142,7 @@ struct SongCardView: View {
                         .padding(.bottom, 12)
 
                     HStack(spacing: 6) {
-                        Text(viewerIsSender ? "You" : share.sender.firstName)
+                        Text(viewerIsSender ? "You" : senderFullName)
                             .font(.system(size: 13, weight: .medium))
                         Text("·")
                         Text(share.timestamp, format: .dateTime.month(.abbreviated).day())
@@ -158,7 +165,8 @@ struct SongCardView: View {
                         .padding(.horizontal, 32)
                         .padding(.bottom, 12)
                 }
-                .padding(.bottom, 80)
+
+                Spacer(minLength: 140)
             }
         }
         .overlay(alignment: .bottom) {

@@ -27,11 +27,24 @@ struct OTPTextField: UIViewRepresentable {
         if uiView.text != text {
             uiView.text = text
         }
+        // After the phone step, switching views dismisses the keyboard; explicitly
+        // focus the code field on the next run loop once the view is in the hierarchy.
+        if !context.coordinator.didRequestInitialFocus {
+            context.coordinator.didRequestInitialFocus = true
+            DispatchQueue.main.async {
+                guard !uiView.becomeFirstResponder() else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    _ = uiView.becomeFirstResponder()
+                }
+            }
+        }
     }
 
     class Coordinator: NSObject, UITextFieldDelegate {
         @Binding var text: String
         let onSixDigits: () -> Void
+        /// Avoid repeated `becomeFirstResponder` calls from SwiftUI update cycles.
+        var didRequestInitialFocus = false
 
         init(text: Binding<String>, onSixDigits: @escaping () -> Void) {
             _text = text
@@ -39,16 +52,11 @@ struct OTPTextField: UIViewRepresentable {
         }
 
         func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
-            let current = textField.text ?? ""
-            guard let swiftRange = Range(range, in: current) else { return false }
-            let proposed = current.replacingCharacters(in: swiftRange, with: string)
-            let filtered = String(proposed.filter { $0.isNumber }.prefix(6))
-            textField.text = filtered
-            text = filtered
-            if filtered.count == 6 {
-                DispatchQueue.main.async { self.onSixDigits() }
-            }
-            return false
+            // Allow the native insert so iOS SMS autofill (QuickType "From Messages")
+            // commits cleanly. Deletions pass through; hardware-keyboard non-digits are rejected.
+            // `textChanged` is the single source of truth for filtering + binding updates.
+            if string.isEmpty { return true }
+            return string.allSatisfy { $0.isNumber }
         }
 
         @objc func textChanged(_ textField: UITextField) {
@@ -74,6 +82,9 @@ struct OTPVerificationView: View {
     @State private var isVerifying = false
     @State private var errorMessage: String?
     @State private var fieldIsFocused = false
+    @State private var isResending = false
+    @State private var resendCooldownRemaining = 0
+    @State private var resendConfirmation: String?
 
     var body: some View {
         ZStack {
@@ -135,6 +146,38 @@ struct OTPVerificationView: View {
                         .padding(.top, 8)
                 }
 
+                if let resendConfirmation {
+                    Text(resendConfirmation)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .padding(.top, 6)
+                }
+
+                Button {
+                    Task { await resendCode() }
+                } label: {
+                    Group {
+                        if isResending {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .tint(.white.opacity(0.75))
+                                    .scaleEffect(0.85)
+                                Text("Sending new code…")
+                            }
+                        } else if resendCooldownRemaining > 0 {
+                            Text("Resend code in \(resendCooldownRemaining)s")
+                        } else {
+                            Text("Didn't receive a code?")
+                        }
+                    }
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(resendCooldownRemaining > 0 || isResending ? 0.35 : 0.65))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 20)
+                }
+                .buttonStyle(.plain)
+                .disabled(isResending || resendCooldownRemaining > 0 || appState.phoneNumber.isEmpty)
+
                 Spacer()
                 Spacer()
             }
@@ -155,6 +198,41 @@ struct OTPVerificationView: View {
             } else {
                 errorMessage = appState.registrationError ?? "Invalid code. Please try again."
                 codeText = ""
+            }
+        }
+    }
+
+    private func resendCode() async {
+        guard !isResending, resendCooldownRemaining == 0 else { return }
+        let phone = appState.phoneNumber
+        guard !phone.isEmpty else { return }
+
+        await MainActor.run {
+            isResending = true
+            errorMessage = nil
+            resendConfirmation = nil
+        }
+
+        let success = await appState.sendCode(phoneNumber: phone)
+
+        await MainActor.run {
+            isResending = false
+            if success {
+                codeText = ""
+                resendConfirmation = "We sent a new code."
+                resendCooldownRemaining = 60
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(4))
+                    if resendConfirmation == "We sent a new code." { resendConfirmation = nil }
+                }
+                Task { @MainActor in
+                    while resendCooldownRemaining > 0 {
+                        try? await Task.sleep(for: .seconds(1))
+                        resendCooldownRemaining -= 1
+                    }
+                }
+            } else {
+                errorMessage = appState.registrationError ?? "Could not resend. Try again later."
             }
         }
     }

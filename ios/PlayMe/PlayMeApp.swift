@@ -1,9 +1,75 @@
 import SwiftUI
+import UIKit
 import FirebaseAuth
 import FirebaseCore
 import FirebaseMessaging
 import UserNotifications
 import ChottuLinkSDK
+
+// MARK: - Push / notification permission (deferred from cold launch)
+
+enum NotificationPermission {
+    private static let authOptions: UNAuthorizationOptions = [.alert, .badge, .sound]
+
+    /// At launch: only register with APNs if the user already granted (or provisional) — no system prompt.
+    static func registerForRemoteNotificationsIfAlreadyAuthorized() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let ok: Bool
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                ok = true
+            default:
+                ok = false
+            }
+            guard ok else { return }
+            DispatchQueue.main.async {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+        }
+    }
+
+    static func currentAuthorizationStatus() async -> UNAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                continuation.resume(returning: settings.authorizationStatus)
+            }
+        }
+    }
+
+    /// Shows the system permission dialog only when status is `.notDetermined`; registers when allowed.
+    static func requestAuthorizationAndRegister() async -> UNAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                switch settings.authorizationStatus {
+                case .denied:
+                    continuation.resume(returning: .denied)
+                case .authorized, .provisional, .ephemeral:
+                    DispatchQueue.main.async {
+                        UIApplication.shared.registerForRemoteNotifications()
+                    }
+                    continuation.resume(returning: settings.authorizationStatus)
+                case .notDetermined:
+                    UNUserNotificationCenter.current().requestAuthorization(options: Self.authOptions) { granted, error in
+                        if let error {
+                            print("Notification permission error: \(error.localizedDescription)")
+                        }
+                        print("Notification permission granted: \(granted)")
+                        DispatchQueue.main.async {
+                            if granted {
+                                UIApplication.shared.registerForRemoteNotifications()
+                            }
+                            UNUserNotificationCenter.current().getNotificationSettings { updated in
+                                continuation.resume(returning: updated.authorizationStatus)
+                            }
+                        }
+                    }
+                @unknown default:
+                    continuation.resume(returning: settings.authorizationStatus)
+                }
+            }
+        }
+    }
+}
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate, ChottuLinkDelegate {
     func application(_ application: UIApplication,
@@ -19,14 +85,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         UNUserNotificationCenter.current().delegate = self
         Messaging.messaging().delegate = self
 
-        let authOptions: UNAuthorizationOptions = [.alert, .badge, .sound]
-        UNUserNotificationCenter.current().requestAuthorization(options: authOptions) { granted, error in
-            if let error {
-                print("Notification permission error: \(error.localizedDescription)")
-            }
-            print("Notification permission granted: \(granted)")
-        }
-        application.registerForRemoteNotifications()
+        NotificationPermission.registerForRemoteNotificationsIfAlreadyAuthorized()
 
         return true
     }
