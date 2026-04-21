@@ -49,13 +49,13 @@ struct SongCardView: View {
     var body: some View {
         GeometryReader { proxy in
             let horizontalInset: CGFloat = 24
-            let nonArtReserve: CGFloat = share.note == nil ? 180 : 220
+            let nonArtReserve: CGFloat = 180
             let maxArtByWidth = max(0, proxy.size.width - horizontalInset * 2)
             let maxArtByHeight = max(220, proxy.size.height - nonArtReserve)
             let artSize = min(maxArtByWidth, maxArtByHeight)
 
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.black
 
                 VStack(spacing: 0) {
                     Spacer(minLength: 8)
@@ -72,16 +72,11 @@ struct SongCardView: View {
                         senderDateRow
                             .padding(.bottom, 12)
 
-                        if let note = share.note {
-                            noteView(note: note)
-                                .padding(.horizontal, 32)
-                                .padding(.bottom, 16)
-                        }
-
                         playerControls
                             .padding(.horizontal, 32)
                             .padding(.bottom, 12)
                     }
+                    .padding(.bottom, 72)
 
                     Spacer(minLength: 8)
                 }
@@ -235,6 +230,26 @@ struct SongCardView: View {
                     .padding(12)
                 }
             }
+            .overlay(alignment: .bottom) {
+                if let note = share.note, !note.isEmpty {
+                    Text(note)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(isNoteExpanded ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 20)
+                        .onTapGesture {
+                            if note.count > 80 {
+                                withAnimation(.easeInOut(duration: 0.2)) { isNoteExpanded.toggle() }
+                            }
+                        }
+                }
+            }
             .shadow(color: .white.opacity(0.05), radius: 20, y: 10)
     }
 
@@ -271,36 +286,6 @@ struct SongCardView: View {
                 chatTarget = conv
             }
             isOpeningChat = false
-        }
-    }
-
-    // MARK: - Note (expandable when long)
-
-    @ViewBuilder
-    private func noteView(note: String) -> some View {
-        let isLong = note.count > 80
-
-        VStack(spacing: 4) {
-            Text("\"\(note)\"")
-                .font(.system(size: 15))
-                .foregroundStyle(.white.opacity(0.7))
-                .italic()
-                .multilineTextAlignment(.center)
-                .lineLimit(isLong && !isNoteExpanded ? 2 : nil)
-                .truncationMode(.tail)
-
-            if isLong {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isNoteExpanded.toggle()
-                    }
-                } label: {
-                    Text(isNoteExpanded ? "Show less" : "Show more")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
-                }
-                .buttonStyle(.plain)
-            }
         }
     }
 

@@ -153,10 +153,13 @@ struct ChatView: View {
                     Text(message.text)
                         .font(.system(size: 15))
                         .foregroundStyle(.white)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 9)
                         .background(isMe ? Color(red: 0.76, green: 0.38, blue: 0.35) : Color.white.opacity(0.1))
                         .clipShape(.rect(cornerRadius: 18))
+                        .frame(maxWidth: 280, alignment: isMe ? .trailing : .leading)
                 }
 
                 Text(formattedTimestamp(message.timestamp))

@@ -101,8 +101,10 @@ struct FriendSelectorView: View {
         TextField(
             "",
             text: $note,
-            prompt: Text("Add a message").foregroundColor(.white.opacity(0.55))
+            prompt: Text("Add a message").foregroundColor(.white.opacity(0.55)),
+            axis: .vertical
         )
+        .lineLimit(1...3)
         .font(.system(size: 14, weight: .semibold))
         .foregroundStyle(.white)
         .tint(.white)
@@ -115,7 +117,7 @@ struct FriendSelectorView: View {
         .padding(.vertical, 9)
         .background(.ultraThinMaterial, in: Capsule())
         .onChange(of: note) { _, newValue in
-            if newValue.count > 150 { note = String(newValue.prefix(150)) }
+            if newValue.count > 70 { note = String(newValue.prefix(70)) }
         }
     }
 

@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import UserNotifications
 import WidgetKit
+import FirebaseFirestore
 
 @Observable
 @MainActor
@@ -33,6 +34,18 @@ class AppState {
     }
 
     var friends: [AppUser] = []
+    /// Incoming pending friend requests for the current user. Live-updated by
+    /// a Firestore snapshot listener attached in `loadData`. Drives the red
+    /// badge on the Add Friends pill and the "Friend Requests" section of
+    /// AddFriendsView.
+    var incomingRequests: [AppUser] = []
+    /// UIDs the current user has a *pending outgoing* friend request to.
+    /// Hydrated lazily per visible search result so AddFriendsView can show
+    /// "Requested" instead of "Add" on re-entry.
+    var outgoingRequestUIDs: Set<String> = []
+    /// Firestore listener for incoming friend requests. Retained so we can
+    /// detach on logout and reattach on sign-in.
+    private var incomingRequestsListener: ListenerRegistration?
     /// UIDs the current user has blocked. Synced from Firestore on foreground;
     /// reads + list views filter against this set client-side so blocked users
     /// disappear from feeds, search results, and conversation rows.
@@ -264,6 +277,9 @@ class AppState {
         friends = serverFriends.filter { !blockedUserIds.contains($0.id) }
         sendStats = await firebase.loadSendStats()
 
+        await refreshFriendRequests()
+        startIncomingRequestsListener()
+
         notificationsEnabled = await firebase.loadNotificationsEnabled()
 
         let serverReceived = await firebase.loadReceivedShares()
@@ -410,6 +426,79 @@ class AppState {
         let serverFriends = await firebase.loadFriends()
         if !serverFriends.isEmpty {
             friends = serverFriends.filter { !blockedUserIds.contains($0.id) }
+        }
+    }
+
+    // MARK: - Friend Requests
+
+    /// One-shot refresh of incoming friend requests. Outgoing state is
+    /// hydrated lazily per visible search result via `hasOutgoingRequest` to
+    /// avoid a full-collection scan the security rules don't allow anyway.
+    func refreshFriendRequests() async {
+        let firebase = FirebaseService.shared
+        guard firebase.isSignedIn else { return }
+        let incoming = await firebase.loadIncomingRequests()
+        incomingRequests = incoming.filter { !blockedUserIds.contains($0.id) }
+    }
+
+    /// Attach (or reattach) the snapshot listener that keeps
+    /// `incomingRequests` in sync with Firestore so the pill badge updates
+    /// in real time. Idempotent.
+    private func startIncomingRequestsListener() {
+        incomingRequestsListener?.remove()
+        incomingRequestsListener = FirebaseService.shared.listenIncomingRequests { [weak self] requests in
+            Task { @MainActor in
+                guard let self else { return }
+                self.incomingRequests = requests.filter { !self.blockedUserIds.contains($0.id) }
+            }
+        }
+    }
+
+    /// Optimistically send a friend request and remember the outgoing state
+    /// locally so the AddFriendsView chip flips to "Requested" immediately.
+    @discardableResult
+    func sendFriendRequest(to user: AppUser) async -> Bool {
+        guard let me = currentUser else { return false }
+        let ok = await FirebaseService.shared.sendFriendRequest(
+            toUID: user.id,
+            username: me.username,
+            firstName: me.firstName,
+            lastName: me.lastName
+        )
+        if ok { outgoingRequestUIDs.insert(user.id) }
+        return ok
+    }
+
+    /// Cancel a pending outgoing request.
+    func cancelOutgoingRequest(to user: AppUser) async {
+        await FirebaseService.shared.cancelOutgoingRequest(toUID: user.id)
+        outgoingRequestUIDs.remove(user.id)
+    }
+
+    /// Accept an incoming friend request; refreshes `friends` so the
+    /// accepted user shows up in the friends list right away.
+    func acceptFriendRequest(_ user: AppUser) async {
+        await FirebaseService.shared.acceptFriendRequest(from: user)
+        incomingRequests.removeAll { $0.id == user.id }
+        await refreshFriends()
+    }
+
+    func declineFriendRequest(_ user: AppUser) async {
+        await FirebaseService.shared.declineFriendRequest(fromUID: user.id)
+        incomingRequests.removeAll { $0.id == user.id }
+    }
+
+    /// Hydrate `outgoingRequestUIDs` for a batch of user IDs. Called by
+    /// AddFriendsView when search results appear so chips render the correct
+    /// state on first paint. Sequential to stay on the MainActor without
+    /// sendability gymnastics around the FirebaseService singleton.
+    func hydrateOutgoingRequests(for userIds: [String]) async {
+        let firebase = FirebaseService.shared
+        guard firebase.isSignedIn else { return }
+        for uid in userIds where !outgoingRequestUIDs.contains(uid) {
+            if await firebase.hasOutgoingRequest(toUID: uid) {
+                outgoingRequestUIDs.insert(uid)
+            }
         }
     }
 
@@ -567,8 +656,12 @@ class AppState {
     }
 
     func logout() {
+        incomingRequestsListener?.remove()
+        incomingRequestsListener = nil
         currentUser = nil
         friends = []
+        incomingRequests = []
+        outgoingRequestUIDs = []
         blockedUserIds = []
         sendStats = [:]
         receivedShares = []

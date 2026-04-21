@@ -75,6 +75,11 @@ struct AddFriendsView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.bottom, 16)
 
+                        if !appState.incomingRequests.isEmpty {
+                            friendRequestsSection
+                                .padding(.bottom, 16)
+                        }
+
                         if !appState.friends.isEmpty {
                             yourFriendsSection
                                 .padding(.bottom, 16)
@@ -454,6 +459,7 @@ struct AddFriendsView: View {
     private func userRow(_ user: AppUser) -> some View {
         let alreadyFriend = appState.friends.contains(where: { $0.id == user.id })
         let justAdded = addedIds.contains(user.id)
+        let requested = appState.outgoingRequestUIDs.contains(user.id)
 
         return HStack(spacing: 14) {
             Text(user.initials)
@@ -482,21 +488,93 @@ struct AddFriendsView: View {
                     .padding(.vertical, 6)
                     .background(Color.white.opacity(0.06))
                     .clipShape(.capsule)
+            } else if requested {
+                Button {
+                    Task { await appState.cancelOutgoingRequest(to: user) }
+                } label: {
+                    Text("Requested")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(.capsule)
+                }
+                .buttonStyle(.plain)
             } else {
                 Button {
-                    Task {
-                        await FirebaseService.shared.addFriend(
-                            friendUID: user.id,
-                            friendUsername: user.username,
-                            friendFirstName: user.firstName,
-                            friendLastName: user.lastName
-                        )
-                        addedIds.insert(user.id)
-                        await appState.refreshFriends()
-                    }
+                    Task { await appState.sendFriendRequest(to: user) }
                 } label: {
                     addButtonLabel("Add")
                 }
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - Incoming friend requests
+
+    private var friendRequestsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("Friend Requests", icon: "person.crop.circle.badge.plus")
+
+            LazyVStack(spacing: 0) {
+                ForEach(appState.incomingRequests) { user in
+                    friendRequestRow(user)
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    private func friendRequestRow(_ user: AppUser) -> some View {
+        HStack(spacing: 14) {
+            Text(user.initials)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(Color.white.opacity(0.12))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayName(for: user))
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white)
+                if !user.username.isEmpty {
+                    Text("@\(user.username)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                Button {
+                    Task { await appState.acceptFriendRequest(user) }
+                } label: {
+                    Text("Accept")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                        .clipShape(.capsule)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    Task { await appState.declineFriendRequest(user) }
+                } label: {
+                    Text("Decline")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(.capsule)
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.vertical, 8)
@@ -568,19 +646,31 @@ struct AddFriendsView: View {
         .clipShape(.capsule)
     }
 
+    private func displayName(for user: AppUser) -> String {
+        let last = user.lastName.trimmingCharacters(in: .whitespaces)
+        return last.isEmpty ? user.firstName : "\(user.firstName) \(last)"
+    }
+
     // MARK: - Search
 
     private func performSearch(_ query: String) {
-        guard !query.isEmpty else {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = (trimmed.hasPrefix("@") ? String(trimmed.dropFirst()) : trimmed).lowercased()
+        guard !normalized.isEmpty else {
             searchResults = []
+            isSearching = false
             return
         }
         isSearching = true
         Task {
             try? await Task.sleep(for: .milliseconds(300))
             guard searchText == query else { return }
-            searchResults = await appState.searchAllUsers(query: query)
+            let results = await appState.searchAllUsers(query: normalized)
+            searchResults = results
             isSearching = false
+            // Hydrate outgoing request state so any previously-requested user
+            // shows the "Requested" chip on first paint.
+            await appState.hydrateOutgoingRequests(for: results.map { $0.id })
         }
     }
 }

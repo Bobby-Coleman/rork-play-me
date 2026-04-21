@@ -396,17 +396,84 @@ class FirebaseService {
         }
     }
 
-    func searchUsers(query: String) async -> [AppUser] {
-        guard !query.isEmpty else { return [] }
-        let lowered = query.lowercased()
+    // MARK: - Friend Requests
+
+    /// Send a pending friend request to `toUID`. Writes
+    /// `/users/{toUID}/friendRequests/{myUID}` with the sender's profile so
+    /// the recipient can render the row without an extra lookup.
+    func sendFriendRequest(
+        toUID: String,
+        username: String,
+        firstName: String,
+        lastName: String = ""
+    ) async -> Bool {
+        guard let uid = firebaseUID, uid != toUID else { return false }
+        let myUsername = username.isEmpty ? (UserDefaults.standard.string(forKey: "currentUserUsername") ?? "") : username
+        let myFirst = firstName.isEmpty ? (UserDefaults.standard.string(forKey: "currentUserFirstName") ?? "") : firstName
+        let myLast = lastName.isEmpty ? (UserDefaults.standard.string(forKey: "currentUserLastName") ?? "") : lastName
         do {
-            let snapshot = try await db.collection("users")
-                .whereField("username", isGreaterThanOrEqualTo: lowered)
-                .whereField("username", isLessThanOrEqualTo: lowered + "\u{f8ff}")
-                .limit(to: 20)
-                .getDocuments()
+            try await db.collection("users").document(toUID)
+                .collection("friendRequests").document(uid)
+                .setData([
+                    "username": myUsername,
+                    "firstName": myFirst,
+                    "lastName": myLast,
+                    "createdAt": FieldValue.serverTimestamp(),
+                ])
+            return true
+        } catch {
+            print("FirebaseService: send friend request failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Cancel an outgoing pending request that the caller previously sent.
+    func cancelOutgoingRequest(toUID: String) async {
+        guard let uid = firebaseUID else { return }
+        do {
+            try await db.collection("users").document(toUID)
+                .collection("friendRequests").document(uid).delete()
+        } catch {
+            print("FirebaseService: cancel outgoing request failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Accept an incoming request by creating the bidirectional friendship
+    /// and deleting the request document.
+    func acceptFriendRequest(from user: AppUser) async {
+        guard let uid = firebaseUID else { return }
+        await addFriend(
+            friendUID: user.id,
+            friendUsername: user.username,
+            friendFirstName: user.firstName,
+            friendLastName: user.lastName
+        )
+        do {
+            try await db.collection("users").document(uid)
+                .collection("friendRequests").document(user.id).delete()
+        } catch {
+            print("FirebaseService: delete accepted request failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Decline an incoming request (simply deletes the request doc).
+    func declineFriendRequest(fromUID: String) async {
+        guard let uid = firebaseUID else { return }
+        do {
+            try await db.collection("users").document(uid)
+                .collection("friendRequests").document(fromUID).delete()
+        } catch {
+            print("FirebaseService: decline friend request failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// One-shot load of incoming friend requests for the current user.
+    func loadIncomingRequests() async -> [AppUser] {
+        guard let uid = firebaseUID else { return [] }
+        do {
+            let snapshot = try await db.collection("users").document(uid)
+                .collection("friendRequests").getDocuments()
             return snapshot.documents.compactMap { doc -> AppUser? in
-                guard doc.documentID != firebaseUID else { return nil }
                 let data = doc.data()
                 let username = data["username"] as? String ?? ""
                 let firstName = data["firstName"] as? String ?? username
@@ -414,9 +481,96 @@ class FirebaseService {
                 return AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: "")
             }
         } catch {
-            print("FirebaseService: search users failed: \(error.localizedDescription)")
+            print("FirebaseService: load incoming requests failed: \(error.localizedDescription)")
             return []
         }
+    }
+
+    /// Returns true if the caller already has a pending outgoing request to
+    /// `toUID`. Used to hydrate search result chip state on view open.
+    func hasOutgoingRequest(toUID: String) async -> Bool {
+        guard let uid = firebaseUID else { return false }
+        do {
+            let doc = try await db.collection("users").document(toUID)
+                .collection("friendRequests").document(uid).getDocument()
+            return doc.exists
+        } catch {
+            return false
+        }
+    }
+
+    /// Live listener for incoming friend requests — mirrors the message
+    /// listener pattern. Used to drive the pill badge on the home feed.
+    func listenIncomingRequests(onChange: @escaping @Sendable ([AppUser]) -> Void) -> ListenerRegistration? {
+        guard let uid = firebaseUID else { return nil }
+        return db.collection("users").document(uid)
+            .collection("friendRequests")
+            .addSnapshotListener { snapshot, _ in
+                guard let docs = snapshot?.documents else { return }
+                let requests = docs.map { doc -> AppUser in
+                    let data = doc.data()
+                    let username = data["username"] as? String ?? ""
+                    let firstName = data["firstName"] as? String ?? username
+                    let lastName = data["lastName"] as? String ?? ""
+                    return AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: "")
+                }
+                onChange(requests)
+            }
+    }
+
+    func searchUsers(query: String) async -> [AppUser] {
+        // Normalize: drop whitespace + leading '@', lowercase. Matches how
+        // usernames are stored via claimUsernameAndCreateProfile.
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let stripped = trimmed.hasPrefix("@") ? String(trimmed.dropFirst()) : trimmed
+        let q = stripped.lowercased()
+        guard !q.isEmpty else { return [] }
+
+        var results: [AppUser] = []
+        var seen: Set<String> = []
+        if let me = firebaseUID { seen.insert(me) }
+
+        // Prefix range query against /users for autocomplete.
+        do {
+            let snapshot = try await db.collection("users")
+                .whereField("username", isGreaterThanOrEqualTo: q)
+                .whereField("username", isLessThanOrEqualTo: q + "\u{f8ff}")
+                .limit(to: 20)
+                .getDocuments()
+            for doc in snapshot.documents {
+                guard !seen.contains(doc.documentID) else { continue }
+                let data = doc.data()
+                let username = data["username"] as? String ?? ""
+                let firstName = data["firstName"] as? String ?? username
+                let lastName = data["lastName"] as? String ?? ""
+                results.append(AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: ""))
+                seen.insert(doc.documentID)
+            }
+        } catch {
+            print("FirebaseService: search users failed: \(error.localizedDescription)")
+        }
+
+        // Exact-match fallback via canonical /usernames mapping. Covers
+        // accounts whose /users doc lacks a searchable `username` field.
+        do {
+            let mapping = try await db.collection("usernames").document(q).getDocument()
+            if let uid = mapping.data()?["uid"] as? String, !seen.contains(uid) {
+                if let profile = await fetchUserProfile(uid: uid) {
+                    results.append(AppUser(
+                        id: uid,
+                        firstName: profile.firstName,
+                        lastName: profile.lastName,
+                        username: profile.username.isEmpty ? q : profile.username,
+                        phone: ""
+                    ))
+                    seen.insert(uid)
+                }
+            }
+        } catch {
+            print("FirebaseService: username exact lookup failed: \(error.localizedDescription)")
+        }
+
+        return results
     }
 
     // MARK: - Blocking

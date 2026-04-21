@@ -46,6 +46,19 @@ service cloud.firestore {
       match /sendStats/{friendId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
+
+      // Incoming friend requests: a sender creates
+      // /users/{recipientUid}/friendRequests/{senderUid}. Only the recipient
+      // can read the list; either party may delete (accept/decline or cancel).
+      match /friendRequests/{senderId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow create: if request.auth != null
+          && request.auth.uid == senderId
+          && !isBlockedBy(userId, request.auth.uid);
+        allow delete: if request.auth != null
+          && (request.auth.uid == senderId || request.auth.uid == userId);
+        allow update: if false;
+      }
     }
 
     match /usernames/{username} {
