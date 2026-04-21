@@ -118,25 +118,19 @@ struct HomeFeedView: View {
                 }
                 .transition(.opacity)
             } else {
-                HStack(alignment: .bottom, spacing: 10) {
-                    ZStack(alignment: .topLeading) {
-                        if replyText.isEmpty {
-                            Text(replyPlaceholder)
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundStyle(.white)
-                                .shadow(color: .white.opacity(0.95), radius: 0, x: 0, y: 0)
-                                .shadow(color: .white.opacity(0.75), radius: 6, x: 0, y: 0)
-                                .shadow(color: .white.opacity(0.45), radius: 14, x: 0, y: 0)
-                                .allowsHitTesting(false)
-                        }
-                        TextField("", text: $replyText, axis: .vertical)
-                            .lineLimit(1...5)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(.white)
-                            .tint(.white)
-                            .focused($isReplyFocused)
-                            .disabled(replyRecipient == nil)
-                    }
+                HStack(spacing: 10) {
+                    TextField(
+                        "",
+                        text: $replyText,
+                        prompt: Text(replyPlaceholder).foregroundColor(.white.opacity(0.9)),
+                        axis: .vertical
+                    )
+                    .lineLimit(1...5)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.white)
+                    .tint(.white)
+                    .focused($isReplyFocused)
+                    .disabled(replyRecipient == nil)
 
                     if isReplyFocused && replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button { isReplyFocused = false } label: {
@@ -165,7 +159,6 @@ struct HomeFeedView: View {
         }
         .padding(.horizontal, 14)
         .animation(.easeInOut(duration: 0.2), value: showSentConfirmation)
-        .animation(.easeInOut(duration: 0.15), value: replyText.isEmpty)
     }
 
     private func sendReply() {

@@ -43,6 +43,12 @@ class AppState {
     /// Hydrated lazily per visible search result so AddFriendsView can show
     /// "Requested" instead of "Add" on re-entry.
     var outgoingRequestUIDs: Set<String> = []
+    /// Transient success toast for friend-request actions (e.g. "Request sent
+    /// to @ari"). Cleared automatically after a short delay.
+    var friendRequestToast: String? = nil
+    /// Transient error banner if a friend-request write fails (rules denied,
+    /// network issue). Surfaces the failure so users know to retry.
+    var friendRequestError: String? = nil
     /// Firestore listener for incoming friend requests. Retained so we can
     /// detach on logout and reattach on sign-in.
     private var incomingRequestsListener: ListenerRegistration?
@@ -454,19 +460,37 @@ class AppState {
         }
     }
 
-    /// Optimistically send a friend request and remember the outgoing state
-    /// locally so the AddFriendsView chip flips to "Requested" immediately.
+    /// Optimistically send a friend request: flips the chip to "Requested"
+    /// before awaiting the write, shows a success toast, and rolls back with
+    /// an error toast if Firestore rejects the write.
     @discardableResult
     func sendFriendRequest(to user: AppUser) async -> Bool {
         guard let me = currentUser else { return false }
+        outgoingRequestUIDs.insert(user.id)
         let ok = await FirebaseService.shared.sendFriendRequest(
             toUID: user.id,
             username: me.username,
             firstName: me.firstName,
             lastName: me.lastName
         )
-        if ok { outgoingRequestUIDs.insert(user.id) }
+        if ok {
+            let handle = user.username.isEmpty ? user.firstName : "@\(user.username)"
+            friendRequestToast = "Request sent to \(handle)"
+        } else {
+            outgoingRequestUIDs.remove(user.id)
+            friendRequestError = "Couldn't send request. Check your connection and try again."
+        }
+        clearFriendRequestFeedbackSoon()
         return ok
+    }
+
+    private func clearFriendRequestFeedbackSoon() {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2.5))
+            guard let self else { return }
+            self.friendRequestToast = nil
+            self.friendRequestError = nil
+        }
     }
 
     /// Cancel a pending outgoing request.

@@ -37,7 +37,9 @@ struct AddFriendsView: View {
 
     private var filteredContacts: [SimpleContact] {
         guard isActive else { return [] }
-        let q = searchText.lowercased()
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let q = (trimmed.hasPrefix("@") ? String(trimmed.dropFirst()) : trimmed).lowercased()
+        guard !q.isEmpty else { return [] }
         return allContacts.filter {
             $0.firstName.lowercased().contains(q) ||
             $0.lastName.lowercased().contains(q) ||
@@ -185,6 +187,15 @@ struct AddFriendsView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .overlay(alignment: .top) {
+            if let toast = appState.friendRequestToast {
+                friendRequestToastView(message: toast, isError: false)
+            } else if let err = appState.friendRequestError {
+                friendRequestToastView(message: err, isError: true)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: appState.friendRequestToast)
+        .animation(.easeInOut(duration: 0.2), value: appState.friendRequestError)
         .alert("Block \(pendingBlock?.firstName ?? "user")?", isPresented: blockAlertBinding) {
             Button("Cancel", role: .cancel) { pendingBlock = nil }
             Button("Block", role: .destructive) {
@@ -644,6 +655,25 @@ struct AddFriendsView: View {
         .padding(.vertical, 6)
         .background(Color(red: 0.76, green: 0.38, blue: 0.35))
         .clipShape(.capsule)
+    }
+
+    private func friendRequestToastView(message: String, isError: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .font(.system(size: 13, weight: .semibold))
+            Text(message)
+                .font(.system(size: 13, weight: .medium))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            (isError ? Color(red: 0.78, green: 0.22, blue: 0.22) : Color(red: 0.18, green: 0.55, blue: 0.32))
+                .opacity(0.95)
+        )
+        .clipShape(.capsule)
+        .padding(.top, 50)
+        .transition(.move(edge: .top).combined(with: .opacity))
     }
 
     private func displayName(for user: AppUser) -> String {
