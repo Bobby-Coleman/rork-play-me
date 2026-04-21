@@ -10,6 +10,7 @@ struct FriendSelectorView: View {
     @State private var note: String = ""
     @State private var showSentAnimation = false
     @State private var showAddFriends = false
+    @FocusState private var isNoteFocused: Bool
 
     private var rankedFriends: [AppUser] {
         appState.friendsRankedByActivity
@@ -25,7 +26,10 @@ struct FriendSelectorView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.black
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { isNoteFocused = false }
 
             VStack(spacing: 0) {
                 Spacer(minLength: 16)
@@ -34,8 +38,6 @@ struct FriendSelectorView: View {
                 titleBlock
                 Spacer(minLength: 28)
                 sendButton
-                noteField
-                    .padding(.top, 18)
                 Spacer()
                 friendChipRow
                     .padding(.bottom, 16)
@@ -59,6 +61,7 @@ struct FriendSelectorView: View {
             }
         }
         .animation(.spring(duration: 0.3), value: showSentAnimation)
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .sheet(isPresented: $showAddFriends) {
             AddFriendsView(appState: appState)
                 .presentationDetents([.large])
@@ -82,7 +85,38 @@ struct FriendSelectorView: View {
             }
             .clipShape(.rect(cornerRadius: 20))
             .shadow(color: .black.opacity(0.4), radius: 16, x: 0, y: 8)
+            .overlay(alignment: .bottom) {
+                notePill
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
+            }
             .padding(.horizontal, 40)
+    }
+
+    /// Blur-material message bubble overlaid on the album art. The root
+    /// ZStack ignores the keyboard safe area, so nothing in the layout shifts
+    /// when this field focuses — the keyboard simply slides up over the
+    /// chip row and Send button below.
+    private var notePill: some View {
+        TextField(
+            "",
+            text: $note,
+            prompt: Text("Add a message").foregroundColor(.white.opacity(0.55))
+        )
+        .font(.system(size: 14, weight: .semibold))
+        .foregroundStyle(.white)
+        .tint(.white)
+        .multilineTextAlignment(.center)
+        .focused($isNoteFocused)
+        .submitLabel(.done)
+        .onSubmit { isNoteFocused = false }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(.ultraThinMaterial, in: Capsule())
+        .onChange(of: note) { _, newValue in
+            if newValue.count > 150 { note = String(newValue.prefix(150)) }
+        }
     }
 
     private var titleBlock: some View {
@@ -129,23 +163,6 @@ struct FriendSelectorView: View {
         .disabled(!canSend)
         .sensoryFeedback(.success, trigger: showSentAnimation)
         .animation(.easeInOut(duration: 0.15), value: canSend)
-    }
-
-    // MARK: - Note field
-
-    private var noteField: some View {
-        TextField("", text: $note, prompt: Text("Add a message").foregroundColor(.white.opacity(0.35)))
-            .font(.system(size: 14))
-            .foregroundStyle(.white)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(Color.white.opacity(0.08))
-            .clipShape(.capsule)
-            .padding(.horizontal, 40)
-            .onChange(of: note) { _, newValue in
-                if newValue.count > 150 { note = String(newValue.prefix(150)) }
-            }
     }
 
     // MARK: - Friend chip row
