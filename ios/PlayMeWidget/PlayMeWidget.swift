@@ -154,7 +154,7 @@ struct PlayMeWidget: Widget {
         }
         .configurationDisplayName("Play Me")
         .description("Latest song someone sent you, their note, and who sent it.")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .supportedFamilies([.systemSmall])
         .containerBackgroundRemovable(false)
     }
 }

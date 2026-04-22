@@ -341,6 +341,26 @@ class FirebaseService {
         }
     }
 
+    /// Real-time listener for the current user's received shares. Fires on
+    /// every Firestore change so the home feed updates instantly when a new
+    /// song arrives. Caller is responsible for `.remove()` on sign-out.
+    func listenReceivedShares(onChange: @escaping @Sendable ([SongShare]) -> Void) -> ListenerRegistration? {
+        guard let uid = firebaseUID else { return nil }
+        return db.collection("shares")
+            .whereField("recipientId", isEqualTo: uid)
+            .order(by: "timestamp", descending: true)
+            .limit(to: 50)
+            .addSnapshotListener { [weak self] snapshot, error in
+                if let error {
+                    print("FirebaseService: listen received shares failed: \(error.localizedDescription)")
+                    return
+                }
+                guard let self, let docs = snapshot?.documents else { return }
+                let shares = docs.compactMap { self.parseShare(from: $0) }
+                onChange(shares)
+            }
+    }
+
     // MARK: - Friends
 
     /// Remove a bidirectional friendship. Deletes both sides so neither user

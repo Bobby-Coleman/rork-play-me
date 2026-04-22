@@ -33,6 +33,11 @@ class AudioPlayerService {
 
     var isPlaying: Bool = false
     var currentSongId: String?
+    /// Full metadata for the track currently loaded in the player, so the
+    /// global mini player can render artwork/title/artist without having to
+    /// look the song up elsewhere. Cleared alongside `currentSongId` in
+    /// `stop()`.
+    var currentSong: Song?
     var isLoading: Bool = false
     var error: String?
 
@@ -79,6 +84,7 @@ class AudioPlayerService {
         isLoading = true
         error = nil
         currentSongId = song.id
+        currentSong = song
 
         let playerItem = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
@@ -122,8 +128,16 @@ class AudioPlayerService {
         isPlaying = false
         progressModel.reset()
         currentSongId = nil
+        currentSong = nil
         isLoading = false
         error = nil
+    }
+
+    /// Pause playback without tearing down the player. Keeps `currentSong`
+    /// populated so the mini player stays visible with a play button.
+    func pause() {
+        player?.pause()
+        isPlaying = false
     }
 
     private func addTimeObserver() {

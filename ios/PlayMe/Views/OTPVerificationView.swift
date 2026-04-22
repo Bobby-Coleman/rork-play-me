@@ -20,31 +20,35 @@ struct OTPTextField: UIViewRepresentable {
         tf.font = .systemFont(ofSize: 24)
         tf.delegate = context.coordinator
         tf.addTarget(context.coordinator, action: #selector(Coordinator.textChanged(_:)), for: .editingChanged)
+        // Request focus exactly once, when the view is first mounted. Doing this
+        // from `updateUIView` caused focus thrash on SwiftUI re-renders that ate
+        // incoming autofill insertions.
+        DispatchQueue.main.async {
+            guard !tf.becomeFirstResponder() else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                _ = tf.becomeFirstResponder()
+            }
+        }
         return tf
     }
 
     func updateUIView(_ uiView: UITextField, context: Context) {
+        // Never let a transient empty binding wipe an autofilled 6-digit code
+        // that the system just delivered — `textChanged` will publish the new
+        // value on the next runloop.
         if uiView.text != text {
+            let current = uiView.text ?? ""
+            if text.isEmpty && current.count == 6 { return }
             uiView.text = text
-        }
-        // After the phone step, switching views dismisses the keyboard; explicitly
-        // focus the code field on the next run loop once the view is in the hierarchy.
-        if !context.coordinator.didRequestInitialFocus {
-            context.coordinator.didRequestInitialFocus = true
-            DispatchQueue.main.async {
-                guard !uiView.becomeFirstResponder() else { return }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    _ = uiView.becomeFirstResponder()
-                }
-            }
         }
     }
 
     class Coordinator: NSObject, UITextFieldDelegate {
         @Binding var text: String
         let onSixDigits: () -> Void
-        /// Avoid repeated `becomeFirstResponder` calls from SwiftUI update cycles.
-        var didRequestInitialFocus = false
+        /// Guards against `textChanged` firing onSixDigits multiple times for
+        /// the same autofilled code (e.g. if SwiftUI re-invokes the binding).
+        private var hasCompleted = false
 
         init(text: Binding<String>, onSixDigits: @escaping () -> Void) {
             _text = text
@@ -65,7 +69,10 @@ struct OTPTextField: UIViewRepresentable {
                 textField.text = filtered
             }
             text = filtered
-            if filtered.count == 6 {
+            if filtered.count < 6 {
+                hasCompleted = false
+            } else if !hasCompleted {
+                hasCompleted = true
                 DispatchQueue.main.async { self.onSixDigits() }
             }
         }
@@ -77,6 +84,7 @@ struct OTPTextField: UIViewRepresentable {
 struct OTPVerificationView: View {
     let appState: AppState
     let onVerified: () -> Void
+    var onBack: (() -> Void)? = nil
 
     @State private var codeText: String = ""
     @State private var isVerifying = false
@@ -89,6 +97,25 @@ struct OTPVerificationView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
+
+            if let onBack {
+                VStack {
+                    HStack {
+                        Button(action: onBack) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 40, height: 40)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                    .padding(.leading, 12)
+                    .padding(.top, 8)
+                    Spacer()
+                }
+            }
 
             VStack(alignment: .leading, spacing: 0) {
                 Spacer()

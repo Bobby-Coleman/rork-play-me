@@ -52,6 +52,9 @@ class AppState {
     /// Firestore listener for incoming friend requests. Retained so we can
     /// detach on logout and reattach on sign-in.
     private var incomingRequestsListener: ListenerRegistration?
+    /// Firestore listener for the current user's received shares. Drives
+    /// real-time home-feed updates; detached on logout.
+    private var receivedSharesListener: ListenerRegistration?
     /// UIDs the current user has blocked. Synced from Firestore on foreground;
     /// reads + list views filter against this set client-side so blocked users
     /// disappear from feeds, search results, and conversation rows.
@@ -285,6 +288,7 @@ class AppState {
 
         await refreshFriendRequests()
         startIncomingRequestsListener()
+        startReceivedSharesListener()
 
         notificationsEnabled = await firebase.loadNotificationsEnabled()
 
@@ -456,6 +460,20 @@ class AppState {
             Task { @MainActor in
                 guard let self else { return }
                 self.incomingRequests = requests.filter { !self.blockedUserIds.contains($0.id) }
+            }
+        }
+    }
+
+    /// Attach (or reattach) the snapshot listener that keeps
+    /// `receivedShares` in sync with Firestore so the home feed updates in
+    /// real time when a friend sends a new song. Idempotent.
+    private func startReceivedSharesListener() {
+        receivedSharesListener?.remove()
+        receivedSharesListener = FirebaseService.shared.listenReceivedShares { [weak self] shares in
+            Task { @MainActor in
+                guard let self else { return }
+                self.receivedShares = shares.filter { !self.blockedUserIds.contains($0.sender.id) }
+                self.syncWidgetWithLatestReceivedShare()
             }
         }
     }
@@ -682,6 +700,8 @@ class AppState {
     func logout() {
         incomingRequestsListener?.remove()
         incomingRequestsListener = nil
+        receivedSharesListener?.remove()
+        receivedSharesListener = nil
         currentUser = nil
         friends = []
         incomingRequests = []

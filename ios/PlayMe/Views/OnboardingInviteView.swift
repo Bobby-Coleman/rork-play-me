@@ -1,5 +1,6 @@
 import SwiftUI
 import MessageUI
+import Contacts
 import FirebaseAuth
 
 struct OnboardingInviteView: View {
@@ -8,13 +9,13 @@ struct OnboardingInviteView: View {
     let onContinue: () -> Void
 
     @State private var allContacts: [SimpleContact] = []
-    @State private var contactsGranted = false
-    @State private var contactsDenied = false
+    @State private var contactsStatus: CNAuthorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
     @State private var visibleContactCount = 20
-    @State private var messageRecipient: MessageRecipient?
+    @State private var messageRecipient: OutgoingInvite?
     @State private var showShareSheet = false
     @State private var searchText = ""
     @State private var inviteLink: String = ""
+    @State private var gateErrorVisible = false
 
     @FocusState private var searchFocused: Bool
 
@@ -22,14 +23,20 @@ struct OnboardingInviteView: View {
         let link = inviteLink.isEmpty
             ? DeepLinkService.publicTestFlightInviteURL
             : inviteLink
-        return "I found this app where we can send songs to each other's home screen you should add me \(link)"
+        return "wanna do this? \(link)"
     }
 
     private var isActive: Bool { !searchText.isEmpty }
 
+    private var hasMinimumInvites: Bool {
+        !appState.invitedContacts.isEmpty
+    }
+
     private var filteredContacts: [SimpleContact] {
         guard isActive else { return [] }
-        let q = searchText.lowercased()
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let q = (trimmed.hasPrefix("@") ? String(trimmed.dropFirst()) : trimmed).lowercased()
+        guard !q.isEmpty else { return [] }
         return allContacts.filter {
             $0.firstName.lowercased().contains(q) ||
             $0.lastName.lowercased().contains(q) ||
@@ -49,171 +56,19 @@ struct OnboardingInviteView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
-                    Text("Find your friends!")
-                        .font(.system(size: 26, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 24)
-                        .padding(.bottom, 4)
-
-                    Text("Invite friends so you can send\nsongs to each other")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.white.opacity(0.5))
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                        .padding(.bottom, 20)
-
-                    // MARK: - Search bar
-                    HStack(spacing: 10) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.white.opacity(0.4))
-                        TextField("Search your contacts", text: $searchText)
-                            .foregroundStyle(.white)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .submitLabel(.search)
-                            .focused($searchFocused)
-
-                        if isActive {
-                            Button("Cancel") {
-                                searchText = ""
-                                searchFocused = false
-                            }
-                            .font(.system(size: 15))
-                            .foregroundStyle(.white.opacity(0.6))
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(.rect(cornerRadius: 10))
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 12)
-
-                    // MARK: - Share your PlayMe link
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("Share your Play Me link")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.5))
-                            .textCase(.uppercase)
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 8)
-
-                        shareRow(icon: "message.fill", color: .green, title: "Messages") {
-                            messageRecipient = MessageRecipient(numbers: [])
-                        }
-
-                        Divider().background(Color.white.opacity(0.06)).padding(.leading, 62)
-
-                        shareRow(icon: "square.and.arrow.up", color: .gray, title: "Other apps") {
-                            showShareSheet = true
-                        }
-                    }
-                    .padding(.bottom, 16)
-
-                    // MARK: - Contacts (single scroll column — no nested ScrollView)
-                    if contactsGranted {
-                        Text("Your contacts")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.5))
-                            .textCase(.uppercase)
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 8)
-
-                        Group {
-                            if isActive {
-                                ForEach(filteredContacts) { contact in
-                                    contactRow(contact)
-                                }
-                                if filteredContacts.isEmpty {
-                                    Text("No matching contacts")
-                                        .font(.system(size: 14))
-                                        .foregroundStyle(.white.opacity(0.3))
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.top, 12)
-                                }
-                            } else {
-                                ForEach(paginatedContacts) { contact in
-                                    contactRow(contact)
-                                }
-
-                                if hasMoreContacts {
-                                    Button {
-                                        visibleContactCount = min(visibleContactCount + 20, allContacts.count)
-                                    } label: {
-                                        Text("Show more")
-                                            .font(.system(size: 14, weight: .semibold))
-                                            .foregroundStyle(.white.opacity(0.6))
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 12)
-                                            .background(Color.white.opacity(0.06))
-                                            .clipShape(.rect(cornerRadius: 10))
-                                    }
-                                    .padding(.top, 8)
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                    } else if contactsDenied {
-                        VStack(spacing: 12) {
-                            Image(systemName: "person.crop.circle.badge.xmark")
-                                .font(.system(size: 36))
-                                .foregroundStyle(.white.opacity(0.3))
-                            Text("Contacts access was denied.\nYou can enable it in Settings.")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.white.opacity(0.5))
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 40)
-                        .padding(.horizontal, 20)
-                    } else {
-                        ProgressView()
-                            .tint(.white.opacity(0.6))
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 48)
-                    }
-
-                    Color.clear.frame(height: 24)
-                }
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 8) {
-                    Button(action: onContinue) {
-                        Text("Continue")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(.black)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 50)
-                            .background(.white)
-                            .clipShape(.rect(cornerRadius: 25))
-                    }
-
-                    Button(action: onContinue) {
-                        Text("testing skip")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.3))
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 12)
-                .frame(maxWidth: .infinity)
-                .background(Color.black.opacity(0.94))
+            if contactsStatus == .notDetermined {
+                permissionGate
+            } else {
+                mainContent
             }
         }
         .toolbar {
             ToolbarItem(placement: .keyboard) {
                 HStack {
                     Spacer(minLength: 0)
-                    Button("Done") {
-                        searchFocused = false
-                    }
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
+                    Button("Done") { searchFocused = false }
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
                 }
             }
         }
@@ -221,20 +76,21 @@ struct OnboardingInviteView: View {
             if let uid = Auth.auth().currentUser?.uid {
                 inviteLink = await DeepLinkService.shared.createInviteLink(userId: uid, username: username) ?? ""
             }
-
-            let granted = await ContactsService.shared.requestAccess()
-            contactsGranted = granted
-            contactsDenied = !granted
-            if granted {
+            // If the user has already granted contacts previously (e.g. via
+            // AddFriendsView), skip the pre-permission gate entirely.
+            if CNContactStore.authorizationStatus(for: .contacts) == .authorized {
                 allContacts = ContactsService.shared.fetchContacts()
+                contactsStatus = .authorized
             }
         }
-        .sheet(item: $messageRecipient) { recipient in
+        .sheet(item: $messageRecipient) { invite in
             if MessageComposeView.canSendText {
                 MessageComposeView(
-                    recipients: recipient.numbers,
+                    recipients: [invite.contact.phoneNumber],
                     body: inviteBody
-                ) { messageRecipient = nil }
+                ) { result in
+                    handleComposeResult(result, for: invite.contact)
+                }
                 .ignoresSafeArea()
             }
         }
@@ -243,34 +99,235 @@ struct OnboardingInviteView: View {
         }
     }
 
-    // MARK: - Rows
+    // MARK: - Pre-permission gate
 
-    private func shareRow(icon: String, color: Color, title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 16))
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(color)
-                    .clipShape(.rect(cornerRadius: 8))
+    private var permissionGate: some View {
+        VStack(spacing: 16) {
+            Spacer()
 
-                Text(title)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white)
+            Image(systemName: "person.2.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(.white.opacity(0.85))
 
-                Spacer()
+            Text("Find your friends")
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(.white)
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.3))
+            Text("Play Me uses your contacts to find friends.")
+                .font(.system(size: 15))
+                .foregroundStyle(.white.opacity(0.55))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+
+            Spacer()
+
+            Button {
+                Task { await requestContactsAccess() }
+            } label: {
+                Text("Allow Contacts")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(.white)
+                    .clipShape(.rect(cornerRadius: 25))
             }
             .padding(.horizontal, 20)
-            .padding(.vertical, 10)
+            .padding(.bottom, 24)
+        }
+    }
+
+    private func requestContactsAccess() async {
+        let granted = await ContactsService.shared.requestAccess()
+        if granted {
+            allContacts = ContactsService.shared.fetchContacts()
+            contactsStatus = .authorized
+        } else {
+            contactsStatus = .denied
+        }
+    }
+
+    // MARK: - Main content (contacts + invite flow)
+
+    private var mainContent: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                Text("Invite friends to Play Me")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 24)
+                    .padding(.bottom, 6)
+
+                Text("You must have at least one friend added to use Play Me.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 20)
+
+                searchBar
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 14)
+
+                shareLinkRow
+                    .padding(.bottom, 16)
+
+                contactsSection
+
+                Color.clear.frame(height: 32)
+            }
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            bottomBar
+        }
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.white.opacity(0.4))
+            TextField("Search your contacts", text: $searchText)
+                .foregroundStyle(.white)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .submitLabel(.search)
+                .focused($searchFocused)
+
+            if isActive {
+                Button("Cancel") {
+                    searchText = ""
+                    searchFocused = false
+                }
+                .font(.system(size: 15))
+                .foregroundStyle(.white.opacity(0.6))
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.08))
+        .clipShape(.rect(cornerRadius: 10))
+    }
+
+    private var shareLinkRow: some View {
+        Button {
+            showShareSheet = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.8))
+                Text("Share your Play Me link")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
+
+    @ViewBuilder
+    private var contactsSection: some View {
+        if contactsStatus == .authorized {
+            Group {
+                if isActive {
+                    ForEach(filteredContacts) { contact in
+                        contactRow(contact)
+                    }
+                    if filteredContacts.isEmpty {
+                        Text("No matching contacts")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white.opacity(0.3))
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 12)
+                    }
+                } else {
+                    ForEach(paginatedContacts) { contact in
+                        contactRow(contact)
+                    }
+                    if hasMoreContacts {
+                        Button {
+                            visibleContactCount = min(visibleContactCount + 20, allContacts.count)
+                        } label: {
+                            Text("Show more")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.6))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color.white.opacity(0.06))
+                                .clipShape(.rect(cornerRadius: 10))
+                        }
+                        .padding(.top, 8)
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+        } else {
+            VStack(spacing: 10) {
+                Text("Contacts access is off. Enable it in Settings to invite friends, or share your link above.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 24)
+            .padding(.horizontal, 32)
+        }
+    }
+
+    private var bottomBar: some View {
+        VStack(spacing: 8) {
+            if gateErrorVisible {
+                Text("You need at least one friend to use Play Me")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color(red: 0.78, green: 0.22, blue: 0.22).opacity(0.95))
+                    .clipShape(.capsule)
+                    .transition(.opacity)
+            }
+
+            Button {
+                if hasMinimumInvites {
+                    onContinue()
+                } else {
+                    withAnimation(.easeInOut(duration: 0.15)) { gateErrorVisible = true }
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        withAnimation(.easeInOut(duration: 0.2)) { gateErrorVisible = false }
+                    }
+                }
+            } label: {
+                Text("Continue")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(.white.opacity(hasMinimumInvites ? 1.0 : 0.4))
+                    .clipShape(.rect(cornerRadius: 25))
+            }
+            .buttonStyle(.plain)
+
+            Button(action: onContinue) {
+                Text("testing skip")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity)
+        .background(Color.black.opacity(0.94))
+    }
+
+    // MARK: - Rows
 
     private func contactRow(_ contact: SimpleContact) -> some View {
         HStack(spacing: 14) {
@@ -281,18 +338,15 @@ struct OnboardingInviteView: View {
                 .background(Color.white.opacity(0.12))
                 .clipShape(Circle())
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(contact.fullName)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-            }
+            Text(contact.fullName)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white)
+                .lineLimit(1)
 
             Spacer()
 
             Button {
-                messageRecipient = MessageRecipient(numbers: [contact.phoneNumber])
-                recordInvitedContact(contact)
+                messageRecipient = OutgoingInvite(contact: contact)
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: alreadyInvited(contact) ? "checkmark" : "plus")
@@ -310,6 +364,7 @@ struct OnboardingInviteView: View {
                 )
                 .clipShape(.capsule)
             }
+            .buttonStyle(.plain)
         }
         .padding(.vertical, 8)
     }
@@ -318,16 +373,20 @@ struct OnboardingInviteView: View {
         appState.invitedContacts.contains(where: { $0.id == contact.id })
     }
 
-    private func recordInvitedContact(_ contact: SimpleContact) {
+    private func handleComposeResult(_ result: MessageComposeResult, for contact: SimpleContact) {
+        messageRecipient = nil
+        // Only count an invite if the user actually sent the SMS. `.cancelled`
+        // and `.failed` must not satisfy the "at least one friend" gate.
+        guard result == .sent else { return }
         if !alreadyInvited(contact) {
             appState.invitedContacts.append(contact)
         }
     }
 }
 
-private struct MessageRecipient: Identifiable {
+private struct OutgoingInvite: Identifiable {
     let id = UUID()
-    let numbers: [String]
+    let contact: SimpleContact
 }
 
 // MARK: - Share Sheet (UIActivityViewController)

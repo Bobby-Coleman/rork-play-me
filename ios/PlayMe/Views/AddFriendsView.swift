@@ -30,7 +30,7 @@ struct AddFriendsView: View {
         let link = inviteLink.isEmpty
             ? DeepLinkService.publicTestFlightInviteURL
             : inviteLink
-        return "I found this app where we can send songs to each other's home screen you should add me \(link)"
+        return "wanna do this? \(link)"
     }
 
     private var isActive: Bool { !searchText.isEmpty }
@@ -156,7 +156,7 @@ struct AddFriendsView: View {
                 MessageComposeView(
                     recipients: recipient.numbers,
                     body: inviteBody
-                ) { messageRecipient = nil }
+                ) { _ in messageRecipient = nil }
                 .ignoresSafeArea()
             }
         }

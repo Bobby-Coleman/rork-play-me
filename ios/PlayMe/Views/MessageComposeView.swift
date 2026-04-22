@@ -4,7 +4,7 @@ import MessageUI
 struct MessageComposeView: UIViewControllerRepresentable {
     let recipients: [String]
     let body: String
-    var onFinish: () -> Void = {}
+    var onFinish: (MessageComposeResult) -> Void = { _ in }
 
     static var canSendText: Bool {
         MFMessageComposeViewController.canSendText()
@@ -23,14 +23,14 @@ struct MessageComposeView: UIViewControllerRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(onFinish: onFinish) }
 
     final class Coordinator: NSObject, MFMessageComposeViewControllerDelegate {
-        let onFinish: () -> Void
-        init(onFinish: @escaping () -> Void) { self.onFinish = onFinish }
+        let onFinish: (MessageComposeResult) -> Void
+        init(onFinish: @escaping (MessageComposeResult) -> Void) { self.onFinish = onFinish }
 
         func messageComposeViewController(
             _ controller: MFMessageComposeViewController,
             didFinishWith result: MessageComposeResult
         ) {
-            controller.dismiss(animated: true) { [onFinish] in onFinish() }
+            controller.dismiss(animated: true) { [onFinish] in onFinish(result) }
         }
     }
 }

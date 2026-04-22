@@ -84,6 +84,7 @@ struct HomeFeedView: View {
             .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.immediately)
             .ignoresSafeArea(.keyboard, edges: .bottom)
+            .refreshable { await appState.refreshShares() }
             .onChange(of: visibleShareId) { oldValue, newValue in
                 guard let newValue, let oldValue, newValue != oldValue else { return }
                 scrollHaptic.prepare()

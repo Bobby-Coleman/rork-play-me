@@ -35,6 +35,8 @@ struct ContentView: View {
     @State private var showSendSheet = false
     @State private var showAddFriends = false
     @State private var selectedTab: Int = 0
+    @State private var miniPlayerSong: Song?
+    @Environment(\.scenePhase) private var scenePhase
     /// True only when this app session started already onboarded — used so returning users
     /// (who installed before this flow existed) never see the first-launch permission prompt
     /// from us; their status is recorded as "already asked" silently.
@@ -76,6 +78,10 @@ struct ContentView: View {
                 .preferredColorScheme(.dark)
             }
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active, appState.isOnboarded else { return }
+            Task { await appState.refreshShares() }
+        }
     }
 
     /// First-launch-after-onboarding: ask iOS directly. No custom explainer.
@@ -90,6 +96,42 @@ struct ContentView: View {
         let allowed = status == .authorized || status == .provisional || status == .ephemeral
         await appState.setNotificationsEnabled(allowed)
         defaults.set(true, forKey: hasRequestedNotificationPermissionKey)
+    }
+
+    /// Tab indices that participate in horizontal swipe navigation. Tab `1`
+    /// is the search affordance that only opens `SendSongSheet` — skipping it
+    /// avoids accidental sheet presentation when swiping from Home.
+    private static let swipeableTabs: [Int] = [0, 2, 3]
+
+    @ViewBuilder
+    private var miniPlayerOverlay: some View {
+        // Hide on the home feed (tab 0) so the reply pill and bottom chrome stay
+        // unobstructed; show on Messages, Profile, etc.
+        if selectedTab != 0, let song = AudioPlayerService.shared.currentSong {
+            MiniPlayerBar(song: song) {
+                miniPlayerSong = song
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 54)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    private func navigateTabBySwipe(translationWidth: CGFloat) {
+        let horizontal = translationWidth
+        let ordered = Self.swipeableTabs
+        guard let idx = ordered.firstIndex(of: selectedTab) else { return }
+        if horizontal < -60 {
+            guard idx + 1 < ordered.count else { return }
+            withAnimation(.easeInOut(duration: 0.28)) {
+                selectedTab = ordered[idx + 1]
+            }
+        } else if horizontal > 60 {
+            guard idx > 0 else { return }
+            withAnimation(.easeInOut(duration: 0.28)) {
+                selectedTab = ordered[idx - 1]
+            }
+        }
     }
 
     private var mainTabView: some View {
@@ -121,6 +163,15 @@ struct ContentView: View {
         }
         .tint(.white)
         .preferredColorScheme(.dark)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 50)
+                .onEnded { value in
+                    let h = value.translation.width
+                    let v = value.translation.height
+                    guard abs(h) > max(72, abs(v) * 1.25) else { return }
+                    navigateTabBySwipe(translationWidth: h)
+                }
+        )
         .onChange(of: selectedTab) { _, newValue in
             if newValue == 1 {
                 showSendSheet = true
@@ -141,6 +192,16 @@ struct ContentView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(item: $miniPlayerSong) { song in
+            SongDetailSheet(song: song, appState: appState)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .overlay(alignment: .bottom) {
+            miniPlayerOverlay
+        }
+        .animation(.easeInOut(duration: 0.22), value: selectedTab)
+        .animation(.easeInOut(duration: 0.22), value: AudioPlayerService.shared.currentSong?.id)
         .onReceive(NotificationCenter.default.publisher(for: .didReceiveDeepLink)) { notification in
             guard let data = notification.userInfo as? [String: Any],
                   let referrerId = data["referringUserId"] as? String,

@@ -23,19 +23,32 @@ struct OnboardingView: View {
                     withAnimation(.easeInOut(duration: 0.4)) { step = 2 }
                 }
             case 2:
-                OTPVerificationView(appState: appState) {
-                    Task {
-                        if await appState.checkForExistingUser() {
-                            onComplete()
-                        } else {
-                            withAnimation(.easeInOut(duration: 0.4)) { step = 3 }
+                OTPVerificationView(
+                    appState: appState,
+                    onVerified: {
+                        Task {
+                            if await appState.checkForExistingUser() {
+                                onComplete()
+                            } else {
+                                withAnimation(.easeInOut(duration: 0.4)) { step = 3 }
+                            }
                         }
+                    },
+                    onBack: {
+                        withAnimation(.easeInOut(duration: 0.4)) { step = 1 }
                     }
-                }
+                )
             case 3:
-                NameEntryView(firstName: $firstName, lastName: $lastName) {
-                    withAnimation(.easeInOut(duration: 0.4)) { step = 4 }
-                }
+                NameEntryView(
+                    firstName: $firstName,
+                    lastName: $lastName,
+                    onComplete: {
+                        withAnimation(.easeInOut(duration: 0.4)) { step = 4 }
+                    },
+                    onBack: {
+                        withAnimation(.easeInOut(duration: 0.4)) { step = 2 }
+                    }
+                )
             case 4:
                 UsernamePickerView(username: $username, appState: appState) {
                     Task {

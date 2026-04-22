@@ -4,6 +4,7 @@ struct NameEntryView: View {
     @Binding var firstName: String
     @Binding var lastName: String
     let onComplete: () -> Void
+    var onBack: (() -> Void)? = nil
 
     @FocusState private var focusedField: Field?
 
@@ -16,6 +17,25 @@ struct NameEntryView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
+
+            if let onBack {
+                VStack {
+                    HStack {
+                        Button(action: onBack) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 40, height: 40)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                    .padding(.leading, 12)
+                    .padding(.top, 8)
+                    Spacer()
+                }
+            }
 
             BlobShape()
                 .fill(
