@@ -23,17 +23,24 @@ import Nuke
 ///     and passed down as a constant.
 struct AlbumArtGridBackgroundView: View {
     let items: [GridSong]
-    /// Square side length the grid renders into. Caller is responsible for
+    /// Horizontal extent the grid renders into. Caller is responsible for
     /// sizing this to match the adjacent song-card styling (e.g.
-    /// `UIScreen.main.bounds.width - 48`).
+    /// `UIScreen.main.bounds.width - 48`). When `height` is `nil` this is
+    /// also used as the vertical extent, preserving the original
+    /// square-only contract.
     let side: CGFloat
+    /// Optional vertical extent. Pass a value different from `side` to
+    /// render a non-square container (used by the onboarding screen, which
+    /// wants a taller rectangle so it doesn't read as identical to the
+    /// Discovery hero square). `nil` keeps the view square.
+    var height: CGFloat? = nil
 
     /// Points per second the grid drifts upward. Slow enough to feel
     /// ambient, fast enough to be visible inside a second or two.
     var scrollSpeed: CGFloat = 14
     /// Spacing between columns and between tiles within a column.
     var spacing: CGFloat = 8
-    /// Corner radius of the outer square mask.
+    /// Corner radius of the outer rounded-rect mask.
     var outerCornerRadius: CGFloat = 20
     /// Corner radius of each individual tile.
     var tileCornerRadius: CGFloat = 10
@@ -45,8 +52,12 @@ struct AlbumArtGridBackgroundView: View {
 
     private var columnCount: Int { 3 }
 
-    /// Square tile side derived from the container size. Fixed for the life
-    /// of the view so no cell needs a GeometryReader.
+    /// Concrete height the grid renders into. Falls back to `side` so the
+    /// square contract is preserved for existing callers.
+    private var renderHeight: CGFloat { height ?? side }
+
+    /// Square tile side derived from the container width. Fixed for the
+    /// life of the view so no cell needs a GeometryReader.
     private var tileSize: CGFloat {
         max(24, (side - spacing * CGFloat(columnCount - 1)) / CGFloat(columnCount))
     }
@@ -54,10 +65,11 @@ struct AlbumArtGridBackgroundView: View {
     private var rowHeight: CGFloat { tileSize + spacing }
 
     /// Number of virtual slots per column. Must be at least enough to cover
-    /// `side + 1 row` of viewport so the wrap point is never visible. A few
-    /// extra rows above/below give the image pipeline time to decode.
+    /// `renderHeight + 1 row` of viewport so the wrap point is never
+    /// visible. A few extra rows above/below give the image pipeline time
+    /// to decode.
     private var slotsPerColumn: Int {
-        max(6, Int(ceil(side / rowHeight)) + 4)
+        max(6, Int(ceil(renderHeight / rowHeight)) + 4)
     }
 
     private var displayItems: [GridSong] {
@@ -89,7 +101,7 @@ struct AlbumArtGridBackgroundView: View {
             Color.black.opacity(dimOpacity)
                 .allowsHitTesting(false)
         }
-        .frame(width: side, height: side)
+        .frame(width: side, height: renderHeight)
         .clipShape(.rect(cornerRadius: outerCornerRadius))
         .allowsHitTesting(false)
         .onAppear { startPrefetch() }
@@ -136,7 +148,7 @@ struct AlbumArtGridBackgroundView: View {
                 .offset(y: y)
             }
         }
-        .frame(width: tile, height: side, alignment: .top)
+        .frame(width: tile, height: renderHeight, alignment: .top)
     }
 
     // MARK: - Prefetching

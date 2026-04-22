@@ -106,8 +106,18 @@ struct DiscoveryView: View {
                     onHeroVisibilityChange?(newValue == Self.heroId)
                 }
                 .onChange(of: appState.discoveryScrollToTopCounter) { _, _ in
+                    // Clear reply focus/text synchronously, then flip
+                    // `visiblePageId` inside `withAnimation`. The
+                    // `.scrollPosition(id:)` binding turns that into the
+                    // scroll animation, and because `isOnHero` goes true
+                    // *at the same instant*, the reply bar's gate drops
+                    // on frame 1 of the animation instead of lingering
+                    // until the scroll settles — which is what made the
+                    // pill appear to ride up with the scroll-to-hero.
+                    isReplyFocused = false
+                    replyText = ""
                     withAnimation(.easeInOut(duration: 0.35)) {
-                        proxy.scrollTo(Self.heroId, anchor: .top)
+                        visiblePageId = Self.heroId
                     }
                 }
             }
@@ -123,7 +133,10 @@ struct DiscoveryView: View {
             if !isOnHero && activeShare != nil {
                 replyBar
                     .padding(.bottom, restingBottom)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    // Plain opacity (no translation) so the pill can't
+                    // visually "travel" during a scroll-to-hero — it
+                    // just fades out in place.
+                    .transition(.opacity)
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -131,11 +144,17 @@ struct DiscoveryView: View {
             // both the hero and the history feed. Keeping it always
             // mounted removes the layout toggle on page change, which
             // was the last contributor to the scroll "bounce" feel.
+            //
+            // The strip has a solid black backdrop so scrolled content
+            // (notably the hero's history chevron) can't ghost through
+            // the translucent pill material during a hero → card swipe.
             HStack {
                 Spacer(minLength: 0)
                 addFriendsPill
                 Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity)
+            .background(Color.black)
         }
         .animation(.easeOut(duration: 0.22), value: isReplyFocused)
         .task {
@@ -167,11 +186,37 @@ struct DiscoveryView: View {
     /// ends up visually centered — addressing the "positioned too high"
     /// feedback — while the history hint stays anchored.
     private var hero: some View {
-        let screenWidth = UIScreen.main.bounds.width
-        let gridSide = max(160, screenWidth - 48)
+        // All spacing is a fraction of the real screen height so the hero
+        // lands in the same visual position on every device (SE through
+        // Pro Max). `UIScreen.main.bounds` is deliberate: it's stable and
+        // doesn't re-publish mid-paging the way a `GeometryReader` would.
+        //
+        // The grid side mirrors `SongCardView.artSize` — which is
+        // `min(screenW - 48, max(220, screenH - 180))` — so when the user
+        // swipes from hero to the first song card the artwork keeps
+        // exactly the same on-screen size. On every modern phone the
+        // width formula wins, so the cap only matters on SE-class
+        // devices; `screenH * 0.42` leaves just enough headroom below
+        // the grid for the CTA + history chevron on those shorter
+        // viewports.
+        let screenW = UIScreen.main.bounds.width
+        let screenH = UIScreen.main.bounds.height
+        let gridSide = min(screenW - 48, screenH * 0.42)
+        // Lowered topSpace offsets the extra height the larger grid
+        // eats; the grid's BOTTOM edge ends up within a few points of
+        // where it sat with the previous (smaller) layout, preserving
+        // the "positioning is good" feedback while the bigger square is
+        // still visually anchored in the upper half.
+        let topSpace = max(60, screenH * 0.09)
+        let gridToCTAGap = max(18, screenH * 0.028)
+        let ctaToHistoryMin = max(18, screenH * 0.028)
+        // Raised from `max(12, screenH * 0.022)` so the history chevron
+        // clears the translucent tab bar on every device instead of
+        // sitting right under its edge.
+        let historyBottom = max(28, screenH * 0.04)
 
         return VStack(spacing: 0) {
-            Spacer(minLength: 20)
+            Spacer().frame(minHeight: topSpace)
 
             AlbumArtGridBackgroundView(
                 items: gridVM.dedupedDisplayItems,
@@ -179,14 +224,23 @@ struct DiscoveryView: View {
             )
             .frame(width: gridSide, height: gridSide)
 
-            Spacer().frame(minHeight: 32, idealHeight: 40, maxHeight: 56)
+            Spacer().frame(minHeight: gridToCTAGap, maxHeight: gridToCTAGap * 2)
 
             DiscoverySearchCTA(action: onSearchTap)
 
-            Spacer(minLength: 20)
+            Spacer(minLength: ctaToHistoryMin)
 
             DiscoveryHistoryHint()
-                .padding(.bottom, 28)
+                .padding(.bottom, historyBottom)
+                // Fade out within the first ~25% of a hero → card swipe
+                // so the chevron never crosses the friends pill. The
+                // scroll transition phase value is 0 when the hint is
+                // centered and approaches ±1 as it exits the viewport;
+                // the ×4 multiplier collapses opacity to zero well
+                // before the hint can reach the top bar.
+                .scrollTransition(axis: .vertical) { content, phase in
+                    content.opacity(max(0, 1 - abs(phase.value) * 4))
+                }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)

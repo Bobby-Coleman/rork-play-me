@@ -809,20 +809,20 @@
 				minimumVersion = 1.0.8;
 			};
 		};
-		XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 11.0.0;
-			};
-		};
 		NK01A5E3C4D5B6A7F8E9A001 /* XCRemoteSwiftPackageReference "Nuke" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/kean/Nuke.git";
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 12.8.0;
+			};
+		};
+		XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.0.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -838,16 +838,6 @@
 			package = 84B7E02F2F91B95F00B59DD6 /* XCRemoteSwiftPackageReference "chottulink-ios-sdk" */;
 			productName = ChottuLinkSDK;
 		};
-		XXFB01A2E3C4D5B6A7F8E9XX /* FirebaseAuth */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseAuth;
-		};
-		XXFB01A4E3C4D5B6A7F8E9XX /* FirebaseFirestore */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
-			productName = FirebaseFirestore;
-		};
 		NK01A5E3C4D5B6A7F8E9A002 /* Nuke */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = NK01A5E3C4D5B6A7F8E9A001 /* XCRemoteSwiftPackageReference "Nuke" */;
@@ -857,6 +847,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = NK01A5E3C4D5B6A7F8E9A001 /* XCRemoteSwiftPackageReference "Nuke" */;
 			productName = NukeUI;
+		};
+		XXFB01A2E3C4D5B6A7F8E9XX /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		XXFB01A4E3C4D5B6A7F8E9XX /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
