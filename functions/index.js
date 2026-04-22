@@ -67,14 +67,45 @@ async function isBlockedBy(recipientUid, senderUid) {
   return snap.exists;
 }
 
-async function sendPush(token, title, body, extraData = {}) {
+// Single-recipient push. Fetches the FCM token for `uid` internally so
+// callers stay uid-centric. Every push gets:
+//   - apns `apns-collapse-id` header (per-type, e.g. `msg-${convId}`),
+//     which lets APNs replace an earlier banner instead of stacking a
+//     duplicate on top of it.
+//   - apns `thread-id`, which groups notifications together in iOS's
+//     notification center AND is what the client uses to clear delivered
+//     notifications surgically when the user opens the relevant screen.
+//   - A `data.type` key used for deep-link routing on the client.
+// We deliberately DO NOT set `aps.badge` — the client owns the badge via
+// `UNUserNotificationCenter.setBadgeCount`, so omitting it here leaves
+// the authoritative client value untouched.
+async function sendPush(uid, opts = {}) {
+  if (!uid) return;
+  const { title, body, data = {}, collapseId, threadId } = opts;
+  const token = await getFCMToken(uid);
   if (!token) return;
+
+  const stringData = {};
+  for (const [k, v] of Object.entries(data || {})) {
+    if (v === undefined || v === null) continue;
+    stringData[k] = typeof v === "string" ? v : String(v);
+  }
+
+  const aps = { sound: "default" };
+  if (threadId) aps["thread-id"] = threadId;
+
+  const apnsHeaders = {};
+  if (collapseId) apnsHeaders["apns-collapse-id"] = collapseId;
+
   try {
     await admin.messaging().send({
       token,
       notification: { title, body },
-      data: extraData,
-      apns: { payload: { aps: { sound: "default", badge: 1 } } },
+      data: stringData,
+      apns: {
+        headers: apnsHeaders,
+        payload: { aps },
+      },
     });
   } catch (err) {
     if (
@@ -109,10 +140,16 @@ exports.onNewShare = onDocumentCreated("shares/{shareId}", async (event) => {
   const senderName = data.sender?.firstName || "Someone";
   const songTitle = data.song?.title || "a song";
 
-  const token = await getFCMToken(recipientId);
-  await sendPush(token, "New Song 🎵", `${senderName} sent you "${songTitle}"`, {
-    type: "new_share",
-    shareId: event.params.shareId,
+  await sendPush(recipientId, {
+    title: "New Song 🎵",
+    body: `${senderName} sent you "${songTitle}"`,
+    data: {
+      type: "new_share",
+      id: event.params.shareId,
+      shareId: event.params.shareId,
+    },
+    collapseId: `share-${event.params.shareId}`,
+    threadId: "shares",
   });
 });
 
@@ -150,10 +187,16 @@ exports.onNewMessage = onDocumentCreated(
         continue;
       }
       if (!(await notificationsEnabledFor(uid))) continue;
-      const token = await getFCMToken(uid);
-      await sendPush(token, senderName, text || "Sent a message", {
-        type: "new_message",
-        conversationId: convId,
+      await sendPush(uid, {
+        title: senderName,
+        body: text || "Sent a message",
+        data: {
+          type: "new_message",
+          id: convId,
+          conversationId: convId,
+        },
+        collapseId: `msg-${convId}`,
+        threadId: `conv-${convId}`,
       });
     }
   }
@@ -189,10 +232,16 @@ exports.onNewLike = onDocumentCreated(
     const likerName = await getUserName(likerId);
     const songTitle = shareData.song?.title || "a song";
 
-    const token = await getFCMToken(senderId);
-    await sendPush(token, "PlayMe", `${likerName} liked "${songTitle}"`, {
-      type: "like",
-      shareId,
+    await sendPush(senderId, {
+      title: "PlayMe",
+      body: `${likerName} liked "${songTitle}"`,
+      data: {
+        type: "like",
+        id: shareId,
+        shareId,
+      },
+      collapseId: `like-${shareId}`,
+      threadId: "likes",
     });
   }
 );
@@ -212,10 +261,59 @@ exports.onNewFriend = onDocumentCreated(
     if (!(await notificationsEnabledFor(friendId))) return;
 
     const adderName = await getUserName(adderId);
-    const token = await getFCMToken(friendId);
-    await sendPush(token, "PlayMe", `${adderName} added you on PlayMe`, {
-      type: "friend_added",
-      friendId: adderId,
+    // `onNewFriend` mirrors on both sides of the `users/{uid}/friends` write,
+    // so the person who RECEIVED the original friend request sees this fire
+    // when the acceptor writes the mirrored row on their side. Phrasing it
+    // as "X accepted your friend request" reads cleaner than the old generic
+    // "added you" copy.
+    await sendPush(friendId, {
+      title: "PlayMe",
+      body: `${adderName} accepted your friend request`,
+      data: {
+        type: "friend_accepted",
+        id: adderId,
+        friendId: adderId,
+      },
+      collapseId: `friend-${adderId}`,
+      threadId: "friend-requests",
+    });
+  }
+);
+
+// Fires the moment an incoming friend request lands in the recipient's
+// `users/{uid}/friendRequests/{fromUID}` subcollection. Gated by the
+// recipient's notification prefs + block list. Collapsed per requester
+// so rapid-fire duplicate requests (or a re-fire on reattach) surface as
+// a single banner.
+exports.onNewFriendRequest = onDocumentCreated(
+  "users/{uid}/friendRequests/{fromUID}",
+  async (event) => {
+    const { uid, fromUID } = event.params;
+    const data = event.data?.data() || {};
+
+    if (await isBlockedBy(uid, fromUID)) {
+      console.log(
+        `onNewFriendRequest: skipping push \u2014 ${fromUID} is blocked by ${uid}`
+      );
+      return;
+    }
+    if (!(await notificationsEnabledFor(uid))) return;
+
+    const displayName =
+      [data.firstName, data.lastName].filter(Boolean).join(" ").trim() ||
+      (data.username ? `@${data.username}` : "") ||
+      "Someone";
+
+    await sendPush(uid, {
+      title: "PlayMe",
+      body: `${displayName} sent you a friend request`,
+      data: {
+        type: "friend_request",
+        id: fromUID,
+        fromUID,
+      },
+      collapseId: `req-${fromUID}`,
+      threadId: "friend-requests",
     });
   }
 );
@@ -484,10 +582,12 @@ async function claimPendingSharesForUser(uid, phoneE164) {
   const myFirstName = me.firstName || "";
   const myLastName = me.lastName || "";
 
-  const myToken = await getFCMToken(uid);
-
   let claimed = 0;
   const pushPromises = [];
+  // Track inviters (sender UIDs whose queued shares we claimed) so we can
+  // deliver a single "X joined from your invite" push per inviter, rather
+  // than N pushes for N queued songs from the same friend.
+  const inviterIds = new Set();
 
   for (const doc of snap.docs) {
     const data = doc.data();
@@ -601,19 +701,22 @@ async function claimPendingSharesForUser(uid, phoneE164) {
     try {
       await batch.commit();
       claimed += 1;
+      inviterIds.add(senderId);
 
       // Fire a magic-moment push to the new user for every claimed share.
       pushPromises.push(
-        sendPush(
-          myToken,
-          "PlayMe",
-          `${senderFirstName || "A friend"} sent you "${song.title || "a song"}"`,
-          {
+        sendPush(uid, {
+          title: "PlayMe",
+          body: `${senderFirstName || "A friend"} sent you "${song.title || "a song"}"`,
+          data: {
             type: "new_share",
+            id: doc.id,
             shareId: doc.id,
             claimedFromPending: "true",
-          }
-        )
+          },
+          collapseId: `share-${doc.id}`,
+          threadId: "shares",
+        })
       );
 
       console.log(
@@ -639,7 +742,28 @@ async function claimPendingSharesForUser(uid, phoneE164) {
     }
   }
 
-  await Promise.all(pushPromises);
+  // "X joined from your invite" pushes — one per unique inviter. Sent in
+  // parallel with the magic-moment pushes to the new user. Guarded by the
+  // inviter's own notification prefs.
+  const joinedFirstName = myFirstName || "A friend";
+  const inviterPushes = Array.from(inviterIds).map(async (inviterUid) => {
+    if (!inviterUid || inviterUid === uid) return;
+    if (await isBlockedBy(inviterUid, uid)) return;
+    if (!(await notificationsEnabledFor(inviterUid))) return;
+    await sendPush(inviterUid, {
+      title: "PlayMe",
+      body: `${joinedFirstName} joined from your invite`,
+      data: {
+        type: "invite_joined",
+        id: uid,
+        joinedUID: uid,
+      },
+      collapseId: `join-${uid}`,
+      threadId: "invites",
+    });
+  });
+
+  await Promise.all([...pushPromises, ...inviterPushes]);
   return { count: claimed };
 }
 

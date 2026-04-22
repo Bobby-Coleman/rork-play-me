@@ -1121,6 +1121,23 @@ class FirebaseService {
         }
     }
 
+    /// Live listener for the current user's conversation inbox. Mirrors
+    /// `listenForMessages` / `listenIncomingRequests` so the inbox UI
+    /// updates in real time as `unreadCount_<uid>` flips or new
+    /// conversations arrive. Returns `nil` when not signed in.
+    func listenConversations(onChange: @escaping @Sendable ([Conversation]) -> Void) -> ListenerRegistration? {
+        guard let uid = firebaseUID else { return nil }
+        return db.collection("conversations")
+            .whereField("participants", arrayContains: uid)
+            .order(by: "lastMessageTimestamp", descending: true)
+            .limit(to: 50)
+            .addSnapshotListener { [weak self] snapshot, _ in
+                guard let self, let docs = snapshot?.documents else { return }
+                let convos = docs.compactMap { self.parseConversation(id: $0.documentID, data: $0.data()) }
+                onChange(convos)
+            }
+    }
+
     func listenForMessages(conversationId: String, onUpdate: @escaping @Sendable ([ChatMessage]) -> Void) -> ListenerRegistration {
         db.collection("conversations")
             .document(conversationId)

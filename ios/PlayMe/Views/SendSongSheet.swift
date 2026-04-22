@@ -3,6 +3,16 @@ import SwiftUI
 struct SendSongSheet: View {
     @Environment(\.dismiss) private var dismiss
     let appState: AppState
+    /// Extra invited (pending-signup) contacts to offer as recipients alongside
+    /// real friends. Defaults to empty, so main-app call sites keep their
+    /// existing friends-only behavior. The onboarding flow passes
+    /// `appState.invitedContacts` so a freshly registered user can still send
+    /// their first song to someone who hasn't joined yet.
+    var invitedContacts: [SimpleContact] = []
+    /// Fired once the underlying `FriendSelectorView` reports a successful
+    /// send (right before the sheet dismisses). Lets onboarding advance to
+    /// the next step without needing to observe dismissal externally.
+    var onSent: (() -> Void)? = nil
 
     @State private var searchText: String = ""
     @State private var selectedSong: Song?
@@ -10,6 +20,7 @@ struct SendSongSheet: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var detailSong: Song?
     @State private var audioPlayer: AudioPlayerService = .shared
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -23,8 +34,12 @@ struct SendSongSheet: View {
                     FriendSelectorView(
                         song: selectedSong!,
                         appState: appState,
+                        invitedContacts: invitedContacts,
                         onBack: { withAnimation(.spring(duration: 0.3)) { step = 0 } },
-                        onSent: { dismiss() }
+                        onSent: {
+                            onSent?()
+                            dismiss()
+                        }
                     )
                     .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .trailing)))
                 }
@@ -45,6 +60,18 @@ struct SendSongSheet: View {
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
+            .task {
+                // iOS drops focus requests issued before the sheet's
+                // presentation animation settles, so we wait out the
+                // transition (~0.35s) and then focus the search field.
+                // This runs once per sheet appearance — returning from
+                // step 1 back to step 0 doesn't trigger it again, which
+                // is the desired behavior.
+                try? await Task.sleep(for: .milliseconds(350))
+                if step == 0 {
+                    isSearchFocused = true
+                }
+            }
         }
         .presentationBackground(.black)
         .sheet(item: $detailSong) { song in
@@ -69,7 +96,9 @@ struct SendSongSheet: View {
                     .foregroundStyle(.white.opacity(0.4))
                 TextField("Search songs or artists...", text: $searchText)
                     .foregroundStyle(.white)
+                    .tint(.white)
                     .autocorrectionDisabled()
+                    .focused($isSearchFocused)
                     .onChange(of: searchText) { _, newValue in
                         performSearch(newValue)
                     }

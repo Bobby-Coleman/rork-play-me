@@ -1,5 +1,6 @@
 import SwiftUI
 import FirebaseFirestore
+import UserNotifications
 
 struct ChatView: View {
     let conversation: Conversation
@@ -86,10 +87,16 @@ struct ChatView: View {
             Task {
                 await FirebaseService.shared.markConversationRead(conversationId: conversation.id)
             }
+            markThisConversationReadLocally()
+            clearDeliveredNotificationsForThisConversation()
+            ActiveScreenTracker.shared.activeConversationId = conversation.id
         }
         .onDisappear {
             listener?.remove()
             listener = nil
+            if ActiveScreenTracker.shared.activeConversationId == conversation.id {
+                ActiveScreenTracker.shared.activeConversationId = nil
+            }
         }
         .sheet(item: $sheetSong) { song in
             SongDetailSheet(song: song, appState: appState, share: nil)
@@ -275,6 +282,34 @@ struct ChatView: View {
         Task {
             await appState.sendMessage(conversationId: conversation.id, text: text)
             isSending = false
+        }
+    }
+
+    /// Optimistically zero this conversation's `unreadCount` in the in-memory
+    /// `AppState.conversations` array so the inbox row badge drops the moment
+    /// the thread opens, without waiting for the Firestore snapshot listener
+    /// to round-trip the `unreadCount_<uid>` = 0 write. The listener will
+    /// later reconcile the authoritative value and this optimistic update
+    /// will simply match.
+    private func markThisConversationReadLocally() {
+        guard let idx = appState.conversations.firstIndex(where: { $0.id == conversation.id }) else { return }
+        guard appState.conversations[idx].unreadCount != 0 else { return }
+        appState.conversations[idx] = appState.conversations[idx].withUnreadCount(0)
+    }
+
+    /// Remove any delivered push notifications that target this specific
+    /// conversation. Notifications are tagged with `apns.thread-id =
+    /// "conv-<id>"` by the Cloud Function, which both groups them in the
+    /// iOS UI and lets us clear them surgically on open without touching
+    /// other threads' notifications.
+    private func clearDeliveredNotificationsForThisConversation() {
+        let threadId = "conv-\(conversation.id)"
+        UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
+            let ids = delivered
+                .filter { $0.request.content.threadIdentifier == threadId }
+                .map { $0.request.identifier }
+            guard !ids.isEmpty else { return }
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
         }
     }
 

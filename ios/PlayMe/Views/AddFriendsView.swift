@@ -1,6 +1,7 @@
 import SwiftUI
 import MessageUI
 import FirebaseAuth
+import UserNotifications
 
 struct AddFriendsView: View {
     let appState: AppState
@@ -77,21 +78,15 @@ struct AddFriendsView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.bottom, 16)
 
-                        if !appState.incomingRequests.isEmpty {
-                            friendRequestsSection
-                                .padding(.bottom, 16)
-                        }
-
-                        if !appState.friends.isEmpty {
-                            yourFriendsSection
-                                .padding(.bottom, 16)
-                        }
-
-                        // MARK: - Search bar
+                        // MARK: - Search bar (always visible, at the top)
+                        // Moved above the friend requests / your friends
+                        // sections so username search is the primary
+                        // affordance. Matches industry-standard add-by-
+                        // handle flows (Instagram, Snapchat).
                         HStack(spacing: 10) {
                             Image(systemName: "magnifyingglass")
                                 .foregroundStyle(.white.opacity(0.4))
-                            TextField("Search or add friends", text: $searchText)
+                            TextField("Search by username or name", text: $searchText)
                                 .foregroundStyle(.white)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
@@ -120,6 +115,16 @@ struct AddFriendsView: View {
                         if isActive {
                             searchContent
                         } else {
+                            if !appState.incomingRequests.isEmpty {
+                                friendRequestsSection
+                                    .padding(.bottom, 16)
+                            }
+
+                            if !appState.friends.isEmpty {
+                                yourFriendsSection
+                                    .padding(.bottom, 16)
+                            }
+
                             browseContent
                         }
                     }
@@ -150,6 +155,13 @@ struct AddFriendsView: View {
                 allContacts = ContactsService.shared.fetchContacts()
             }
             contactsLoaded = true
+        }
+        .onAppear {
+            clearDeliveredFriendRequestNotifications()
+            ActiveScreenTracker.shared.isViewingAddFriends = true
+        }
+        .onDisappear {
+            ActiveScreenTracker.shared.isViewingAddFriends = false
         }
         .sheet(item: $messageRecipient) { recipient in
             if MessageComposeView.canSendText {
@@ -220,21 +232,8 @@ struct AddFriendsView: View {
 
     private var searchContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !filteredContacts.isEmpty {
-                sectionHeader("Your contacts", icon: "person.crop.rectangle.stack")
-
-                LazyVStack(spacing: 0) {
-                    ForEach(filteredContacts) { contact in
-                        contactRow(contact)
-                    }
-                }
-                .padding(.horizontal, 20)
-
-                Divider()
-                    .background(Color.white.opacity(0.06))
-                    .padding(.vertical, 12)
-            }
-
+            // Username results lead — searching by @handle is the primary
+            // intent for this screen.
             if isSearching {
                 sectionHeader("Add by username", icon: "at")
                 ProgressView()
@@ -247,6 +246,23 @@ struct AddFriendsView: View {
                 LazyVStack(spacing: 0) {
                     ForEach(searchResults) { user in
                         userRow(user)
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+
+            if !searchResults.isEmpty && !filteredContacts.isEmpty {
+                Divider()
+                    .background(Color.white.opacity(0.06))
+                    .padding(.vertical, 12)
+            }
+
+            if !filteredContacts.isEmpty {
+                sectionHeader("Your contacts", icon: "person.crop.rectangle.stack")
+
+                LazyVStack(spacing: 0) {
+                    ForEach(filteredContacts) { contact in
+                        contactRow(contact)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -682,6 +698,22 @@ struct AddFriendsView: View {
     }
 
     // MARK: - Search
+
+    /// Remove any delivered push notifications whose payload is tagged
+    /// `data.type == "friend_request"`. Seeing this screen implies the user
+    /// has satisfied the banner's intent, so leaving the notification in
+    /// the notification center would be noise. Cloud Functions write the
+    /// `type` key on every friend-request push, so this is a straight
+    /// filter + removeDeliveredNotifications call.
+    private func clearDeliveredFriendRequestNotifications() {
+        UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
+            let ids = delivered
+                .filter { ($0.request.content.userInfo["type"] as? String) == "friend_request" }
+                .map { $0.request.identifier }
+            guard !ids.isEmpty else { return }
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
+        }
+    }
 
     private func performSearch(_ query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)

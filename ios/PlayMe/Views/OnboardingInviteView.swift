@@ -16,6 +16,12 @@ struct OnboardingInviteView: View {
     @State private var searchText = ""
     @State private var inviteLink: String = ""
     @State private var gateErrorVisible = false
+    /// Live username-search results. Mirrors the main-app AddFriendsView
+    /// flow so a new user can add existing PlayMe users directly during
+    /// onboarding, not just via SMS invites. Debounced inside
+    /// `performUserSearch` to keep Firestore usage bounded.
+    @State private var searchResults: [AppUser] = []
+    @State private var isSearching = false
 
     @FocusState private var searchFocused: Bool
 
@@ -28,8 +34,13 @@ struct OnboardingInviteView: View {
 
     private var isActive: Bool { !searchText.isEmpty }
 
+    /// The onboarding gate: the user must have added AT LEAST ONE friend in
+    /// any available form — an SMS invite OR a sent friend request to an
+    /// existing PlayMe user. Both paths count so users who find their
+    /// friends via @handle search don't get blocked by the "must invite a
+    /// contact" requirement.
     private var hasMinimumInvites: Bool {
-        !appState.invitedContacts.isEmpty
+        !appState.invitedContacts.isEmpty || !appState.outgoingRequestUIDs.isEmpty
     }
 
     private var filteredContacts: [SimpleContact] {
@@ -171,6 +182,8 @@ struct OnboardingInviteView: View {
                     .padding(.horizontal, 20)
                     .padding(.bottom, 14)
 
+                usernameResultsSection
+
                 shareLinkRow
                     .padding(.bottom, 16)
 
@@ -189,16 +202,21 @@ struct OnboardingInviteView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.white.opacity(0.4))
-            TextField("Search your contacts", text: $searchText)
+            TextField("Search by username or name", text: $searchText)
                 .foregroundStyle(.white)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .submitLabel(.search)
                 .focused($searchFocused)
+                .onChange(of: searchText) { _, newValue in
+                    performUserSearch(newValue)
+                }
 
             if isActive {
                 Button("Cancel") {
                     searchText = ""
+                    searchResults = []
+                    isSearching = false
                     searchFocused = false
                 }
                 .font(.system(size: 15))
@@ -229,6 +247,143 @@ struct OnboardingInviteView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// Username search results — shown only while searching. Contacts row
+    /// below still gets rendered when contacts auth is granted, so the user
+    /// can fall through to an SMS invite if no matching @handle is found.
+    @ViewBuilder
+    private var usernameResultsSection: some View {
+        if isActive {
+            if isSearching {
+                HStack(spacing: 6) {
+                    Image(systemName: "at")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.4))
+                    Text("Add by username")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .textCase(.uppercase)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
+
+                ProgressView()
+                    .tint(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 12)
+            } else if !searchResults.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "at")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.4))
+                    Text("Add by username")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .textCase(.uppercase)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 4)
+
+                LazyVStack(spacing: 0) {
+                    ForEach(searchResults) { user in
+                        userRow(user)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+            }
+        }
+    }
+
+    private func userRow(_ user: AppUser) -> some View {
+        let alreadyFriend = appState.friends.contains(where: { $0.id == user.id })
+        let requested = appState.outgoingRequestUIDs.contains(user.id)
+
+        return HStack(spacing: 14) {
+            Text(user.initials)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(Color.white.opacity(0.12))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(user.firstName)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white)
+                if !user.username.isEmpty {
+                    Text("@\(user.username)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+            }
+
+            Spacer()
+
+            if alreadyFriend {
+                Text("Added")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.06))
+                    .clipShape(.capsule)
+            } else if requested {
+                Button {
+                    Task { await appState.cancelOutgoingRequest(to: user) }
+                } label: {
+                    Text("Requested")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(.capsule)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button {
+                    Task { await appState.sendFriendRequest(to: user) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("Add")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                    .clipShape(.capsule)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    /// Debounced username / name search. Mirrors `AddFriendsView.performSearch`
+    /// but local to onboarding so we don't need to share state with the
+    /// main-app screen. Results feed `usernameResultsSection`.
+    private func performUserSearch(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = (trimmed.hasPrefix("@") ? String(trimmed.dropFirst()) : trimmed).lowercased()
+        guard !normalized.isEmpty else {
+            searchResults = []
+            isSearching = false
+            return
+        }
+        isSearching = true
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard searchText == query else { return }
+            let results = await appState.searchAllUsers(query: normalized)
+            searchResults = results
+            isSearching = false
+            await appState.hydrateOutgoingRequests(for: results.map { $0.id })
+        }
     }
 
     @ViewBuilder

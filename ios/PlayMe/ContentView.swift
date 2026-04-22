@@ -77,6 +77,13 @@ struct ContentView: View {
                     withAnimation(.easeInOut(duration: 0.5)) {
                         appState.isOnboarded = true
                     }
+                    // Force the Discovery (magnifier) tab on first landing.
+                    // `selectedTab` defaults to 0 for fresh installs, but
+                    // pinning it here defends against any future path that
+                    // might have mutated it during onboarding, or any iOS
+                    // state-restore that would otherwise drop the user on
+                    // Profile/Messages.
+                    selectedTab = 0
                     Task { await appState.loadData() }
                 }
                 .preferredColorScheme(.dark)

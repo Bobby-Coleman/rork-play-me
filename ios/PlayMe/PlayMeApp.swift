@@ -7,6 +7,26 @@ import UserNotifications
 import ChottuLinkSDK
 import Nuke
 
+// MARK: - Foreground notification suppression tracker
+
+/// Lightweight main-actor registry the notification delegate consults in
+/// `willPresent` to decide whether to surface a banner. When the user is
+/// already looking at the screen a push is about to interrupt (e.g. a
+/// DM arrives while they're already inside that thread), the banner is
+/// noise — we just let the listener update the UI silently instead.
+@MainActor
+final class ActiveScreenTracker {
+    static let shared = ActiveScreenTracker()
+    private init() {}
+
+    /// Conversation ID currently on-screen in `ChatView`. `nil` when no
+    /// thread is open. Updated in `ChatView.onAppear/onDisappear`.
+    var activeConversationId: String?
+    /// True when `AddFriendsView` is on-screen. Drives suppression of
+    /// friend-request banners.
+    var isViewingAddFriends: Bool = false
+}
+
 // MARK: - Push / notification permission (deferred from cold launch)
 
 enum NotificationPermission {
@@ -166,7 +186,38 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .badge, .sound])
+        let content = notification.request.content
+        let userInfo = content.userInfo
+        let type = userInfo["type"] as? String
+        let threadId = content.threadIdentifier
+
+        // Suppress the banner when the user is already looking at the
+        // destination surface. The listener updates will repaint the
+        // screen silently, so a banner on top would be redundant noise.
+        // We still pass it through for badge updates below? — no: setBadgeCount
+        // is owned by the client, so we just pass an empty option set to
+        // skip banner/sound/badge entirely here.
+        Task { @MainActor in
+            let tracker = ActiveScreenTracker.shared
+            if type == "new_message" || type == "new_share" {
+                if let convId = userInfo["conversationId"] as? String,
+                   tracker.activeConversationId == convId {
+                    completionHandler([])
+                    return
+                }
+                if threadId.hasPrefix("conv-"),
+                   let active = tracker.activeConversationId,
+                   threadId == "conv-\(active)" {
+                    completionHandler([])
+                    return
+                }
+            } else if type == "friend_request", tracker.isViewingAddFriends {
+                completionHandler([])
+                return
+            }
+
+            completionHandler([.banner, .badge, .sound])
+        }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,

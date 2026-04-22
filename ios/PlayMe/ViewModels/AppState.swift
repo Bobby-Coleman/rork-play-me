@@ -37,8 +37,11 @@ class AppState {
     /// Incoming pending friend requests for the current user. Live-updated by
     /// a Firestore snapshot listener attached in `loadData`. Drives the red
     /// badge on the Add Friends pill and the "Friend Requests" section of
-    /// AddFriendsView.
-    var incomingRequests: [AppUser] = []
+    /// AddFriendsView. Each mutation also recomputes the app-icon badge so
+    /// pending requests are reflected alongside unread messages.
+    var incomingRequests: [AppUser] = [] {
+        didSet { recomputeBadge() }
+    }
     /// UIDs the current user has a *pending outgoing* friend request to.
     /// Hydrated lazily per visible search result so AddFriendsView can show
     /// "Requested" instead of "Add" on re-entry.
@@ -62,6 +65,17 @@ class AppState {
     /// Firestore listener for the current user's received shares. Drives
     /// real-time home-feed updates; detached on logout.
     private var receivedSharesListener: ListenerRegistration?
+    /// Firestore listener for the current user's conversation inbox. Drives
+    /// real-time inbox row updates (unread badge flips, new conversations,
+    /// last-message preview) without requiring a manual `loadConversations`
+    /// refresh call. Detached on logout.
+    private var conversationsListener: ListenerRegistration?
+    /// Debounce task used to coalesce bursts of widget reloads. When a batch
+    /// of `receivedShares` updates lands in the same run loop (e.g. three
+    /// back-to-back pushes), `syncWidgetWithLatestReceivedShare` cancels
+    /// the previous task and schedules a single reload after 250ms. Keeps
+    /// WidgetCenter reloads cheap during heavy listener activity.
+    private var widgetReloadTask: Task<Void, Never>?
     /// UIDs the current user has blocked. Synced from Firestore on foreground;
     /// reads + list views filter against this set client-side so blocked users
     /// disappear from feeds, search results, and conversation rows.
@@ -83,14 +97,24 @@ class AppState {
         }
     }
     var conversations: [Conversation] = [] {
-        didSet {
-            let count = conversations.reduce(0) { $0 + $1.unreadCount }
-            UNUserNotificationCenter.current().setBadgeCount(count)
-        }
+        didSet { recomputeBadge() }
     }
 
     var totalUnreadCount: Int {
         conversations.reduce(0) { $0 + $1.unreadCount }
+    }
+
+    /// App-icon badge reflects both unread DMs (sum of `unreadCount_<uid>`
+    /// across conversations) and pending incoming friend requests. Reasons:
+    /// - Users expect the badge to represent "things waiting for me", not
+    ///   just messages — friend requests fit that intent.
+    /// - Opening AddFriendsView clears the request portion; opening a
+    ///   thread clears that conversation's portion. Both paths converge
+    ///   through this recompute, so the number never drifts.
+    private func recomputeBadge() {
+        let convUnread = conversations.reduce(0) { $0 + $1.unreadCount }
+        let reqUnread = incomingRequests.count
+        UNUserNotificationCenter.current().setBadgeCount(convUnread + reqUnread)
     }
 
     /// `friends` sorted by how often the current user has sent to them:
@@ -296,6 +320,7 @@ class AppState {
         await refreshFriendRequests()
         startIncomingRequestsListener()
         startReceivedSharesListener()
+        startConversationsListener()
 
         notificationsEnabled = await firebase.loadNotificationsEnabled()
 
@@ -481,6 +506,22 @@ class AppState {
                 guard let self else { return }
                 self.receivedShares = shares.filter { !self.blockedUserIds.contains($0.sender.id) }
                 self.syncWidgetWithLatestReceivedShare()
+            }
+        }
+    }
+
+    /// Attach (or reattach) the snapshot listener that keeps the inbox
+    /// (`conversations`) in sync with Firestore. Replaces the previous
+    /// one-shot `loadConversations` poll model, so inbox rows reflect
+    /// unread-count flips, new threads, and last-message previews the
+    /// instant they happen server-side. Idempotent.
+    private func startConversationsListener() {
+        conversationsListener?.remove()
+        conversationsListener = FirebaseService.shared.listenConversations { [weak self] convos in
+            Task { @MainActor in
+                guard let self else { return }
+                let uid = FirebaseService.shared.firebaseUID ?? ""
+                self.conversations = convos.filter { !self.blockedUserIds.contains($0.friendId(currentUserId: uid)) }
             }
         }
     }
@@ -709,6 +750,10 @@ class AppState {
         incomingRequestsListener = nil
         receivedSharesListener?.remove()
         receivedSharesListener = nil
+        conversationsListener?.remove()
+        conversationsListener = nil
+        widgetReloadTask?.cancel()
+        widgetReloadTask = nil
         currentUser = nil
         friends = []
         incomingRequests = []
@@ -784,8 +829,21 @@ class AppState {
 
     private static let widgetAppGroup = "group.app.rork.playme.shared"
 
-    /// Home screen widget shows the latest song **sent to you**, not songs you sent.
+    /// Home screen widget shows the latest song **sent to you**, not songs
+    /// you sent. Bursts of updates (e.g. three back-to-back received-shares
+    /// listener events) coalesce into a single `WidgetCenter` reload via a
+    /// 250ms debounce, which keeps widget refreshes cheap and avoids the
+    /// "reload spam" pattern WidgetKit penalizes with throttling.
     private func syncWidgetWithLatestReceivedShare() {
+        widgetReloadTask?.cancel()
+        widgetReloadTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self else { return }
+            await MainActor.run { self.performWidgetSync() }
+        }
+    }
+
+    private func performWidgetSync() {
         let defaults = UserDefaults(suiteName: Self.widgetAppGroup)
         guard let latest = receivedShares.max(by: { $0.timestamp < $1.timestamp }) else {
             Self.clearWidgetUserDefaults(defaults)

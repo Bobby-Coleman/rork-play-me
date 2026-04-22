@@ -20,27 +20,25 @@ struct OTPTextField: UIViewRepresentable {
         tf.font = .systemFont(ofSize: 24)
         tf.delegate = context.coordinator
         tf.addTarget(context.coordinator, action: #selector(Coordinator.textChanged(_:)), for: .editingChanged)
-        // Request focus exactly once, when the view is first mounted. Doing this
-        // from `updateUIView` caused focus thrash on SwiftUI re-renders that ate
-        // incoming autofill insertions.
-        DispatchQueue.main.async {
-            guard !tf.becomeFirstResponder() else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                _ = tf.becomeFirstResponder()
-            }
+        // Defer first-responder by ~250ms so iOS SMS autofill can register
+        // the field + paint its QuickType candidate before we steal focus.
+        // Competing with autofill on the very first frame was letting the
+        // system cancel the suggestion the moment the user tapped it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak tf] in
+            _ = tf?.becomeFirstResponder()
         }
         return tf
     }
 
     func updateUIView(_ uiView: UITextField, context: Context) {
-        // Never let a transient empty binding wipe an autofilled 6-digit code
-        // that the system just delivered — `textChanged` will publish the new
-        // value on the next runloop.
-        if uiView.text != text {
-            let current = uiView.text ?? ""
-            if text.isEmpty && current.count == 6 { return }
-            uiView.text = text
-        }
+        // Never clobber text while the field is actively editing — iOS
+        // autofill animates the candidate into the field, and any
+        // out-of-band `uiView.text = ...` write during that handoff
+        // cancels the animation and wipes the suggested code. The view
+        // is only written to when we need to reflect an external reset
+        // (e.g. after a failed verify flips `codeText` back to "").
+        guard !uiView.isFirstResponder else { return }
+        if uiView.text != text { uiView.text = text }
     }
 
     class Coordinator: NSObject, UITextFieldDelegate {
@@ -64,11 +62,14 @@ struct OTPTextField: UIViewRepresentable {
         }
 
         @objc func textChanged(_ textField: UITextField) {
-            let filtered = String((textField.text ?? "").filter { $0.isNumber }.prefix(6))
-            if textField.text != filtered {
-                textField.text = filtered
-            }
-            text = filtered
+            let raw = textField.text ?? ""
+            let filtered = String(raw.filter { $0.isNumber }.prefix(6))
+            // Only push the change back to SwiftUI — do NOT write back into
+            // the UITextField during editingChanged, which cancels in-flight
+            // autofill animations and causes the "code disappears on tap"
+            // bug. `updateUIView` is responsible for the reverse direction,
+            // guarded by `isFirstResponder`.
+            if text != filtered { text = filtered }
             if filtered.count < 6 {
                 hasCompleted = false
             } else if !hasCompleted {
@@ -151,7 +152,15 @@ struct OTPVerificationView: View {
                         verifyCode()
                     }
                     .frame(height: 52)
-                    .onAppear { fieldIsFocused = true }
+                    .task {
+                        // Defer initial focus so iOS SMS autofill's
+                        // candidate has time to paint — competing with
+                        // autofill on the first frame was letting the
+                        // system cancel the suggestion before the user
+                        // could tap it.
+                        try? await Task.sleep(for: .milliseconds(250))
+                        fieldIsFocused = true
+                    }
                 }
 
                 if isVerifying {

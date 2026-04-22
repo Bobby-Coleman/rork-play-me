@@ -3,10 +3,20 @@ import SwiftUI
 struct FriendSelectorView: View {
     let song: Song
     let appState: AppState
+    /// Pending-signup contacts to render alongside real friends. Defaults to
+    /// empty so every main-app call site stays friends-only. The onboarding
+    /// flow passes `appState.invitedContacts` so freshly registered users
+    /// who have only SMS-invited people can still send their first song.
+    var invitedContacts: [SimpleContact] = []
     let onBack: () -> Void
     let onSent: () -> Void
 
     @State private var selectedFriends: Set<String> = []
+    /// Parallel selection set for invited contacts. Lives alongside
+    /// `selectedFriends` rather than merging into one set so we can route
+    /// sends to the correct backend path (`sendSong` vs
+    /// `sendSongToPendingContact`) without any later disambiguation.
+    @State private var selectedContacts: Set<String> = []
     @State private var note: String = ""
     @State private var showSentAnimation = false
     @State private var showAddFriends = false
@@ -17,11 +27,16 @@ struct FriendSelectorView: View {
     }
 
     private var allSelected: Bool {
-        !rankedFriends.isEmpty && rankedFriends.allSatisfy { selectedFriends.contains($0.id) }
+        let friendsAllOn = rankedFriends.isEmpty
+            || rankedFriends.allSatisfy { selectedFriends.contains($0.id) }
+        let contactsAllOn = invitedContacts.isEmpty
+            || invitedContacts.allSatisfy { selectedContacts.contains($0.id) }
+        let anyRecipients = !rankedFriends.isEmpty || !invitedContacts.isEmpty
+        return anyRecipients && friendsAllOn && contactsAllOn
     }
 
     private var canSend: Bool {
-        !selectedFriends.isEmpty
+        !selectedFriends.isEmpty || !selectedContacts.isEmpty
     }
 
     var body: some View {
@@ -142,10 +157,14 @@ struct FriendSelectorView: View {
             guard canSend else { return }
             showSentAnimation = true
             let friends = resolveSelectedFriends()
+            let contacts = resolveSelectedContacts()
             let noteToSend = note
             Task {
                 for friend in friends {
                     await appState.sendSong(song, to: friend, note: noteToSend)
+                }
+                for contact in contacts {
+                    _ = await appState.sendSongToPendingContact(song, contact: contact, note: noteToSend)
                 }
                 try? await Task.sleep(for: .seconds(1.2))
                 onSent()
@@ -176,6 +195,9 @@ struct FriendSelectorView: View {
                 ForEach(rankedFriends) { friend in
                     friendChip(friend)
                 }
+                ForEach(invitedContacts) { contact in
+                    contactChip(contact)
+                }
                 addFriendsChip
             }
             .padding(.horizontal, 20)
@@ -189,9 +211,15 @@ struct FriendSelectorView: View {
                 for user in rankedFriends {
                     selectedFriends.remove(user.id)
                 }
+                for contact in invitedContacts {
+                    selectedContacts.remove(contact.id)
+                }
             } else {
                 for user in rankedFriends {
                     selectedFriends.insert(user.id)
+                }
+                for contact in invitedContacts {
+                    selectedContacts.insert(contact.id)
                 }
             }
         } label: {
@@ -202,7 +230,7 @@ struct FriendSelectorView: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(rankedFriends.isEmpty)
+        .disabled(rankedFriends.isEmpty && invitedContacts.isEmpty)
     }
 
     private func friendChip(_ friend: AppUser) -> some View {
@@ -218,6 +246,40 @@ struct FriendSelectorView: View {
                 Text(friend.initials)
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.white)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Chip for a pending-signup contact. Visually consistent with
+    /// `friendChip` but carries an "INVITED" micro-badge so the user can
+    /// tell apart a real account from someone who will only receive the
+    /// song once they finish signup.
+    private func contactChip(_ contact: SimpleContact) -> some View {
+        let isSelected = selectedContacts.contains(contact.id)
+        let label = contact.firstName.isEmpty ? contact.phoneNumber : contact.firstName
+        return Button {
+            if isSelected {
+                selectedContacts.remove(contact.id)
+            } else {
+                selectedContacts.insert(contact.id)
+            }
+        } label: {
+            chipLayout(label: label, selected: isSelected) {
+                ZStack(alignment: .topTrailing) {
+                    Text(contact.initials.isEmpty ? "?" : contact.initials)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+
+                    Text("INVITED")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.25))
+                        .clipShape(.capsule)
+                        .offset(x: 14, y: -18)
+                }
             }
         }
         .buttonStyle(.plain)
@@ -294,6 +356,16 @@ struct FriendSelectorView: View {
         for user in rankedFriends where selectedFriends.contains(user.id) && !seen.contains(user.id) {
             seen.insert(user.id)
             result.append(user)
+        }
+        return result
+    }
+
+    private func resolveSelectedContacts() -> [SimpleContact] {
+        var seen = Set<String>()
+        var result: [SimpleContact] = []
+        for contact in invitedContacts where selectedContacts.contains(contact.id) && !seen.contains(contact.id) {
+            seen.insert(contact.id)
+            result.append(contact)
         }
         return result
     }

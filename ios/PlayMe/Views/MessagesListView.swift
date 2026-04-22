@@ -79,6 +79,9 @@ struct MessagesListView: View {
                         Text(friendName)
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .minimumScaleFactor(0.8)
 
                         Text(conversation.lastMessageText)
                             .font(.system(size: 13))
@@ -130,15 +133,20 @@ struct MessagesListView: View {
             Button {
                 quickSendRecipient = recipientAppUser(for: conversation)
             } label: {
-                Image(systemName: "music.note.list")
-                    .font(.system(size: 18, weight: .semibold))
+                // Paperplane matches the primary "reply with a song"
+                // affordance used on received song cards, so the gesture
+                // reads as "send back / reply with a song" consistently
+                // across surfaces instead of "browse your music" (the old
+                // `music.note.list`).
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Color(red: 0.76, green: 0.38, blue: 0.35))
                     .frame(width: 36, height: 36)
                     .background(Color.white.opacity(0.1))
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Search and send a song")
+            .accessibilityLabel("Reply with a song")
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)

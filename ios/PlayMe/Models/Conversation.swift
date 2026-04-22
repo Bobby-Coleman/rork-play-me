@@ -23,4 +23,20 @@ struct Conversation: Identifiable, Hashable, Sendable {
         }
         return ""
     }
+
+    /// Returns a copy of this conversation with `unreadCount` overridden.
+    /// Used by `ChatView` to zero the inbox badge optimistically the moment
+    /// a thread is opened, without waiting for the Firestore snapshot to
+    /// round-trip the `unreadCount_<uid>` = 0 write.
+    func withUnreadCount(_ newCount: Int) -> Conversation {
+        Conversation(
+            id: id,
+            participants: participants,
+            participantNames: participantNames,
+            lastMessageText: lastMessageText,
+            lastMessageTimestamp: lastMessageTimestamp,
+            unreadCount: newCount,
+            songStreakCount: songStreakCount
+        )
+    }
 }
