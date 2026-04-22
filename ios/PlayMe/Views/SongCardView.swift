@@ -174,24 +174,8 @@ struct SongCardView: View {
     // MARK: - Artwork
 
     private func artwork(size: CGFloat) -> some View {
-        Color.clear
+        AlbumArtSquare(url: share.song.albumArtURL, showsShadow: false)
             .frame(width: size, height: size)
-            .overlay {
-                AsyncImage(url: URL(string: share.song.albumArtURL)) { phase in
-                    if let image = phase.image {
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } else if phase.error != nil {
-                        Color(.systemGray5)
-                    } else {
-                        Color(.systemGray6)
-                            .overlay { ProgressView().tint(.white) }
-                    }
-                }
-                .allowsHitTesting(false)
-            }
-            .clipShape(.rect(cornerRadius: 16))
             .overlay(alignment: .topTrailing) {
                 Button {
                     onToggleLike()

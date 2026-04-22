@@ -49,6 +49,13 @@ class AppState {
     /// Transient error banner if a friend-request write fails (rules denied,
     /// network issue). Surfaces the failure so users know to retry.
     var friendRequestError: String? = nil
+    /// Incremented by `ContentView` whenever the user taps the Discovery
+    /// tab's magnifier while already on the Discovery tab but scrolled into
+    /// the history feed. `DiscoveryView` observes this counter and animates
+    /// its internal ScrollViewReader back to the hero page. Decoupled as a
+    /// counter instead of a boolean so consecutive taps always trigger a
+    /// state change (vs. a sticky `true` that needs resetting).
+    var discoveryScrollToTopCounter: Int = 0
     /// Firestore listener for incoming friend requests. Retained so we can
     /// detach on logout and reattach on sign-in.
     private var incomingRequestsListener: ListenerRegistration?

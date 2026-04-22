@@ -36,6 +36,10 @@ struct ContentView: View {
     @State private var showAddFriends = false
     @State private var selectedTab: Int = 0
     @State private var miniPlayerSong: Song?
+    /// Tracks whether the Discovery tab is currently showing its hero page
+    /// (vs. scrolled into the history feed). Mini-player stays hidden on the
+    /// hero so the CTA + ambient grid read cleanly.
+    @State private var discoveryIsOnHero: Bool = true
     @Environment(\.scenePhase) private var scenePhase
     /// True only when this app session started already onboarded — used so returning users
     /// (who installed before this flow existed) never see the first-launch permission prompt
@@ -98,15 +102,22 @@ struct ContentView: View {
         defaults.set(true, forKey: hasRequestedNotificationPermissionKey)
     }
 
-    /// Tab indices that participate in horizontal swipe navigation. Tab `1`
-    /// is the search affordance that only opens `SendSongSheet` — skipping it
-    /// avoids accidental sheet presentation when swiping from Home.
-    private static let swipeableTabs: [Int] = [0, 2, 3]
+    /// Tab indices that participate in horizontal swipe navigation. Ordered
+    /// left-to-right to match the visual tab bar: Messages, Discovery,
+    /// Profile.
+    private static let swipeableTabs: [Int] = [2, 0, 3]
+
+    /// Haptic used when entering Search from either the nav magnifier or the
+    /// on-screen CTA — medium impact per spec so the transition feels
+    /// intentional.
+    private let searchHaptic = UIImpactFeedbackGenerator(style: .medium)
 
     @ViewBuilder
     private var miniPlayerOverlay: some View {
-        // Hide on the home feed (tab 0) so the reply pill and bottom chrome stay
-        // unobstructed; show on Messages, Profile, etc.
+        // Always hide on the Discovery tab — both the hero (so the CTA reads
+        // cleanly) and the history card pages (so the reply pill stays
+        // unobstructed). Shows on Messages and Profile so in-progress
+        // playback remains recoverable.
         if selectedTab != 0, let song = AudioPlayerService.shared.currentSong {
             MiniPlayerBar(song: song) {
                 miniPlayerSong = song
@@ -115,6 +126,40 @@ struct ContentView: View {
             .padding(.bottom, 54)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
+    }
+
+    /// Custom binding that intercepts a tap on the already-selected Discovery
+    /// tab. If the user is currently scrolled into the history feed the tap
+    /// first animates them back to the hero page. Only a *second* tap on
+    /// an already-visible hero opens Search — preventing the "scroll +
+    /// search fires together" race documented in the design spec.
+    private var selectedTabBinding: Binding<Int> {
+        Binding(
+            get: { selectedTab },
+            set: { new in
+                if new == 0 && selectedTab == 0 {
+                    if discoveryIsOnHero {
+                        openSearch()
+                    } else {
+                        scrollDiscoveryToHero()
+                    }
+                } else {
+                    selectedTab = new
+                }
+            }
+        )
+    }
+
+    private func openSearch() {
+        searchHaptic.prepare()
+        searchHaptic.impactOccurred()
+        showSendSheet = true
+    }
+
+    /// Bumps the shared scroll-to-hero counter. `DiscoveryView` observes it
+    /// and animates its `ScrollViewReader` back to the hero page.
+    private func scrollDiscoveryToHero() {
+        appState.discoveryScrollToTopCounter &+= 1
     }
 
     private func navigateTabBySwipe(translationWidth: CGFloat) {
@@ -135,25 +180,27 @@ struct ContentView: View {
     }
 
     private var mainTabView: some View {
-        TabView(selection: $selectedTab) {
-            Tab(value: 0) {
-                HomeFeedView(shares: appState.receivedShares, appState: appState, onSendSong: { showSendSheet = true }, onAddFriends: { showAddFriends = true })
-            } label: {
-                Image(systemName: "house.fill")
-            }
-
-            Tab(value: 1) {
-                Color.black
-            } label: {
-                Image(systemName: "magnifyingglass")
-            }
-
+        TabView(selection: selectedTabBinding) {
             Tab(value: 2) {
                 MessagesListView(appState: appState)
             } label: {
                 Image(systemName: "bubble.left.and.bubble.right.fill")
             }
             .badge(appState.totalUnreadCount)
+
+            Tab(value: 0) {
+                DiscoveryView(
+                    shares: appState.receivedShares,
+                    appState: appState,
+                    onSearchTap: openSearch,
+                    onAddFriends: { showAddFriends = true },
+                    onHeroVisibilityChange: { isHero in
+                        discoveryIsOnHero = isHero
+                    }
+                )
+            } label: {
+                Image(systemName: "magnifyingglass")
+            }
 
             Tab(value: 3) {
                 ProfileView(appState: appState)
@@ -173,16 +220,11 @@ struct ContentView: View {
                 }
         )
         .onChange(of: selectedTab) { _, newValue in
-            if newValue == 1 {
-                showSendSheet = true
-            }
             if newValue == 2 {
                 Task { await appState.loadConversations() }
             }
         }
         .sheet(isPresented: $showSendSheet) {
-            selectedTab = 0
-        } content: {
             SendSongSheet(appState: appState)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
@@ -200,7 +242,11 @@ struct ContentView: View {
         .overlay(alignment: .bottom) {
             miniPlayerOverlay
         }
-        .animation(.easeInOut(duration: 0.22), value: selectedTab)
+        // Deliberately no implicit animation on `selectedTab` — the tab
+        // transition itself is a UIKit crossfade handled by TabView, and
+        // letting SwiftUI animate dependent state in response propagates
+        // spring settle into child ScrollViews (contributing to the
+        // landing-page bounce the spec calls out).
         .animation(.easeInOut(duration: 0.22), value: AudioPlayerService.shared.currentSong?.id)
         .onReceive(NotificationCenter.default.publisher(for: .didReceiveDeepLink)) { notification in
             guard let data = notification.userInfo as? [String: Any],

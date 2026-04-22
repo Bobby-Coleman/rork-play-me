@@ -5,6 +5,7 @@ import FirebaseCore
 import FirebaseMessaging
 import UserNotifications
 import ChottuLinkSDK
+import Nuke
 
 // MARK: - Push / notification permission (deferred from cold launch)
 
@@ -182,6 +183,35 @@ extension Notification.Name {
 @main
 struct PlayMeApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
+
+    init() {
+        // Shared URLCache still useful as a secondary tier for non-Nuke
+        // AsyncImage sites that might remain (e.g. avatars elsewhere).
+        URLCache.shared = URLCache(
+            memoryCapacity: 32 * 1024 * 1024,
+            diskCapacity: 128 * 1024 * 1024,
+            diskPath: "playme_url_cache"
+        )
+
+        // Nuke is the primary album-art pipeline. Big memory cache so the
+        // Discovery grid and every SongCardView share decoded bitmaps; big
+        // disk cache so cold launch after a week still paints instantly.
+        // Task coalescing deduplicates concurrent requests for the same URL,
+        // which is exactly what the Discovery grid needs when many slots
+        // bind the same URL during a loop cycle.
+        var config = ImagePipeline.Configuration.withDataCache
+        let imageCache = ImageCache()
+        imageCache.costLimit = 80 * 1024 * 1024
+        imageCache.countLimit = 500
+        config.imageCache = imageCache
+        if let dataCache = try? DataCache(name: "playme.album.cache") {
+            dataCache.sizeLimit = 400 * 1024 * 1024
+            config.dataCache = dataCache
+        }
+        config.isProgressiveDecodingEnabled = false
+        config.isTaskCoalescingEnabled = true
+        ImagePipeline.shared = ImagePipeline(configuration: config)
+    }
 
     var body: some Scene {
         WindowGroup {

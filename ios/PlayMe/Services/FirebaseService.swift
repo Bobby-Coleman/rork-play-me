@@ -1256,4 +1256,46 @@ class FirebaseService {
             timestamp: timestamp
         )
     }
+
+    // MARK: - Curated Grid
+
+    /// Loads the editorial curated list for the Discovery background grid
+    /// from `curatedGrids/current`. Returns an empty array on any failure so
+    /// the caller can fall back to its last good list without special-case
+    /// error plumbing.
+    ///
+    /// Expected document shape:
+    /// ```
+    /// curatedGrids/current = {
+    ///   items: [
+    ///     { id: "song-1", albumArtURL: "https://...", title?: "...", artist?: "..." },
+    ///     ...
+    ///   ]
+    /// }
+    /// ```
+    func fetchCuratedGrid() async -> [GridSong] {
+        do {
+            let doc = try await db.collection("curatedGrids").document("current").getDocument()
+            guard let data = doc.data(),
+                  let raw = data["items"] as? [[String: Any]] else {
+                return []
+            }
+            return raw.compactMap { dict -> GridSong? in
+                guard let id = dict["id"] as? String,
+                      let albumArtURL = dict["albumArtURL"] as? String,
+                      !albumArtURL.isEmpty else {
+                    return nil
+                }
+                return GridSong(
+                    id: id,
+                    albumArtURL: albumArtURL,
+                    title: dict["title"] as? String,
+                    artist: dict["artist"] as? String
+                )
+            }
+        } catch {
+            print("FirebaseService.fetchCuratedGrid: \(error.localizedDescription)")
+            return []
+        }
+    }
 }

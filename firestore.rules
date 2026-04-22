@@ -120,6 +120,14 @@ service cloud.firestore {
       allow read, update, delete: if false;
     }
 
+    // Editorial album-art lists powering the Discovery background grid.
+    // Any authenticated user can read the curated document; writes are
+    // restricted to Cloud Functions / admin SDK.
+    match /curatedGrids/{docId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
     // User reports (App Store Guideline 1.2 UGC requirement). Anyone signed
     // in can submit a report; only Cloud Functions / admins can read or
     // moderate them.

@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		8491A0A32F8841230088392D /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 8491A0A22F8841230088392D /* FirebaseMessaging */; };
 		84B7E0312F91B95F00B59DD6 /* ChottuLinkSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 84B7E0302F91B95F00B59DD6 /* ChottuLinkSDK */; };
+		NK01A5E3C4D5B6A7F8E9A004 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = NK01A5E3C4D5B6A7F8E9A002 /* Nuke */; };
+		NK01A5E3C4D5B6A7F8E9A005 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = NK01A5E3C4D5B6A7F8E9A003 /* NukeUI */; };
 		XX3DF24C364CC9BFC26E41XX /* PlayMeWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = XX8D76BE4CCED1AB217465XX /* PlayMeWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		XXFB01A1E3C4D5B6A7F8E9XX /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = XXFB01A2E3C4D5B6A7F8E9XX /* FirebaseAuth */; };
 		XXFB01A3E3C4D5B6A7F8E9XX /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = XXFB01A4E3C4D5B6A7F8E9XX /* FirebaseFirestore */; };
@@ -114,6 +116,8 @@
 				8491A0A32F8841230088392D /* FirebaseMessaging in Frameworks */,
 				XXFB01A1E3C4D5B6A7F8E9XX /* FirebaseAuth in Frameworks */,
 				XXFB01A3E3C4D5B6A7F8E9XX /* FirebaseFirestore in Frameworks */,
+				NK01A5E3C4D5B6A7F8E9A004 /* Nuke in Frameworks */,
+				NK01A5E3C4D5B6A7F8E9A005 /* NukeUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -197,6 +201,8 @@
 				XXFB01A4E3C4D5B6A7F8E9XX /* FirebaseFirestore */,
 				8491A0A22F8841230088392D /* FirebaseMessaging */,
 				84B7E0302F91B95F00B59DD6 /* ChottuLinkSDK */,
+				NK01A5E3C4D5B6A7F8E9A002 /* Nuke */,
+				NK01A5E3C4D5B6A7F8E9A003 /* NukeUI */,
 			);
 			productName = PlayMe;
 			productReference = 105FC57A2E9EAD3100EA8BCF /* PlayMe.app */;
@@ -303,6 +309,7 @@
 			packageReferences = (
 				XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				84B7E02F2F91B95F00B59DD6 /* XCRemoteSwiftPackageReference "chottulink-ios-sdk" */,
+				NK01A5E3C4D5B6A7F8E9A001 /* XCRemoteSwiftPackageReference "Nuke" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 105FC57B2E9EAD3100EA8BCF /* Products */;
@@ -810,6 +817,14 @@
 				minimumVersion = 11.0.0;
 			};
 		};
+		NK01A5E3C4D5B6A7F8E9A001 /* XCRemoteSwiftPackageReference "Nuke" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/kean/Nuke.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.8.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -832,6 +847,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseFirestore;
+		};
+		NK01A5E3C4D5B6A7F8E9A002 /* Nuke */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = NK01A5E3C4D5B6A7F8E9A001 /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = Nuke;
+		};
+		NK01A5E3C4D5B6A7F8E9A003 /* NukeUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = NK01A5E3C4D5B6A7F8E9A001 /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = NukeUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
