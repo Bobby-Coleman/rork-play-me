@@ -127,17 +127,17 @@ struct DiscoveryView: View {
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if !isOnHero {
-                HStack {
-                    Spacer(minLength: 0)
-                    addFriendsPill
-                    Spacer(minLength: 0)
-                }
-                .transition(.opacity)
+            // Friends pill is visible across the whole Discovery tab —
+            // both the hero and the history feed. Keeping it always
+            // mounted removes the layout toggle on page change, which
+            // was the last contributor to the scroll "bounce" feel.
+            HStack {
+                Spacer(minLength: 0)
+                addFriendsPill
+                Spacer(minLength: 0)
             }
         }
         .animation(.easeOut(duration: 0.22), value: isReplyFocused)
-        .animation(.easeInOut(duration: 0.25), value: isOnHero)
         .task {
             await gridVM.loadIfNeeded()
         }
@@ -148,32 +148,48 @@ struct DiscoveryView: View {
 
     // MARK: - Hero page
 
-    /// Hero layout. A top-level `GeometryReader` computes `gridSide` once so
-    /// the grid knows exactly how big its square container is without every
-    /// cell doing its own measurement. No `.ignoresSafeArea()` inside — the
-    /// paging `containerRelativeFrame` parent already sizes to the screen,
-    /// and letting content bleed past that bound is what caused the scroll
-    /// bounce feel on transitions.
+    /// Hero layout. `gridSide` is derived from `UIScreen.main.bounds` rather
+    /// than a `GeometryReader` so the computation doesn't re-run while the
+    /// paging scroll is mid-transition (a GeometryReader inside a
+    /// `containerRelativeFrame` page re-publishes its size during animation,
+    /// which can kick off layout work during the snap and cause the bounce
+    /// feel the spec wants gone).
+    ///
+    /// Vertical layout (top → bottom):
+    ///   * Flexible top spacer — pushes everything down from the navbar.
+    ///   * Album art grid (square).
+    ///   * Fixed gap.
+    ///   * Search CTA (text + magnifier).
+    ///   * Flexible spacer.
+    ///   * History chevron pinned near the bottom.
+    ///
+    /// The two flexible spacers sandwich the core content (grid + CTA) so it
+    /// ends up visually centered — addressing the "positioned too high"
+    /// feedback — while the history hint stays anchored.
     private var hero: some View {
-        GeometryReader { proxy in
-            let horizontalPadding: CGFloat = 24
-            let gridSide = max(120, min(proxy.size.width, proxy.size.height) - horizontalPadding * 2)
+        let screenWidth = UIScreen.main.bounds.width
+        let gridSide = max(160, screenWidth - 48)
 
-            VStack(spacing: 0) {
-                Spacer(minLength: 12)
+        return VStack(spacing: 0) {
+            Spacer(minLength: 20)
 
-                AlbumArtGridBackgroundView(
-                    items: gridVM.dedupedDisplayItems,
-                    side: gridSide
-                )
-                .frame(width: gridSide, height: gridSide)
+            AlbumArtGridBackgroundView(
+                items: gridVM.dedupedDisplayItems,
+                side: gridSide
+            )
+            .frame(width: gridSide, height: gridSide)
 
-                DiscoveryOverlayView(onSearchTap: onSearchTap)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black)
+            Spacer().frame(minHeight: 32, idealHeight: 40, maxHeight: 56)
+
+            DiscoverySearchCTA(action: onSearchTap)
+
+            Spacer(minLength: 20)
+
+            DiscoveryHistoryHint()
+                .padding(.bottom, 28)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
     }
 
     // MARK: - Reply bar (mirrors HomeFeedView behavior)

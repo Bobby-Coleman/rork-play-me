@@ -2,46 +2,50 @@ import Foundation
 
 /// Hardcoded bundled seed provider. Used for previews, unit tests, and — most
 /// importantly — as the synchronous first-paint source for the Discovery grid
-/// when no cached or curated list is yet available. Every entry is unique by
-/// `albumArtURL` so the deduper never has to drop anything from the seed.
+/// when no cached or curated list is yet available.
+///
+/// Every entry here was harvested from the public iTunes Search API and its
+/// 600x600 artwork URL was verified to return HTTP 200 against the MZStatic
+/// CDN. That matters: earlier seeds were hand-assembled and resolved to 404s,
+/// which rendered an empty grid. Regenerate the list by re-running iTunes
+/// Search + HEAD-check when refreshing the rotation.
 struct MockSongGridProvider: SongGridProvider {
     func load() async throws -> [GridSong] {
         MockSongGridProvider.samples
     }
 
-    /// ~30 curated album-art URLs served off Apple's public MZStatic CDN.
-    /// These are stable 600x600 jpegs that do not require auth and have been
-    /// manually deduped.
     static let samples: [GridSong] = [
-        .init(id: "mock-1",  albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/8e/28/88/8e2888a7-9ef9-a1f4-2c28-4f4e915a7d04/24UMGIM30603.rgb.jpg/600x600bb.jpg",  title: "Espresso",        artist: "Sabrina Carpenter"),
-        .init(id: "mock-2",  albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/c2/c3/fc/c2c3fcfa-7e8a-e3e8-5d4c-6dc7e9a4a6c9/24UMGIM77350.rgb.jpg/600x600bb.jpg",  title: "Not Like Us",       artist: "Kendrick Lamar"),
-        .init(id: "mock-3",  albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/1d/04/3b/1d043bb0-2f42-7afd-81f1-fddeec39da01/196589884145.jpg/600x600bb.jpg",        title: "Lunch",             artist: "Billie Eilish"),
-        .init(id: "mock-4",  albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/fb/a8/0b/fba80b5c-2f38-a0c1-11a5-5b55d2e4a2be/196871889956.jpg/600x600bb.jpg",        title: "Please Please Please", artist: "Sabrina Carpenter"),
-        .init(id: "mock-5",  albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/96/93/87/96938757-5cb9-43ad-db1d-8fcf3c3b90ce/24UMGIM22287.rgb.jpg/600x600bb.jpg",    title: "Cruel Summer",      artist: "Taylor Swift"),
-        .init(id: "mock-6",  albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/d6/20/41/d620419f-2d5e-3e43-7bbe-6c8bff47dbc6/196872099438.jpg/600x600bb.jpg",        title: "A Bar Song",        artist: "Shaboozey"),
-        .init(id: "mock-7",  albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/2c/b9/ab/2cb9ab77-5ba0-cbc2-fce3-38fb85d0d0e2/196922091391.jpg/600x600bb.jpg",        title: "Birds of a Feather", artist: "Billie Eilish"),
-        .init(id: "mock-8",  albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/b9/1a/75/b91a7514-bc9e-3dc9-84cc-5d8a8b30d8e4/24UMGIM33048.rgb.jpg/600x600bb.jpg",    title: "Beautiful Things",  artist: "Benson Boone"),
-        .init(id: "mock-9",  albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/5a/67/5e/5a675e2c-0c48-8a2e-2e11-7ef6f08ee6a2/24UMGIM20515.rgb.jpg/600x600bb.jpg",    title: "Paint The Town Red", artist: "Doja Cat"),
-        .init(id: "mock-10", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/1e/a4/65/1ea4653b-2d67-79ec-7aca-a2e5e6a9c4c9/196589884145.jpg/600x600bb.jpg",        title: "Stick Season",      artist: "Noah Kahan"),
-        .init(id: "mock-11", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/4e/46/6f/4e466f38-6a39-84a8-0d1d-34a8b3ca7b7e/196922043795.jpg/600x600bb.jpg",        title: "Good Luck, Babe!",  artist: "Chappell Roan"),
-        .init(id: "mock-12", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/6d/ae/85/6dae858f-8d26-91f7-d3b4-9db7d0d6a5a8/196922030597.jpg/600x600bb.jpg",        title: "Too Sweet",         artist: "Hozier"),
-        .init(id: "mock-13", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/aa/e4/0f/aae40f5d-4d39-8c4b-32c4-12e4bda3baed/196871868968.jpg/600x600bb.jpg",        title: "Fortnight",         artist: "Taylor Swift"),
-        .init(id: "mock-14", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/d1/a0/e2/d1a0e2f7-84a3-01ee-7e86-ef07b3e6d1e0/196871875691.jpg/600x600bb.jpg",        title: "I Had Some Help",   artist: "Post Malone"),
-        .init(id: "mock-15", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/bd/22/45/bd224512-bd49-3c0e-4a56-3a7d1b74ac88/196871832953.jpg/600x600bb.jpg",        title: "Million Dollar Baby", artist: "Tommy Richman"),
-        .init(id: "mock-16", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/e0/37/41/e0374130-2ccd-08b9-0fcd-40c2f7c5f4a2/196871799942.jpg/600x600bb.jpg",        title: "Snooze",            artist: "SZA"),
-        .init(id: "mock-17", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/fa/d5/09/fad509fe-6fa9-b2d7-9141-d5a68aaa1b91/196871898117.jpg/600x600bb.jpg",        title: "Austin",            artist: "Dasha"),
-        .init(id: "mock-18", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/f2/0b/1f/f20b1f4e-8d0e-88e1-84e2-9f8dfcabe0f6/196871993099.jpg/600x600bb.jpg",        title: "Greedy",            artist: "Tate McRae"),
-        .init(id: "mock-19", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/e5/c0/0d/e5c00d46-5a38-25d2-0b1b-e1e73e7bf2d2/24UMGIM29305.rgb.jpg/600x600bb.jpg",    title: "Flowers",           artist: "Miley Cyrus"),
-        .init(id: "mock-20", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/94/77/35/94773519-ba79-5acc-f4dc-2ab47c8af8d6/196871867015.jpg/600x600bb.jpg",        title: "Like That",         artist: "Future & Metro Boomin"),
-        .init(id: "mock-21", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/fa/7b/fc/fa7bfc33-b30d-da9a-9b4a-2bfa1ded5b91/196871930667.jpg/600x600bb.jpg",        title: "Blinding Lights",   artist: "The Weeknd"),
-        .init(id: "mock-22", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/7a/2d/92/7a2d92db-27fb-ff57-a6b4-b1e14ec63c55/196922163180.jpg/600x600bb.jpg",        title: "Anti-Hero",         artist: "Taylor Swift"),
-        .init(id: "mock-23", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/18/5f/5d/185f5d44-c15c-43a2-9ade-c6eb39efd3ed/196922035707.jpg/600x600bb.jpg",        title: "As It Was",         artist: "Harry Styles"),
-        .init(id: "mock-24", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/38/11/a2/3811a2c4-8cd9-0b86-bfcd-11344040e76f/196589876751.jpg/600x600bb.jpg",        title: "Vampire",           artist: "Olivia Rodrigo"),
-        .init(id: "mock-25", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/86/42/32/86423295-7d2d-b1ef-5086-fb1c02cbe4ef/196589876171.jpg/600x600bb.jpg",        title: "Dance The Night",   artist: "Dua Lipa"),
-        .init(id: "mock-26", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/f7/42/2c/f7422c3d-efc5-12f9-87a0-8a26f55823e6/196871929487.jpg/600x600bb.jpg",        title: "Last Night",        artist: "Morgan Wallen"),
-        .init(id: "mock-27", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/a1/14/b6/a114b651-0f4f-e89e-cf01-baf0bcc3ed0d/196589877116.jpg/600x600bb.jpg",        title: "Kill Bill",         artist: "SZA"),
-        .init(id: "mock-28", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/5a/e1/cb/5ae1cb8c-3bb9-e0c5-2bae-49fefd5912c5/196922035790.jpg/600x600bb.jpg",        title: "Unholy",            artist: "Sam Smith & Kim Petras"),
-        .init(id: "mock-29", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/c2/ea/ee/c2eaee51-e2a7-ce7f-ad99-5b6c6a66a67f/196871947214.jpg/600x600bb.jpg",        title: "Calm Down",         artist: "Rema & Selena Gomez"),
-        .init(id: "mock-30", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/d4/e3/59/d4e3592d-ed5f-7a29-1c5b-79c8af27b5f1/24UMGIM31064.rgb.jpg/600x600bb.jpg",    title: "Rich Baby Daddy",   artist: "Drake & Sexyy Red")
+        .init(id: "itunes-1440829630", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/51/61/f3/5161f3c4-2292-f035-eb68-6f95bbc9edd6/00602537542338.rgb.jpg/600x600bb.jpg",      title: "Hold On, We're Going Home", artist: "Drake"),
+        .init(id: "itunes-1662168786", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music123/v4/09/aa/f8/09aaf8da-8eaf-bf60-0c23-48a88d546cbd/26991.jpg/600x600bb.jpg",                    title: "MIA",                        artist: "Bad Bunny"),
+        .init(id: "itunes-1440843496", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/95/f5/87/95f587f7-21c3-d5f9-d81a-4350f9caa020/16UMGIM27643.rgb.jpg/600x600bb.jpg",          title: "One Dance",                  artist: "Drake"),
+        .init(id: "itunes-1447555315", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/cf/3a/db/cf3adbe6-8ea1-f60f-60fd-713eefda3962/193483317984.jpg/600x600bb.jpg",              title: "MÍA",                        artist: "Bad Bunny"),
+        .init(id: "itunes-1440841730", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/f2/0d/8b/f20d8bff-a927-ae98-6784-20a1f51cb23e/16UMGIM27642.rgb.jpg/600x600bb.jpg",          title: "Hotline Bling",              artist: "Drake"),
+        .init(id: "itunes-1572737688", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/e7/ba/c3/e7bac380-e05a-5942-e576-cf426e4c41f2/21UMGIM55277.rgb.jpg/600x600bb.jpg",          title: "Drake",                      artist: "Still Woozy"),
+        .init(id: "itunes-1833328840", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/2d/46/e0/2d46e0bc-8ab9-85dd-4b56-ee6951351034/25UM1IM19577.rgb.jpg/600x600bb.jpg",          title: "The Fate of Ophelia",        artist: "Taylor Swift"),
+        .init(id: "itunes-1440936016", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/89/4a/4a/894a4ab9-b0b0-9ea5-ca41-8da0b9b79453/14UMDIM03405.rgb.jpg/600x600bb.jpg",          title: "Shake It Off",               artist: "Taylor Swift"),
+        .init(id: "itunes-1468058171", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/49/3d/ab/493dab54-f920-9043-6181-80993b8116c9/19UMGIM53909.rgb.jpg/600x600bb.jpg",          title: "Cruel Summer",               artist: "Taylor Swift"),
+        .init(id: "itunes-1452859427", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/59/dc/cb/59dccbb0-73f9-701e-7b5b-58c902ddfe68/09UMDIM00338.rgb.jpg/600x600bb.jpg",          title: "You Belong With Me",         artist: "Taylor Swift"),
+        .init(id: "itunes-1739659144", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/92/9f/69/929f69f1-9977-3a44-d674-11f70c852d1b/24UMGIM36186.rgb.jpg/600x600bb.jpg",          title: "WILDFLOWER",                 artist: "Billie Eilish"),
+        .init(id: "itunes-1440899467", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/02/1d/30/021d3036-5503-3ed3-df00-882f2833a6ae/17UM1IM17026.rgb.jpg/600x600bb.jpg",          title: "ocean eyes",                 artist: "Billie Eilish"),
+        .init(id: "itunes-1369380479", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/27/94/d4/2794d4fc-c3e2-2373-3e6c-dd82fd5aefe6/18UMGIM18200.rgb.jpg/600x600bb.jpg",          title: "lovely",                     artist: "Billie Eilish & Khalid"),
+        .init(id: "itunes-1450695739", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/1a/37/d1/1a37d1b1-8508-54f2-f541-bf4e437dda76/19UMGIM05028.rgb.jpg/600x600bb.jpg",          title: "bad guy",                    artist: "Billie Eilish"),
+        .init(id: "itunes-1696819855", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/7d/64/76/7d64761e-a9b3-6754-8ae1-b457338beead/23UMGIM77779.rgb.jpg/600x600bb.jpg",          title: "What Was I Made For?",       artist: "Billie Eilish"),
+        .init(id: "itunes-1781270323", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/50/c2/cc/50c2cc95-3658-9417-0d4b-831abde44ba1/24UM1IM28978.rgb.jpg/600x600bb.jpg",          title: "luther",                     artist: "Kendrick Lamar"),
+        .init(id: "itunes-1440881708", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music112/v4/86/c9/bb/86c9bb30-fe3d-442e-33c1-c106c4d23705/17UMGIM88776.rgb.jpg/600x600bb.jpg",          title: "LOVE.",                      artist: "Kendrick Lamar"),
+        .init(id: "itunes-1781353929", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/31/3a/3f/313a3fbc-bb8f-80c7-b5a2-e226869a38cd/24UMGIM51924.rgb.jpg/600x600bb.jpg",          title: "Not Like Us",                artist: "Kendrick Lamar"),
+        .init(id: "itunes-1781316952", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/54/28/14/54281424-eece-0935-299d-fdd2ab403f92/24UM1IM28978.rgb.jpg/600x600bb.jpg",          title: "tv off",                     artist: "Kendrick Lamar"),
+        .init(id: "itunes-1440882165", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music112/v4/ab/16/ef/ab16efe9-e7f1-66ec-021c-5592a23f0f9e/17UMGIM88793.rgb.jpg/600x600bb.jpg",          title: "HUMBLE.",                    artist: "Kendrick Lamar"),
+        .init(id: "itunes-1787022572", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/90/5e/7e/905e7ed5-a8fa-a8f3-cd06-0028fdf3afaa/199066342442.jpg/600x600bb.jpg",              title: "NUEVAYoL",                   artist: "Bad Bunny"),
+        .init(id: "itunes-1470146813", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/77/32/74/7732746d-25e5-baae-b921-bad4a07d87b1/19UMGIM55524.rgb.jpg/600x600bb.jpg",          title: "LA CANCIÓN",                 artist: "J Balvin & Bad Bunny"),
+        .init(id: "itunes-1622045962", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music112/v4/3e/04/eb/3e04ebf6-370f-f59d-ec84-2c2643db92f1/196626945068.jpg/600x600bb.jpg",              title: "Ojitos Lindos",              artist: "Bad Bunny"),
+        .init(id: "itunes-1652080289", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music122/v4/4f/64/d2/4f64d264-ce5b-64a7-3d11-5d7550613db1/22UM1IM25832.rgb.jpg/600x600bb.jpg",          title: "No Me Conoce (Remix)",       artist: "JHAYCO, J Balvin & Bad Bunny"),
+        .init(id: "itunes-1682500319", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/b6/74/4d/b6744dbd-77ed-413a-3777-5ac6a2e780eb/197188732554.jpg/600x600bb.jpg",              title: "un x100to",                  artist: "Grupo Frontera & Bad Bunny"),
+        .init(id: "itunes-1732348414", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music112/v4/0f/90/a8/0f90a856-0447-d846-fa7b-b9c937e72310/196871881180.jpg/600x600bb.jpg",              title: "Saturn",                     artist: "SZA"),
+        .init(id: "itunes-1657869393", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music122/v4/bd/3b/a9/bd3ba9fb-9609-144f-bcfe-ead67b5f6ab3/196589564931.jpg/600x600bb.jpg",              title: "Kill Bill",                  artist: "SZA"),
+        .init(id: "itunes-852343743",  albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/d8/86/70/d8867099-c280-065b-8617-53096e63fd55/859712300362_cover.jpg/600x600bb.jpg",       title: "Childs Play",                artist: "SZA"),
+        .init(id: "itunes-1396141904", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/8a/49/80/8a49806e-e9b6-1025-f4a8-cf51edb4504b/17UM1IM31406.rgb.jpg/600x600bb.jpg",          title: "What Lovers Do",             artist: "Maroon 5"),
+        .init(id: "itunes-1538003843", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/6c/11/d6/6c11d681-aa3a-d59e-4c2e-f77e181026ab/190295092665.jpg/600x600bb.jpg",              title: "Levitating",                 artist: "Dua Lipa"),
+        .init(id: "itunes-1228739609", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/c1/54/2d/c1542d45-c6c2-12ca-7308-6eacd762c562/190295807870.jpg/600x600bb.jpg",              title: "New Rules",                  artist: "Dua Lipa"),
+        .init(id: "itunes-1689238922", albumArtURL: "https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/c0/54/97/c05497aa-c19f-bf4f-de29-71edf30fbefb/075679688767.jpg/600x600bb.jpg",              title: "Dance The Night",            artist: "Dua Lipa")
     ]
 }
