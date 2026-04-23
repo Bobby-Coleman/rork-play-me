@@ -131,17 +131,59 @@ actor ArtistLookupService {
             return []
         }
         let items = try await fetch(url: url)
-        var seen = Set<String>()
-        let albums: [Album] = items
-            .filter { $0.wrapperType == "collection" }
-            .compactMap { $0.toAlbum() }
-            .filter { seen.insert($0.id).inserted }
-        // Newest first. iTunes returns ISO-ish strings ("2017-04-14T07:00:00Z");
-        // lexicographic sort on the original `releaseDate` field would be ideal
-        // but we don't keep it here, so fall back to year-desc which is close enough.
+
+        // Pass 1: dedupe by `collectionId` (iTunes occasionally returns the
+        // same id twice across storefronts).
+        var byId: [Int: iTunesLookupItem] = [:]
+        for item in items where item.wrapperType == "collection" {
+            guard let id = item.collectionId else { continue }
+            byId[id] = item
+        }
+
+        // Pass 2: conservative near-dup collapse. Group by (normalized name,
+        // release year); inside a group keep the entry with the highest
+        // `trackCount`, tiebreaking on earliest `releaseDate`. This collapses
+        // US + UK editions of the same album from the same year, but
+        // deliberately leaves "DAMN." and "DAMN. (Collector's Edition)" or
+        // "Album (Deluxe)" variants as separate entries.
+        var groups: [String: iTunesLookupItem] = [:]
+        for item in byId.values {
+            let name = (item.collectionName ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let year = (item.releaseDate ?? "").prefix(4)
+            let key = "\(name)|\(year)"
+
+            guard let existing = groups[key] else {
+                groups[key] = item
+                continue
+            }
+
+            if Self.prefer(item, over: existing) {
+                groups[key] = item
+            }
+        }
+
+        let albums: [Album] = groups.values.compactMap { $0.toAlbum() }
+
+        // Newest first. `releaseYear` is our coarse sort key (iTunes returns
+        // "2017-04-14T07:00:00Z"); we don't propagate the full timestamp to
+        // `Album`, so year-desc is close enough for the discography grid.
         return albums.sorted { (a, b) in
             (a.releaseYear ?? "") > (b.releaseYear ?? "")
         }
+    }
+
+    /// Prefer the candidate with more tracks; tiebreak on earliest release
+    /// date (so a deluxe re-release with the same track count doesn't
+    /// beat the original).
+    private static func prefer(_ candidate: iTunesLookupItem, over existing: iTunesLookupItem) -> Bool {
+        let cCount = candidate.trackCount ?? 0
+        let eCount = existing.trackCount ?? 0
+        if cCount != eCount { return cCount > eCount }
+        let cDate = candidate.releaseDate ?? ""
+        let eDate = existing.releaseDate ?? ""
+        return cDate < eDate
     }
 
     private func fetch(url: URL) async throws -> [iTunesLookupItem] {

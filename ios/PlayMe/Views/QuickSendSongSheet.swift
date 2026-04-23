@@ -9,7 +9,7 @@ struct QuickSendSongSheet: View {
     @State private var selectedSong: Song?
     @State private var step: Int = 0
     @State private var searchTask: Task<Void, Never>?
-    @State private var detailSong: Song?
+    @State private var detailArtist: ArtistSummary?
     @State private var note: String = ""
     @State private var isSending: Bool = false
     @State private var audioPlayer: AudioPlayerService = .shared
@@ -30,33 +30,33 @@ struct QuickSendSongSheet: View {
             .animation(.spring(duration: 0.3), value: step)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
+                    // On the compose step, back returns to search results so
+                    // the user can correct a mis-tapped row. The X only
+                    // dismisses the whole sheet from the search step.
                     Button {
-                        dismiss()
+                        if step == 1 {
+                            withAnimation(.spring(duration: 0.3)) { step = 0 }
+                        } else {
+                            dismiss()
+                        }
                     } label: {
-                        Image(systemName: "xmark")
+                        Image(systemName: step == 1 ? "chevron.left" : "xmark")
                             .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(.white.opacity(0.6))
                             .frame(width: 32, height: 32)
                             .background(Color.white.opacity(0.1))
                             .clipShape(Circle())
+                            .contentTransition(.symbolEffect(.replace))
                     }
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }
         .presentationBackground(.black)
-        .sheet(item: $detailSong) { song in
-            SongDetailSheet(
-                song: song,
-                appState: appState,
-                onSend: {
-                    selectedSong = song
-                    detailSong = nil
-                    withAnimation(.spring(duration: 0.3)) { step = 1 }
-                }
-            )
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+        .sheet(item: $detailArtist) { artist in
+            ArtistView(artistId: artist.id, initialArtistName: artist.name, appState: appState)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -84,6 +84,7 @@ struct QuickSendSongSheet: View {
                     Button {
                         searchText = ""
                         appState.searchResults = []
+                        appState.topArtistMatch = nil
                         appState.isSearchingSongs = false
                         searchTask?.cancel()
                     } label: {
@@ -107,9 +108,25 @@ struct QuickSendSongSheet: View {
                             .padding(.top, 40)
                     } else if searchText.isEmpty {
                         hintView
-                    } else if appState.searchResults.isEmpty {
+                    } else if appState.searchResults.isEmpty && appState.topArtistMatch == nil {
                         noResultsView
                     } else {
+                        if let artist = appState.topArtistMatch {
+                            ArtistResultHeader()
+                            ArtistResultRow(artist: artist) {
+                                detailArtist = artist
+                            }
+                            .overlay(alignment: .bottom) {
+                                Color.white.opacity(0.05).frame(height: 0.5)
+                            }
+                            Text("SONGS")
+                                .font(.system(size: 11, weight: .bold))
+                                .tracking(1.5)
+                                .foregroundStyle(.white.opacity(0.5))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 16)
+                                .padding(.bottom, 4)
+                        }
                         ForEach(appState.searchResults) { song in
                             songRow(song)
                         }
@@ -123,21 +140,9 @@ struct QuickSendSongSheet: View {
 
     private func composeView(song: Song) -> some View {
         VStack(spacing: 0) {
-            Button {
-                withAnimation(.spring(duration: 0.3)) { step = 0 }
-            } label: {
-                HStack {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text("Back")
-                        .font(.system(size: 16, weight: .medium))
-                }
-                .foregroundStyle(.white.opacity(0.7))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-            }
-
+            // The toolbar chevron now owns the back affordance — the
+            // inline "Back" row used to sit here but was redundant next
+            // to the toolbar button.
             Color(.systemGray5)
                 .frame(width: 120, height: 120)
                 .overlay {
@@ -226,6 +231,7 @@ struct QuickSendSongSheet: View {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
             appState.searchResults = []
+            appState.topArtistMatch = nil
             appState.isSearchingSongs = false
             return
         }
@@ -292,6 +298,20 @@ struct QuickSendSongSheet: View {
 
             Spacer()
 
+            Button {
+                selectedSong = song
+                withAnimation(.spring(duration: 0.3)) { step = 1 }
+            } label: {
+                Text("NEXT")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                    .clipShape(.capsule)
+            }
+            .sensoryFeedback(.impact(weight: .light), trigger: selectedSong?.id)
+
             Text(song.duration)
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.3))
@@ -299,7 +319,11 @@ struct QuickSendSongSheet: View {
         .padding(.vertical, 12)
         .contentShape(Rectangle())
         .onTapGesture {
-            detailSong = song
+            // Row tap routes directly to compose — preview/scrub live
+            // alongside the Send button there, so the extra detail step
+            // is no longer useful. Back chevron returns here.
+            selectedSong = song
+            withAnimation(.spring(duration: 0.3)) { step = 1 }
         }
         .overlay(alignment: .bottom) {
             Color.white.opacity(0.05)

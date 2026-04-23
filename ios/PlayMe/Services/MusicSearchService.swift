@@ -44,6 +44,17 @@ nonisolated struct iTunesTrack: Codable, Sendable {
     }
 }
 
+nonisolated struct iTunesArtistSearchResponse: Codable, Sendable {
+    let resultCount: Int
+    let results: [iTunesArtistHit]
+}
+
+nonisolated struct iTunesArtistHit: Codable, Sendable {
+    let artistId: Int
+    let artistName: String
+    let primaryGenreName: String?
+}
+
 nonisolated struct SonglinkResponse: Codable, Sendable {
     let linksByPlatform: [String: SonglinkPlatformLink]?
 }
@@ -74,6 +85,58 @@ actor MusicSearchService {
 
         let decoded = try JSONDecoder().decode(iTunesSearchResponse.self, from: data)
         return decoded.results.map { $0.toSong() }
+    }
+
+    /// Returns the top iTunes artist match for `term`, but only when the
+    /// artist's name is a plausible match for the query (normalized prefix or
+    /// token containment). This keeps song-intent queries like "bohemian
+    /// rhapsody" from pinning a random artist at the top of the results.
+    func searchArtist(term: String) async throws -> ArtistSummary? {
+        let trimmed = term.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty,
+              let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "\(baseURL)?term=\(encoded)&media=music&entity=musicArtist&limit=1") else {
+            return nil
+        }
+
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            return nil
+        }
+
+        let decoded = try JSONDecoder().decode(iTunesArtistSearchResponse.self, from: data)
+        guard let hit = decoded.results.first else { return nil }
+        guard Self.queryLooksLikeArtist(query: trimmed, artistName: hit.artistName) else { return nil }
+
+        return ArtistSummary(
+            id: String(hit.artistId),
+            name: hit.artistName,
+            primaryGenre: hit.primaryGenreName
+        )
+    }
+
+    /// Normalized heuristic: show the artist row only when the query is a
+    /// prefix of the artist name OR every query token is a prefix of some
+    /// artist token. "kendrick" → "Kendrick Lamar" passes; "damn" → same
+    /// artist doesn't.
+    private static func queryLooksLikeArtist(query: String, artistName: String) -> Bool {
+        let q = normalize(query)
+        let a = normalize(artistName)
+        guard !q.isEmpty, !a.isEmpty else { return false }
+        if a.hasPrefix(q) { return true }
+
+        let qTokens = q.split(separator: " ").map(String.init)
+        let aTokens = a.split(separator: " ").map(String.init)
+        guard !qTokens.isEmpty else { return false }
+        return qTokens.allSatisfy { qt in
+            aTokens.contains(where: { $0.hasPrefix(qt) })
+        }
+    }
+
+    private static func normalize(_ s: String) -> String {
+        s.trimmingCharacters(in: .whitespacesAndNewlines)
+         .folding(options: .diacriticInsensitive, locale: .current)
+         .lowercased()
     }
 
     func resolveSpotifyURL(appleMusicURL: String) async -> String? {

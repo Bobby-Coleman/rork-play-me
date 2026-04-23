@@ -18,7 +18,7 @@ struct SendSongSheet: View {
     @State private var selectedSong: Song?
     @State private var step: Int = 0
     @State private var searchTask: Task<Void, Never>?
-    @State private var detailSong: Song?
+    @State private var detailArtist: ArtistSummary?
     @State private var audioPlayer: AudioPlayerService = .shared
     @FocusState private var isSearchFocused: Bool
 
@@ -47,15 +47,24 @@ struct SendSongSheet: View {
             .animation(.spring(duration: 0.3), value: step)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
+                    // On step 1 the user is picking recipients for a song
+                    // they already chose — the back chevron returns them to
+                    // their search results in case they tapped the wrong
+                    // row. On step 0 we keep the X for a full sheet dismiss.
                     Button {
-                        dismiss()
+                        if step == 1 {
+                            withAnimation(.spring(duration: 0.3)) { step = 0 }
+                        } else {
+                            dismiss()
+                        }
                     } label: {
-                        Image(systemName: "xmark")
+                        Image(systemName: step == 1 ? "chevron.left" : "xmark")
                             .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(.white.opacity(0.6))
                             .frame(width: 32, height: 32)
                             .background(Color.white.opacity(0.1))
                             .clipShape(Circle())
+                            .contentTransition(.symbolEffect(.replace))
                     }
                 }
             }
@@ -74,18 +83,10 @@ struct SendSongSheet: View {
             }
         }
         .presentationBackground(.black)
-        .sheet(item: $detailSong) { song in
-            SongDetailSheet(
-                song: song,
-                appState: appState,
-                onSend: {
-                    selectedSong = song
-                    detailSong = nil
-                    withAnimation(.spring(duration: 0.3)) { step = 1 }
-                }
-            )
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+        .sheet(item: $detailArtist) { artist in
+            ArtistView(artistId: artist.id, initialArtistName: artist.name, appState: appState)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -115,6 +116,7 @@ struct SendSongSheet: View {
                     Button {
                         searchText = ""
                         appState.searchResults = []
+                        appState.topArtistMatch = nil
                         appState.isSearchingSongs = false
                         searchTask?.cancel()
                     } label: {
@@ -138,9 +140,25 @@ struct SendSongSheet: View {
                             .padding(.top, 40)
                     } else if searchText.isEmpty {
                         hintView
-                    } else if appState.searchResults.isEmpty {
+                    } else if appState.searchResults.isEmpty && appState.topArtistMatch == nil {
                         noResultsView
                     } else {
+                        if let artist = appState.topArtistMatch {
+                            ArtistResultHeader()
+                            ArtistResultRow(artist: artist) {
+                                detailArtist = artist
+                            }
+                            .overlay(alignment: .bottom) {
+                                Color.white.opacity(0.05).frame(height: 0.5)
+                            }
+                            Text("SONGS")
+                                .font(.system(size: 11, weight: .bold))
+                                .tracking(1.5)
+                                .foregroundStyle(.white.opacity(0.5))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 16)
+                                .padding(.bottom, 4)
+                        }
                         ForEach(appState.searchResults) { song in
                             songRow(song)
                         }
@@ -183,6 +201,7 @@ struct SendSongSheet: View {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
             appState.searchResults = []
+            appState.topArtistMatch = nil
             appState.isSearchingSongs = false
             return
         }
@@ -249,6 +268,20 @@ struct SendSongSheet: View {
 
             Spacer()
 
+            Button {
+                selectedSong = song
+                withAnimation(.spring(duration: 0.3)) { step = 1 }
+            } label: {
+                Text("SHARE")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                    .clipShape(.capsule)
+            }
+            .sensoryFeedback(.impact(weight: .light), trigger: selectedSong?.id)
+
             Text(song.duration)
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.3))
@@ -256,7 +289,12 @@ struct SendSongSheet: View {
         .padding(.vertical, 12)
         .contentShape(Rectangle())
         .onTapGesture {
-            detailSong = song
+            // Row tap routes directly to the friend picker — the picker
+            // now owns preview/scrub itself, so the intermediate detail
+            // sheet is no longer worth an extra step. The back chevron on
+            // that screen brings the user right back to these results.
+            selectedSong = song
+            withAnimation(.spring(duration: 0.3)) { step = 1 }
         }
         .overlay(alignment: .bottom) {
             Color.white.opacity(0.05)

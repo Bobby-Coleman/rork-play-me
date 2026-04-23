@@ -785,7 +785,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = app.rork.6lps4bdet5kkzmhqjyurh.notificationservice;
 				PRODUCT_NAME = PlayMeNotificationService;
 				SDKROOT = iphoneos;
@@ -813,7 +813,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = app.rork.6lps4bdet5kkzmhqjyurh.notificationservice;
 				PRODUCT_NAME = PlayMeNotificationService;
 				SDKROOT = iphoneos;
@@ -830,7 +830,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = PlayMeWidget/PlayMeWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = Y8LFBVELVR;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PlayMeWidget/Info.plist;
@@ -841,7 +841,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = app.rork.6lps4bdet5kkzmhqjyurh.playmewidget;
 				PRODUCT_NAME = PlayMeWidget;
 				SDKROOT = iphoneos;
@@ -858,7 +858,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = PlayMeWidget/PlayMeWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = Y8LFBVELVR;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PlayMeWidget/Info.plist;
@@ -869,7 +869,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = app.rork.6lps4bdet5kkzmhqjyurh.playmewidget;
 				PRODUCT_NAME = PlayMeWidget;
 				SDKROOT = iphoneos;

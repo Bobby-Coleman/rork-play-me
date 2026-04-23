@@ -17,6 +17,7 @@ struct ArtistView: View {
     @State private var errorMessage: String?
     @State private var detailSong: Song?
     @State private var detailAlbum: Album?
+    @State private var artistImageURL: String?
 
     private let columns: [GridItem] = [
         GridItem(.flexible(), spacing: 12),
@@ -76,22 +77,82 @@ struct ArtistView: View {
 
     // MARK: - Header
 
+    private var displayName: String {
+        if let loaded = details?.artistName, !loaded.isEmpty { return loaded }
+        return initialArtistName ?? ""
+    }
+
+    private var initials: String {
+        let tokens = displayName
+            .split(separator: " ")
+            .filter { !$0.isEmpty }
+            .prefix(2)
+        let letters = tokens.compactMap { $0.first.map(String.init) }
+        return letters.joined().uppercased()
+    }
+
+    /// 260pt photo-forward header: artwork fills the width, a dark gradient
+    /// scrim keeps the typography legible, and the monogram fallback keeps
+    /// the layout exactly the same height whether Deezer has a picture or
+    /// not (no jump once the URL resolves).
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("ARTIST")
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1.5)
-                .foregroundStyle(.white.opacity(0.5))
-            Text(details?.artistName.isEmpty == false ? details!.artistName : (initialArtistName ?? ""))
-                .font(.system(size: 32, weight: .bold))
-                .foregroundStyle(.white)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
+        ZStack(alignment: .bottomLeading) {
+            Group {
+                if let url = artistImageURL, let parsed = URL(string: url) {
+                    AsyncImage(url: parsed) { phase in
+                        if let image = phase.image {
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } else {
+                            monogramBackdrop
+                        }
+                    }
+                } else {
+                    monogramBackdrop
+                }
+            }
+            .frame(height: 260)
+            .frame(maxWidth: .infinity)
+            .clipped()
+
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.35), .black],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 260)
+            .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("ARTIST")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(1.5)
+                    .foregroundStyle(.white.opacity(0.75))
+                Text(displayName)
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 2)
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 20)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 24)
-        .padding(.top, 8)
-        .padding(.bottom, 24)
+        .padding(.bottom, 16)
+    }
+
+    /// Large initials badge used when Deezer has no image for this artist.
+    /// Kept inside the 260pt frame so the header height stays stable.
+    private var monogramBackdrop: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(white: 0.22), Color(white: 0.08)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Text(initials.isEmpty ? "?" : initials)
+                .font(.system(size: 96, weight: .heavy))
+                .foregroundStyle(.white.opacity(0.2))
+        }
     }
 
     // MARK: - Loaded content
@@ -255,14 +316,40 @@ struct ArtistView: View {
     private func load(forceRefresh: Bool = false) async {
         isLoading = true
         errorMessage = nil
+
+        // Resolve the Deezer image in parallel with the iTunes lookup so
+        // the photo can appear the moment the header renders — no extra
+        // serial latency on top of the artist page load. The name-guarded
+        // resolver inside ArtistImageService returns nil on miss and the
+        // monogram fallback keeps rendering.
+        let name = initialArtistName ?? ""
+        async let imageTask: String? = name.isEmpty ? nil : ArtistImageService.shared.imageURL(forName: name)
+
+        async let detailsTask: ArtistDetails = ArtistLookupService.shared.fetchArtistDetails(
+            artistId: artistId,
+            forceRefresh: forceRefresh
+        )
+
         do {
-            let fetched = try await ArtistLookupService.shared.fetchArtistDetails(
-                artistId: artistId,
-                forceRefresh: forceRefresh
-            )
+            let fetched = try await detailsTask
             details = fetched
+            // If we didn't have a name hint up front (or the resolver came
+            // back nil), try again now that iTunes gave us the canonical
+            // artist name.
+            if artistImageURL == nil {
+                let resolved = await imageTask
+                if let resolved {
+                    artistImageURL = resolved
+                } else if name.isEmpty || name.caseInsensitiveCompare(fetched.artistName) != .orderedSame {
+                    artistImageURL = await ArtistImageService.shared.imageURL(forName: fetched.artistName)
+                }
+            }
         } catch {
             errorMessage = error.localizedDescription
+            // Still let any image we resolved show up behind the error.
+            if artistImageURL == nil {
+                artistImageURL = await imageTask
+            }
         }
         isLoading = false
     }

@@ -88,6 +88,10 @@ class AppState {
     var notificationsEnabled: Bool = true
     var songs: [Song] = []
     var searchResults: [Song] = []
+    /// Artist-entity hit for the current `searchResults` query, surfaced as
+    /// a Spotify-style "Top result" row above the song list. Only populated
+    /// when the query meaningfully matches an iTunes artist name.
+    var topArtistMatch: ArtistSummary? = nil
     var isSearchingSongs: Bool = false
     var receivedShares: [SongShare] = []
     var sentShares: [SongShare] = []
@@ -449,16 +453,27 @@ class AppState {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
             searchResults = []
+            topArtistMatch = nil
             isSearchingSongs = false
             return
         }
 
         isSearchingSongs = true
-        do {
-            searchResults = try await MusicSearchService.shared.search(term: trimmed)
-        } catch {
-            searchResults = []
-        }
+        // Fire both iTunes calls in parallel — the artist lookup is cheap
+        // and finishes alongside the song search, so we don't pay any
+        // serial latency for the Spotify-style top-result row.
+        async let songsTask: [Song] = {
+            do { return try await MusicSearchService.shared.search(term: trimmed) }
+            catch { return [] }
+        }()
+        async let artistTask: ArtistSummary? = {
+            do { return try await MusicSearchService.shared.searchArtist(term: trimmed) }
+            catch { return nil }
+        }()
+
+        let (songs, artist) = await (songsTask, artistTask)
+        searchResults = songs
+        topArtistMatch = artist
         isSearchingSongs = false
     }
 
