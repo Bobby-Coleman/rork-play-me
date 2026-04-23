@@ -3,6 +3,7 @@ import UIKit
 import UserNotifications
 import WidgetKit
 import FirebaseFirestore
+import MusicKit
 
 @Observable
 @MainActor
@@ -87,12 +88,22 @@ class AppState {
     var sendStats: [String: SendStat] = [:]
     var notificationsEnabled: Bool = true
     var songs: [Song] = []
-    var searchResults: [Song] = []
-    /// Artist-entity hit for the current `searchResults` query, surfaced as
-    /// a Spotify-style "Top result" row above the song list. Only populated
-    /// when the query meaningfully matches an iTunes artist name.
-    var topArtistMatch: ArtistSummary? = nil
+    /// Bucketed search response for the current query, pre-ranked by
+    /// Apple Music (MusicKit). View code just slices by `searchFilter`.
+    /// See `SearchResults` for the shape.
+    var searchResults: SearchResults = .empty
+    /// Active filter tab (`All | Artists | Songs | Albums`). The service
+    /// layer fetches everything every time and this just picks the slice.
+    var searchFilter: SearchFilter = .all
     var isSearchingSongs: Bool = false
+    /// Last-observed MusicKit authorization status. `noResultsView` gates
+    /// the "Open Settings" prompt on this being `.denied`.
+    var musicAuthStatus: MusicAuthorization.Status = MusicAuthorization.currentStatus
+
+    /// Convenience for views that only need to know whether to surface
+    /// the Settings deep-link (keeps `import MusicKit` out of the view
+    /// layer).
+    var isMusicSearchDenied: Bool { musicAuthStatus == .denied }
     var receivedShares: [SongShare] = []
     var sentShares: [SongShare] = []
     var likedShareIds: Set<String> = [] {
@@ -449,31 +460,41 @@ class AppState {
         await loadConversations()
     }
 
+    /// MusicKit catalog search. Apple Music's own ranking model drives
+    /// the order of songs/artists/albums — the same ordering you'd get
+    /// in the Apple Music app itself. The view layer reads
+    /// `searchResults` by the active `searchFilter`; bucket ordering is
+    /// authoritative and we don't re-sort client-side.
+    ///
+    /// Note: this works for every authorized user regardless of whether
+    /// they subscribe to Apple Music. Full-track playback still flows
+    /// through `AudioPlayerService` (30s previews) and deep-linking via
+    /// `resolveSpotifyURL` for Spotify-preferring users.
     func searchSongs(query: String) async {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
-            searchResults = []
-            topArtistMatch = nil
+            searchResults = .empty
             isSearchingSongs = false
             return
         }
 
         isSearchingSongs = true
-        // Fire both iTunes calls in parallel — the artist lookup is cheap
-        // and finishes alongside the song search, so we don't pay any
-        // serial latency for the Spotify-style top-result row.
-        async let songsTask: [Song] = {
-            do { return try await MusicSearchService.shared.search(term: trimmed) }
-            catch { return [] }
-        }()
-        async let artistTask: ArtistSummary? = {
-            do { return try await MusicSearchService.shared.searchArtist(term: trimmed) }
-            catch { return nil }
-        }()
 
-        let (songs, artist) = await (songsTask, artistTask)
-        searchResults = songs
-        topArtistMatch = artist
+        let response = await AppleMusicSearchService.shared.search(term: trimmed)
+
+        // Bail if the caller was cancelled mid-flight (debounce typed another key).
+        if Task.isCancelled {
+            isSearchingSongs = false
+            return
+        }
+
+        musicAuthStatus = response.authStatus
+        searchResults = SearchResults(
+            artists: response.artists,
+            songs: response.songs,
+            albums: response.albums,
+            topHit: response.topHit
+        )
         isSearchingSongs = false
     }
 

@@ -27,6 +27,8 @@
 	<array>
 		<string>spotify</string>
 	</array>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>PlayMe searches Apple Music so you can find songs to send to your friends.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>PlayMe uses your contacts to help you find and invite friends.</string>
 	<key>UIBackgroundModes</key>

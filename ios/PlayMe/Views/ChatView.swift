@@ -100,7 +100,9 @@ struct ChatView: View {
             }
         }
         .sheet(item: $sheetSong) { song in
-            SongDetailSheet(song: song, appState: appState, share: nil)
+            SongActionSheet(song: song, appState: appState)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: $artistSong) { song in
             if let aid = song.artistId {

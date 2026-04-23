@@ -11,6 +11,10 @@ nonisolated struct Album: Identifiable, Hashable, Sendable {
     let releaseYear: String?
     let trackCount: Int?
     let primaryGenre: String?
+    /// Owning artist name. Present when the album comes from a search
+    /// result (where the row needs a byline) and nil when it comes from
+    /// `ArtistView`/`AlbumDetailView` which already know the artist.
+    let artistName: String?
 
     init(
         id: String,
@@ -18,7 +22,8 @@ nonisolated struct Album: Identifiable, Hashable, Sendable {
         artworkURL: String,
         releaseYear: String? = nil,
         trackCount: Int? = nil,
-        primaryGenre: String? = nil
+        primaryGenre: String? = nil,
+        artistName: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -26,5 +31,6 @@ nonisolated struct Album: Identifiable, Hashable, Sendable {
         self.releaseYear = releaseYear
         self.trackCount = trackCount
         self.primaryGenre = primaryGenre
+        self.artistName = artistName
     }
 }

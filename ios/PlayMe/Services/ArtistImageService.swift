@@ -71,7 +71,19 @@ actor ArtistImageService {
             }
             cache[key] = .miss
             return nil
+        } catch is CancellationError {
+            // Rapid-typing flows cancel in-flight requests by design. Don't
+            // poison the cache with a miss for a valid artist name just
+            // because the user kept typing — the next real attempt should
+            // be allowed to hit the network again.
+            return nil
         } catch {
+            // URLSession surfaces cancellation as NSURLErrorCancelled rather
+            // than a Swift CancellationError on some OS versions. Treat the
+            // same way so cancellations never become permanent misses.
+            if (error as NSError).code == NSURLErrorCancelled {
+                return nil
+            }
             cache[key] = .miss
             return nil
         }

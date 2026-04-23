@@ -129,7 +129,7 @@ struct ProfileView: View {
             await appState.refreshShares()
         }
         .sheet(item: $detailShare) { share in
-            SongDetailSheet(song: share.song, appState: appState, share: share)
+            SongActionSheet(song: share.song, appState: appState, share: share)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }

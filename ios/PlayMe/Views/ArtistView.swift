@@ -15,7 +15,7 @@ struct ArtistView: View {
     @State private var details: ArtistDetails?
     @State private var isLoading: Bool = true
     @State private var errorMessage: String?
-    @State private var detailSong: Song?
+    @State private var actionSong: Song?
     @State private var detailAlbum: Album?
     @State private var artistImageURL: String?
 
@@ -63,8 +63,8 @@ struct ArtistView: View {
         .task(id: artistId) {
             await load()
         }
-        .sheet(item: $detailSong) { song in
-            SongDetailSheet(song: song, appState: appState)
+        .sheet(item: $actionSong) { song in
+            SongActionSheet(song: song, appState: appState)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
@@ -193,42 +193,52 @@ struct ArtistView: View {
     }
 
     private func popularRow(index: Int, song: Song) -> some View {
-        Button {
-            detailSong = song
-        } label: {
-            HStack(spacing: 14) {
-                Text("\(index)")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .frame(width: 22, alignment: .leading)
+        HStack(spacing: 14) {
+            Text("\(index)")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.4))
+                .frame(width: 22, alignment: .leading)
 
-                AsyncImage(url: URL(string: song.albumArtURL)) { phase in
-                    if let image = phase.image {
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } else {
-                        Color(.systemGray5)
-                    }
+            AsyncImage(url: URL(string: song.albumArtURL)) { phase in
+                if let image = phase.image {
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } else {
+                    Color(.systemGray5)
                 }
-                .frame(width: 44, height: 44)
-                .clipShape(.rect(cornerRadius: 4))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(song.title)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Text(song.artist)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.5))
-                        .lineLimit(1)
-                }
-
-                Spacer()
             }
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
+            .frame(width: 44, height: 44)
+            .clipShape(.rect(cornerRadius: 4))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(song.title)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(song.artist)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Button {
+                actionSong = song
+            } label: {
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .frame(width: 36, height: 36)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(.capsule)
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            actionSong = song
+        }
     }
 
     private func albumTile(_ album: Album) -> some View {

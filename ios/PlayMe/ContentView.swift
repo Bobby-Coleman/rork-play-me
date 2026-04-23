@@ -242,7 +242,7 @@ struct ContentView: View {
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $miniPlayerSong) { song in
-            SongDetailSheet(song: song, appState: appState)
+            SongActionSheet(song: song, appState: appState)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }

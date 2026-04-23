@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Simple track list for an album. Tapping a row routes into
-/// `SongDetailSheet` — same unified hub every other song surface uses.
+/// Simple track list for an album. Tapping a row routes into the canonical
+/// `SongActionSheet` — same unified hub every other song surface uses.
 struct AlbumDetailView: View {
     let album: Album
     let appState: AppState
@@ -11,7 +11,7 @@ struct AlbumDetailView: View {
     @State private var tracks: [Song] = []
     @State private var isLoading: Bool = true
     @State private var errorMessage: String?
-    @State private var detailSong: Song?
+    @State private var actionSong: Song?
 
     var body: some View {
         NavigationStack {
@@ -52,8 +52,8 @@ struct AlbumDetailView: View {
         .task(id: album.id) {
             await load()
         }
-        .sheet(item: $detailSong) { song in
-            SongDetailSheet(song: song, appState: appState)
+        .sheet(item: $actionSong) { song in
+            SongActionSheet(song: song, appState: appState)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
@@ -102,36 +102,46 @@ struct AlbumDetailView: View {
     }
 
     private func trackRow(index: Int, song: Song) -> some View {
-        Button {
-            detailSong = song
-        } label: {
-            HStack(spacing: 14) {
-                Text("\(index)")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .frame(width: 22, alignment: .leading)
+        HStack(spacing: 14) {
+            Text("\(index)")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.white.opacity(0.4))
+                .frame(width: 22, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(song.title)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Text(song.artist)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.5))
-                        .lineLimit(1)
-                }
-
-                Spacer()
-
-                Text(song.duration)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(song.title)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(song.artist)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .lineLimit(1)
             }
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
+
+            Spacer()
+
+            Text(song.duration)
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.35))
+
+            Button {
+                actionSong = song
+            } label: {
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .frame(width: 32, height: 32)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(.capsule)
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            actionSong = song
+        }
         .overlay(alignment: .bottom) {
             Color.white.opacity(0.05).frame(height: 0.5)
         }

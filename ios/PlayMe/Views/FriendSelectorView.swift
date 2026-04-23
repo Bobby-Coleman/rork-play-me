@@ -24,6 +24,10 @@ struct FriendSelectorView: View {
     @State private var note: String = ""
     @State private var showSentAnimation = false
     @State private var showAddFriends = false
+    /// Pre-resolved Spotify URL for the "Open in Spotify" button. When the
+    /// user prefers Spotify and the song only carries an Apple-Music URL,
+    /// we resolve it once on appear so the tap-through is instant.
+    @State private var resolvedSpotifyURL: String?
     @FocusState private var isNoteFocused: Bool
 
     private var rankedFriends: [AppUser] {
@@ -84,6 +88,17 @@ struct FriendSelectorView: View {
         }
         .animation(.spring(duration: 0.3), value: showSentAnimation)
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        .task {
+            // Resolve once per-appearance so the "Open in Spotify" pill can
+            // jump straight into the app. No-op when the user prefers Apple
+            // Music, when the song already ships with a Spotify URI, or when
+            // there's no Apple-Music URL to translate from.
+            if appState.preferredMusicService == .spotify,
+               SpotifyDeepLinkResolver.spotifyTrackID(for: song, resolvedSpotifyURL: nil) == nil,
+               let amURL = song.appleMusicURL {
+                resolvedSpotifyURL = await MusicSearchService.shared.resolveSpotifyURL(appleMusicURL: amURL)
+            }
+        }
         .sheet(isPresented: $showAddFriends) {
             AddFriendsView(appState: appState)
                 .presentationDetents([.large])
@@ -160,32 +175,43 @@ struct FriendSelectorView: View {
     // MARK: - Preview controls
 
     /// Inline scrub bar + play/pause so users can audition the track while
-    /// picking recipients. Uses the shared `AudioPlayerService` instance —
-    /// playback state survives returning to the previous step and vice versa.
+    /// picking recipients. The "Open in Spotify / Apple Music" pill sits
+    /// on the same row as the play button — same layout as the feed card
+    /// so the share view feels like a continuation rather than a separate
+    /// surface. Service honors `appState.preferredMusicService`, set once
+    /// during onboarding.
     private var previewControls: some View {
         VStack(spacing: 10) {
             ScrubBarView(songId: song.id, fallbackDuration: song.duration)
 
-            Button {
-                audioPlayer.play(song: song)
-            } label: {
-                ZStack {
-                    if isCurrentSong && audioPlayer.isLoading {
-                        ProgressView()
-                            .tint(.black)
-                            .scaleEffect(0.8)
-                    } else {
-                        Image(systemName: isPlayingThis ? "pause.fill" : "play.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                            .contentTransition(.symbolEffect(.replace))
+            HStack(spacing: 10) {
+                Button {
+                    audioPlayer.play(song: song)
+                } label: {
+                    ZStack {
+                        if isCurrentSong && audioPlayer.isLoading {
+                            ProgressView()
+                                .tint(.black)
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: isPlayingThis ? "pause.fill" : "play.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .contentTransition(.symbolEffect(.replace))
+                        }
                     }
+                    .foregroundStyle(.black)
+                    .frame(width: 52, height: 40)
+                    .background(.white)
+                    .clipShape(.capsule)
                 }
-                .foregroundStyle(.black)
-                .frame(width: 52, height: 40)
-                .background(.white)
-                .clipShape(.capsule)
+                .sensoryFeedback(.impact(weight: .light), trigger: isPlayingThis)
+
+                openInServiceButton(
+                    song: song,
+                    service: appState.preferredMusicService,
+                    resolvedSpotifyURL: resolvedSpotifyURL
+                )
             }
-            .sensoryFeedback(.impact(weight: .light), trigger: isPlayingThis)
         }
     }
 

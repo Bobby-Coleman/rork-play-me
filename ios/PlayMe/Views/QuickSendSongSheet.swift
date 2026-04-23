@@ -10,6 +10,7 @@ struct QuickSendSongSheet: View {
     @State private var step: Int = 0
     @State private var searchTask: Task<Void, Never>?
     @State private var detailArtist: ArtistSummary?
+    @State private var detailAlbum: Album?
     @State private var note: String = ""
     @State private var isSending: Bool = false
     @State private var audioPlayer: AudioPlayerService = .shared
@@ -58,6 +59,11 @@ struct QuickSendSongSheet: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(item: $detailAlbum) { album in
+            AlbumDetailView(album: album, appState: appState)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     private var songSearchView: some View {
@@ -83,8 +89,7 @@ struct QuickSendSongSheet: View {
                 if !searchText.isEmpty {
                     Button {
                         searchText = ""
-                        appState.searchResults = []
-                        appState.topArtistMatch = nil
+                        appState.searchResults = .empty
                         appState.isSearchingSongs = false
                         searchTask?.cancel()
                     } label: {
@@ -98,43 +103,161 @@ struct QuickSendSongSheet: View {
             .background(Color.white.opacity(0.08))
             .clipShape(.rect(cornerRadius: 12))
             .padding(.horizontal, 20)
-            .padding(.bottom, 16)
+            .padding(.bottom, 8)
+
+            if !searchText.isEmpty && !appState.searchResults.isEmpty {
+                SearchFilterBar(selection: Binding(
+                    get: { appState.searchFilter },
+                    set: { appState.searchFilter = $0 }
+                ))
+                .padding(.bottom, 4)
+            }
 
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    if appState.isSearchingSongs {
+                    if appState.isSearchingSongs && appState.searchResults.isEmpty {
                         ProgressView()
                             .tint(.white)
                             .padding(.top, 40)
                     } else if searchText.isEmpty {
                         hintView
-                    } else if appState.searchResults.isEmpty && appState.topArtistMatch == nil {
+                    } else if appState.searchResults.isEmpty {
                         noResultsView
                     } else {
-                        if let artist = appState.topArtistMatch {
-                            ArtistResultHeader()
-                            ArtistResultRow(artist: artist) {
-                                detailArtist = artist
-                            }
-                            .overlay(alignment: .bottom) {
-                                Color.white.opacity(0.05).frame(height: 0.5)
-                            }
-                            Text("SONGS")
-                                .font(.system(size: 11, weight: .bold))
-                                .tracking(1.5)
-                                .foregroundStyle(.white.opacity(0.5))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.top, 16)
-                                .padding(.bottom, 4)
-                        }
-                        ForEach(appState.searchResults) { song in
-                            songRow(song)
-                        }
+                        resultsContent
                     }
                 }
                 .padding(.horizontal, 20)
             }
             .scrollDismissesKeyboard(.interactively)
+        }
+    }
+
+    @ViewBuilder
+    private var resultsContent: some View {
+        switch appState.searchFilter {
+        case .all:     allGroupedContent
+        case .artists: artistsFullList
+        case .songs:   songsFullList
+        case .albums:  albumsFullList
+        }
+    }
+
+    @ViewBuilder
+    private var allGroupedContent: some View {
+        let results = appState.searchResults
+
+        if let top = results.topHit {
+            ArtistResultHeader()
+            topHitRow(top)
+                .overlay(alignment: .bottom) {
+                    Color.white.opacity(0.05).frame(height: 0.5)
+                }
+        }
+
+        let artists = Array(results.artists.prefix(3).filter { artist in
+            if case .artist(let top) = results.topHit, top.id == artist.id { return false }
+            return true
+        })
+        if !artists.isEmpty {
+            SearchSectionHeader(title: "Artists", onSeeAll: results.artists.count > artists.count ? {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                appState.searchFilter = .artists
+            } : nil)
+            ForEach(artists) { artist in
+                ArtistResultRow(artist: artist) {
+                    detailArtist = artist
+                }
+                .id(artist.id)
+                .overlay(alignment: .bottom) {
+                    Color.white.opacity(0.05).frame(height: 0.5)
+                }
+            }
+        }
+
+        let songs = Array(results.songs.prefix(4).filter { song in
+            if case .song(let top) = results.topHit, top.id == song.id { return false }
+            return true
+        })
+        if !songs.isEmpty {
+            SearchSectionHeader(title: "Songs", onSeeAll: results.songs.count > songs.count ? {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                appState.searchFilter = .songs
+            } : nil)
+            ForEach(songs) { song in
+                songRow(song)
+            }
+        }
+
+        let albums = Array(results.albums.prefix(3).filter { album in
+            if case .album(let top) = results.topHit, top.id == album.id { return false }
+            return true
+        })
+        if !albums.isEmpty {
+            SearchSectionHeader(title: "Albums", onSeeAll: results.albums.count > albums.count ? {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                appState.searchFilter = .albums
+            } : nil)
+            ForEach(albums) { album in
+                AlbumResultRow(album: album) {
+                    detailAlbum = album
+                }
+                .id(album.id)
+                .overlay(alignment: .bottom) {
+                    Color.white.opacity(0.05).frame(height: 0.5)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var artistsFullList: some View {
+        ForEach(appState.searchResults.artists) { artist in
+            ArtistResultRow(artist: artist) {
+                detailArtist = artist
+            }
+            .id(artist.id)
+            .overlay(alignment: .bottom) {
+                Color.white.opacity(0.05).frame(height: 0.5)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var songsFullList: some View {
+        ForEach(appState.searchResults.songs) { song in
+            songRow(song)
+        }
+    }
+
+    @ViewBuilder
+    private var albumsFullList: some View {
+        ForEach(appState.searchResults.albums) { album in
+            AlbumResultRow(album: album) {
+                detailAlbum = album
+            }
+            .id(album.id)
+            .overlay(alignment: .bottom) {
+                Color.white.opacity(0.05).frame(height: 0.5)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func topHitRow(_ hit: SearchResults.TopHit) -> some View {
+        switch hit {
+        case .artist(let artist):
+            ArtistResultRow(artist: artist) {
+                detailArtist = artist
+            }
+            .id(artist.id)
+        case .song(let song):
+            songRow(song)
+        case .album(let album):
+            AlbumResultRow(album: album) {
+                detailAlbum = album
+            }
+            .id(album.id)
         }
     }
 
@@ -214,13 +337,36 @@ struct QuickSendSongSheet: View {
     }
 
     private var noResultsView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 36))
-                .foregroundStyle(.white.opacity(0.15))
-            Text("No results for \"\(searchText)\"")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white.opacity(0.3))
+        VStack(spacing: 14) {
+            if appState.isMusicSearchDenied {
+                Image(systemName: "music.note.list")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.white.opacity(0.15))
+                Text("Allow Apple Music access to search songs")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Text("Open Settings")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(Capsule().fill(.white))
+                }
+            } else {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.white.opacity(0.15))
+                Text("No results for \"\(searchText)\"")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -230,8 +376,7 @@ struct QuickSendSongSheet: View {
         searchTask?.cancel()
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
-            appState.searchResults = []
-            appState.topArtistMatch = nil
+            appState.searchResults = .empty
             appState.isSearchingSongs = false
             return
         }
@@ -289,11 +434,28 @@ struct QuickSendSongSheet: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                Text(song.artist.uppercased())
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .tracking(0.5)
-                    .lineLimit(1)
+                if let artistId = song.artistId {
+                    Button {
+                        detailArtist = ArtistSummary(
+                            id: artistId,
+                            name: song.artist,
+                            primaryGenre: nil
+                        )
+                    } label: {
+                        Text(song.artist.uppercased())
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .tracking(0.5)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(song.artist.uppercased())
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .tracking(0.5)
+                        .lineLimit(1)
+                }
             }
 
             Spacer()
@@ -302,14 +464,13 @@ struct QuickSendSongSheet: View {
                 selectedSong = song
                 withAnimation(.spring(duration: 0.3)) { step = 1 }
             } label: {
-                Text("NEXT")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color(red: 0.76, green: 0.38, blue: 0.35))
-                    .clipShape(.capsule)
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Color.white.opacity(0.08)))
             }
+            .buttonStyle(.plain)
             .sensoryFeedback(.impact(weight: .light), trigger: selectedSong?.id)
 
             Text(song.duration)

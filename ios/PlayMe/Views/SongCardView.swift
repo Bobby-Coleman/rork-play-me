@@ -26,8 +26,8 @@ struct SongCardView: View {
         isCurrentSong && audioPlayer.isPlaying
     }
 
-    /// True when the current user is the sender of this share. Keeps parity
-    /// with `SongDetailSheet` so a sent song never prompts a self-reply.
+    /// True when the current user is the sender of this share. Kept so a
+    /// sent song never prompts a self-reply via the chat affordance below.
     private var viewerIsSender: Bool {
         guard let me = appState.currentUser?.id else { return false }
         return share.sender.id == me
@@ -120,7 +120,7 @@ struct SongCardView: View {
                 .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showDetailSheet) {
-                SongDetailSheet(song: share.song, appState: appState, share: share)
+                SongActionSheet(song: share.song, appState: appState, share: share)
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
