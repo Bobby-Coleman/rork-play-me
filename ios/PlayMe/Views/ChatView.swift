@@ -11,6 +11,7 @@ struct ChatView: View {
     @State private var listener: ListenerRegistration?
     @State private var isSending: Bool = false
     @State private var sheetSong: Song?
+    @State private var artistSong: Song?
     @State private var reportTarget: ReportTarget?
     @State private var showReportedToast: Bool = false
     @State private var pendingBlock: AppUser?
@@ -101,6 +102,13 @@ struct ChatView: View {
         .sheet(item: $sheetSong) { song in
             SongDetailSheet(song: song, appState: appState, share: nil)
         }
+        .sheet(item: $artistSong) { song in
+            if let aid = song.artistId {
+                ArtistView(artistId: aid, initialArtistName: song.artist, appState: appState)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
         .sheet(item: $reportTarget) { target in
             ReportSheet(target: target, appState: appState) {
                 withAnimation { showReportedToast = true }
@@ -179,42 +187,52 @@ struct ChatView: View {
     }
 
     private func inlineSongCard(_ song: Song) -> some View {
-        Button {
-            sheetSong = song
-        } label: {
-            HStack(spacing: 10) {
-                AsyncImage(url: URL(string: song.albumArtURL)) { phase in
-                    if let image = phase.image {
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } else {
-                        Color(.systemGray5)
-                    }
+        HStack(spacing: 10) {
+            AsyncImage(url: URL(string: song.albumArtURL)) { phase in
+                if let image = phase.image {
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    Color(.systemGray5)
                 }
-                .frame(width: 44, height: 44)
-                .clipShape(.rect(cornerRadius: 6))
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(.rect(cornerRadius: 6))
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(song.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(song.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if song.artistId != nil {
+                    Button {
+                        artistSong = song
+                    } label: {
+                        Text(song.artist)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                } else {
                     Text(song.artist)
                         .font(.system(size: 11))
                         .foregroundStyle(.white.opacity(0.5))
                         .lineLimit(1)
                 }
-
-                Spacer()
             }
-            .padding(8)
-            .background(Color.white.opacity(0.08))
-            .clipShape(.rect(cornerRadius: 12))
-            .frame(maxWidth: 240)
-            .contentShape(.rect)
+
+            Spacer()
         }
-        .buttonStyle(.plain)
+        .padding(8)
+        .background(Color.white.opacity(0.08))
+        .clipShape(.rect(cornerRadius: 12))
+        .frame(maxWidth: 240)
+        .contentShape(.rect)
+        .onTapGesture {
+            sheetSong = song
+        }
     }
 
     private var inputBar: some View {

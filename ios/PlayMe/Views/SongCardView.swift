@@ -15,6 +15,8 @@ struct SongCardView: View {
     @State private var isNoteExpanded: Bool = false
     @State private var chatTarget: Conversation?
     @State private var isOpeningChat: Bool = false
+    @State private var showDetailSheet: Bool = false
+    @State private var showArtistView: Bool = false
 
     private var isCurrentSong: Bool {
         audioPlayer.currentSongId == share.song.id
@@ -117,6 +119,18 @@ struct SongCardView: View {
                 .presentationBackground(.black)
                 .presentationDragIndicator(.visible)
             }
+            .sheet(isPresented: $showDetailSheet) {
+                SongDetailSheet(song: share.song, appState: appState, share: share)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showArtistView) {
+                if let aid = share.song.artistId {
+                    ArtistView(artistId: aid, initialArtistName: share.song.artist, appState: appState)
+                        .presentationDetents([.large])
+                        .presentationDragIndicator(.visible)
+                }
+            }
             .overlay(alignment: .top) {
                 if showReportedToast {
                     Text("Report submitted. Thanks.")
@@ -161,13 +175,36 @@ struct SongCardView: View {
                 .foregroundStyle(.white.opacity(0.5))
                 .lineLimit(1)
 
-            (Text(share.song.title).fontWeight(.bold).foregroundColor(.white)
-                + Text("  \u{00B7}  ").foregroundColor(.white.opacity(0.4))
-                + Text(share.song.artist).foregroundColor(.white.opacity(0.65)))
-                .font(.system(size: 17))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .multilineTextAlignment(.center)
+            HStack(spacing: 0) {
+                Button {
+                    showDetailSheet = true
+                } label: {
+                    Text(share.song.title)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+
+                Text("  \u{00B7}  ")
+                    .foregroundStyle(.white.opacity(0.4))
+
+                if share.song.artistId != nil {
+                    Button {
+                        showArtistView = true
+                    } label: {
+                        Text(share.song.artist)
+                            .foregroundStyle(.white.opacity(0.65))
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(share.song.artist)
+                        .foregroundStyle(.white.opacity(0.65))
+                }
+            }
+            .font(.system(size: 17))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .multilineTextAlignment(.center)
         }
     }
 
@@ -176,6 +213,10 @@ struct SongCardView: View {
     private func artwork(size: CGFloat) -> some View {
         AlbumArtSquare(url: share.song.albumArtURL, showsShadow: false)
             .frame(width: size, height: size)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                showDetailSheet = true
+            }
             .overlay(alignment: .topTrailing) {
                 Button {
                     onToggleLike()

@@ -9,8 +9,24 @@ nonisolated struct Song: Identifiable, Hashable, Sendable {
     let spotifyURI: String?
     let previewURL: String?
     let appleMusicURL: String?
+    /// iTunes artistId. Optional because legacy Firestore shares never stored
+    /// it; when `nil` the artist label falls back to plain non-tappable text.
+    let artistId: String?
+    /// iTunes collectionId (album). Same optionality rationale as `artistId`.
+    let albumId: String?
 
-    init(id: String, title: String, artist: String, albumArtURL: String, duration: String, spotifyURI: String? = nil, previewURL: String? = nil, appleMusicURL: String? = nil) {
+    init(
+        id: String,
+        title: String,
+        artist: String,
+        albumArtURL: String,
+        duration: String,
+        spotifyURI: String? = nil,
+        previewURL: String? = nil,
+        appleMusicURL: String? = nil,
+        artistId: String? = nil,
+        albumId: String? = nil
+    ) {
         self.id = id
         self.title = title
         self.artist = artist
@@ -19,6 +35,8 @@ nonisolated struct Song: Identifiable, Hashable, Sendable {
         self.spotifyURI = spotifyURI
         self.previewURL = previewURL
         self.appleMusicURL = appleMusicURL
+        self.artistId = artistId
+        self.albumId = albumId
     }
 
     func with(spotifyURI: String?) -> Song {
@@ -30,7 +48,9 @@ nonisolated struct Song: Identifiable, Hashable, Sendable {
             duration: duration,
             spotifyURI: spotifyURI ?? self.spotifyURI,
             previewURL: previewURL,
-            appleMusicURL: appleMusicURL
+            appleMusicURL: appleMusicURL,
+            artistId: artistId,
+            albumId: albumId
         )
     }
 }

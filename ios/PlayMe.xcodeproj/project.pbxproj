@@ -11,6 +11,7 @@
 		84B7E0312F91B95F00B59DD6 /* ChottuLinkSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 84B7E0302F91B95F00B59DD6 /* ChottuLinkSDK */; };
 		NK01A5E3C4D5B6A7F8E9A004 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = NK01A5E3C4D5B6A7F8E9A002 /* Nuke */; };
 		NK01A5E3C4D5B6A7F8E9A005 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = NK01A5E3C4D5B6A7F8E9A003 /* NukeUI */; };
+		NS01A5E3C4D5B6A7F8E9B003 /* PlayMeNotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = NS01A5E3C4D5B6A7F8E9B002 /* PlayMeNotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		XX3DF24C364CC9BFC26E41XX /* PlayMeWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = XX8D76BE4CCED1AB217465XX /* PlayMeWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		XXFB01A1E3C4D5B6A7F8E9XX /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = XXFB01A2E3C4D5B6A7F8E9XX /* FirebaseAuth */; };
 		XXFB01A3E3C4D5B6A7F8E9XX /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = XXFB01A4E3C4D5B6A7F8E9XX /* FirebaseFirestore */; };
@@ -31,6 +32,13 @@
 			remoteGlobalIDString = 105FC5792E9EAD3100EA8BCF;
 			remoteInfo = PlayMe;
 		};
+		NS01A5E3C4D5B6A7F8E9B004 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 105FC5722E9EAD3100EA8BCF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = NS01A5E3C4D5B6A7F8E9B001;
+			remoteInfo = PlayMeNotificationService;
+		};
 		XX1A874A33DEAE22C03D3FXX /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 105FC5722E9EAD3100EA8BCF /* Project object */;
@@ -48,6 +56,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				XX3DF24C364CC9BFC26E41XX /* PlayMeWidget.appex in Embed Foundation Extensions */,
+				NS01A5E3C4D5B6A7F8E9B003 /* PlayMeNotificationService.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -58,10 +67,18 @@
 		105FC57A2E9EAD3100EA8BCF /* PlayMe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PlayMe.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		105FC5892E9EAD3200EA8BCF /* PlayMeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PlayMeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		105FC5932E9EAD3200EA8BCF /* PlayMeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PlayMeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		NS01A5E3C4D5B6A7F8E9B002 /* PlayMeNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PlayMeNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		XX8D76BE4CCED1AB217465XX /* PlayMeWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PlayMeWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		NS01A5E3C4D5B6A7F8E9B00A /* Exceptions for "PlayMeNotificationService" folder in "PlayMeNotificationService" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = NS01A5E3C4D5B6A7F8E9B001 /* PlayMeNotificationService */;
+		};
 		XXA1B2C3D4E5F6A7B8C9D0XX /* Exceptions for "PlayMe" folder in "PlayMe" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -95,6 +112,14 @@
 		105FC5962E9EAD3200EA8BCF /* PlayMeUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = PlayMeUITests;
+			sourceTree = "<group>";
+		};
+		NS01A5E3C4D5B6A7F8E9B009 /* PlayMeNotificationService */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				NS01A5E3C4D5B6A7F8E9B00A /* Exceptions for "PlayMeNotificationService" folder in "PlayMeNotificationService" target */,
+			);
+			path = PlayMeNotificationService;
 			sourceTree = "<group>";
 		};
 		XX7DD80A4CD0ED2A772BF9XX /* PlayMeWidget */ = {
@@ -135,6 +160,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		NS01A5E3C4D5B6A7F8E9B006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		XX75B8358D2242CEB782C5XX /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -153,6 +185,7 @@
 				105FC5962E9EAD3200EA8BCF /* PlayMeUITests */,
 				105FC57B2E9EAD3100EA8BCF /* Products */,
 				XX7DD80A4CD0ED2A772BF9XX /* PlayMeWidget */,
+				NS01A5E3C4D5B6A7F8E9B009 /* PlayMeNotificationService */,
 				8491A0A12F8841230088392D /* Frameworks */,
 			);
 			sourceTree = "<group>";
@@ -164,6 +197,7 @@
 				105FC5892E9EAD3200EA8BCF /* PlayMeTests.xctest */,
 				105FC5932E9EAD3200EA8BCF /* PlayMeUITests.xctest */,
 				XX8D76BE4CCED1AB217465XX /* PlayMeWidget.appex */,
+				NS01A5E3C4D5B6A7F8E9B002 /* PlayMeNotificationService.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -191,6 +225,7 @@
 			);
 			dependencies = (
 				XX2F3E74E0BCB99A2F367BXX /* PBXTargetDependency */,
+				NS01A5E3C4D5B6A7F8E9B005 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				105FC57C2E9EAD3100EA8BCF /* PlayMe */,
@@ -253,6 +288,26 @@
 			productName = PlayMeUITests;
 			productReference = 105FC5932E9EAD3200EA8BCF /* PlayMeUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		NS01A5E3C4D5B6A7F8E9B001 /* PlayMeNotificationService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = NS01A5E3C4D5B6A7F8E9B00B /* Build configuration list for PBXNativeTarget "PlayMeNotificationService" */;
+			buildPhases = (
+				NS01A5E3C4D5B6A7F8E9B008 /* Sources */,
+				NS01A5E3C4D5B6A7F8E9B006 /* Frameworks */,
+				NS01A5E3C4D5B6A7F8E9B007 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				NS01A5E3C4D5B6A7F8E9B009 /* PlayMeNotificationService */,
+			);
+			name = PlayMeNotificationService;
+			productName = PlayMeNotificationService;
+			productReference = NS01A5E3C4D5B6A7F8E9B002 /* PlayMeNotificationService.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		XX24E7FAEAE6D286D45D0AXX /* PlayMeWidget */ = {
 			isa = PBXNativeTarget;
@@ -320,6 +375,7 @@
 				105FC5882E9EAD3200EA8BCF /* PlayMeTests */,
 				105FC5922E9EAD3200EA8BCF /* PlayMeUITests */,
 				XX24E7FAEAE6D286D45D0AXX /* PlayMeWidget */,
+				NS01A5E3C4D5B6A7F8E9B001 /* PlayMeNotificationService */,
 			);
 		};
 /* End PBXProject section */
@@ -340,6 +396,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		105FC5912E9EAD3200EA8BCF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		NS01A5E3C4D5B6A7F8E9B007 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -377,6 +440,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		NS01A5E3C4D5B6A7F8E9B008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		XXE0FD6AFA7551401BFCEBXX /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -396,6 +466,11 @@
 			isa = PBXTargetDependency;
 			target = 105FC5792E9EAD3100EA8BCF /* PlayMe */;
 			targetProxy = 105FC5942E9EAD3200EA8BCF /* PBXContainerItemProxy */;
+		};
+		NS01A5E3C4D5B6A7F8E9B005 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = NS01A5E3C4D5B6A7F8E9B001 /* PlayMeNotificationService */;
+			targetProxy = NS01A5E3C4D5B6A7F8E9B004 /* PBXContainerItemProxy */;
 		};
 		XX2F3E74E0BCB99A2F367BXX /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -694,6 +769,62 @@
 			};
 			name = Release;
 		};
+		NS01A5E3C4D5B6A7F8E9B00C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PlayMeNotificationService/PlayMeNotificationService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 4;
+				DEVELOPMENT_TEAM = Y8LFBVELVR;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PlayMeNotificationService/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "$(PRODUCT_NAME)";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rork.6lps4bdet5kkzmhqjyurh.notificationservice;
+				PRODUCT_NAME = PlayMeNotificationService;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		NS01A5E3C4D5B6A7F8E9B00D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PlayMeNotificationService/PlayMeNotificationService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 4;
+				DEVELOPMENT_TEAM = Y8LFBVELVR;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PlayMeNotificationService/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "$(PRODUCT_NAME)";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rork.6lps4bdet5kkzmhqjyurh.notificationservice;
+				PRODUCT_NAME = PlayMeNotificationService;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 		XX259FA947FBA9A8D39092XX /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -785,6 +916,15 @@
 			buildConfigurations = (
 				105FC5A42E9EAD3200EA8BCF /* Debug */,
 				105FC5A52E9EAD3200EA8BCF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		NS01A5E3C4D5B6A7F8E9B00B /* Build configuration list for PBXNativeTarget "PlayMeNotificationService" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				NS01A5E3C4D5B6A7F8E9B00C /* Debug */,
+				NS01A5E3C4D5B6A7F8E9B00D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

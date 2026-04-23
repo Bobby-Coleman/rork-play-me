@@ -11,6 +11,10 @@ struct FriendSelectorView: View {
     let onBack: () -> Void
     let onSent: () -> Void
 
+    private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
+    private var isCurrentSong: Bool { audioPlayer.currentSongId == song.id }
+    private var isPlayingThis: Bool { isCurrentSong && audioPlayer.isPlaying }
+
     @State private var selectedFriends: Set<String> = []
     /// Parallel selection set for invited contacts. Lives alongside
     /// `selectedFriends` rather than merging into one set so we can route
@@ -49,9 +53,12 @@ struct FriendSelectorView: View {
             VStack(spacing: 0) {
                 Spacer(minLength: 16)
                 artwork
-                Spacer(minLength: 20)
+                Spacer(minLength: 16)
                 titleBlock
-                Spacer(minLength: 28)
+                Spacer(minLength: 16)
+                previewControls
+                    .padding(.horizontal, 40)
+                Spacer(minLength: 20)
                 sendButton
                 Spacer()
                 friendChipRow
@@ -148,6 +155,38 @@ struct FriendSelectorView: View {
                 .lineLimit(1)
         }
         .padding(.horizontal, 24)
+    }
+
+    // MARK: - Preview controls
+
+    /// Inline scrub bar + play/pause so users can audition the track while
+    /// picking recipients. Uses the shared `AudioPlayerService` instance —
+    /// playback state survives returning to the previous step and vice versa.
+    private var previewControls: some View {
+        VStack(spacing: 10) {
+            ScrubBarView(songId: song.id, fallbackDuration: song.duration)
+
+            Button {
+                audioPlayer.play(song: song)
+            } label: {
+                ZStack {
+                    if isCurrentSong && audioPlayer.isLoading {
+                        ProgressView()
+                            .tint(.black)
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: isPlayingThis ? "pause.fill" : "play.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .contentTransition(.symbolEffect(.replace))
+                    }
+                }
+                .foregroundStyle(.black)
+                .frame(width: 52, height: 40)
+                .background(.white)
+                .clipShape(.capsule)
+            }
+            .sensoryFeedback(.impact(weight: .light), trigger: isPlayingThis)
+        }
     }
 
     // MARK: - Send button

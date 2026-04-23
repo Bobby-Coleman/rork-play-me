@@ -827,7 +827,7 @@ class AppState {
         sentShares = []
     }
 
-    private static let widgetAppGroup = "group.app.rork.playme.shared"
+    private static let widgetAppGroup = WidgetSharedConstants.appGroup
 
     /// Home screen widget shows the latest song **sent to you**, not songs
     /// you sent. Bursts of updates (e.g. three back-to-back received-shares
@@ -850,15 +850,15 @@ class AppState {
             WidgetCenter.shared.reloadAllTimelines()
             return
         }
-        defaults?.set(latest.song.title, forKey: "widgetSongTitle")
-        defaults?.set(latest.song.artist, forKey: "widgetSongArtist")
-        defaults?.set(latest.sender.firstName, forKey: "widgetSenderFirstName")
+        defaults?.set(latest.song.title, forKey: WidgetSharedConstants.Key.songTitle)
+        defaults?.set(latest.song.artist, forKey: WidgetSharedConstants.Key.songArtist)
+        defaults?.set(latest.sender.firstName, forKey: WidgetSharedConstants.Key.senderFirstName)
         if let note = latest.note, !note.isEmpty {
-            defaults?.set(note, forKey: "widgetNote")
+            defaults?.set(note, forKey: WidgetSharedConstants.Key.note)
         } else {
-            defaults?.removeObject(forKey: "widgetNote")
+            defaults?.removeObject(forKey: WidgetSharedConstants.Key.note)
         }
-        defaults?.set(latest.id, forKey: "widgetShareId")
+        defaults?.set(latest.id, forKey: WidgetSharedConstants.Key.shareId)
 
         Task.detached {
             await Self.downloadWidgetAlbumArt(urlString: latest.song.albumArtURL)
@@ -866,8 +866,7 @@ class AppState {
     }
 
     private static func downloadWidgetAlbumArt(urlString: String) async {
-        guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: widgetAppGroup) else { return }
-        let imageFile = containerURL.appendingPathComponent("widgetAlbumArt.jpg")
+        guard let imageFile = WidgetSharedConstants.albumArtFileURL() else { return }
 
         guard let url = URL(string: urlString), !urlString.isEmpty else {
             try? FileManager.default.removeItem(at: imageFile)
@@ -891,14 +890,9 @@ class AppState {
     }
 
     private static func clearWidgetUserDefaults(_ defaults: UserDefaults?) {
-        let keys = [
-            "widgetSongTitle", "widgetSongArtist",
-            "widgetSenderFirstName", "widgetNote", "widgetShareId",
-        ]
-        keys.forEach { defaults?.removeObject(forKey: $0) }
-
-        if let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: widgetAppGroup) {
-            try? FileManager.default.removeItem(at: containerURL.appendingPathComponent("widgetAlbumArt.jpg"))
+        WidgetSharedConstants.allKeys.forEach { defaults?.removeObject(forKey: $0) }
+        if let imageFile = WidgetSharedConstants.albumArtFileURL() {
+            try? FileManager.default.removeItem(at: imageFile)
         }
     }
 }

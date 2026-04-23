@@ -9,6 +9,8 @@ nonisolated struct iTunesTrack: Codable, Sendable {
     let trackId: Int
     let trackName: String
     let artistName: String
+    let artistId: Int?
+    let collectionId: Int?
     let collectionName: String?
     let artworkUrl100: String
     let trackTimeMillis: Int?
@@ -35,7 +37,9 @@ nonisolated struct iTunesTrack: Codable, Sendable {
             albumArtURL: artworkUrl600,
             duration: formattedDuration,
             previewURL: previewUrl,
-            appleMusicURL: trackViewUrl
+            appleMusicURL: trackViewUrl,
+            artistId: artistId.map(String.init),
+            albumId: collectionId.map(String.init)
         )
     }
 }

@@ -81,7 +81,8 @@ async function isBlockedBy(recipientUid, senderUid) {
 // the authoritative client value untouched.
 async function sendPush(uid, opts = {}) {
   if (!uid) return;
-  const { title, body, data = {}, collapseId, threadId } = opts;
+  const { title, body, data = {}, collapseId, threadId, mutableContent } =
+    opts;
   const token = await getFCMToken(uid);
   if (!token) return;
 
@@ -91,8 +92,16 @@ async function sendPush(uid, opts = {}) {
     stringData[k] = typeof v === "string" ? v : String(v);
   }
 
+  // Base APS payload. We deliberately DO NOT set `badge` — the client owns
+  // badge counts via `UNUserNotificationCenter.setBadgeCount`, so omitting
+  // it here leaves the last authoritative client value untouched.
   const aps = { sound: "default" };
   if (threadId) aps["thread-id"] = threadId;
+  // `mutable-content: 1` is what wakes the Notification Service Extension
+  // before the banner lands. We only flip it for push types that carry
+  // extension work (e.g. widget refresh on `new_share`); every other push
+  // skips the extra round trip.
+  if (mutableContent) aps["mutable-content"] = 1;
 
   const apnsHeaders = {};
   if (collapseId) apnsHeaders["apns-collapse-id"] = collapseId;
@@ -143,10 +152,20 @@ exports.onNewShare = onDocumentCreated("shares/{shareId}", async (event) => {
   await sendPush(recipientId, {
     title: "New Song 🎵",
     body: `${senderName} sent you "${songTitle}"`,
+    // Widget payload: the NSE reads these keys to refresh the home-screen
+    // widget before the banner is delivered, so the widget updates even
+    // when the app is suspended or cold-terminated. Keep these keys in
+    // sync with ios/PlayMeNotificationService/NotificationService.swift.
+    mutableContent: true,
     data: {
       type: "new_share",
       id: event.params.shareId,
       shareId: event.params.shareId,
+      widgetSongTitle: songTitle,
+      widgetSongArtist: data.song?.artist || "",
+      widgetSenderFirstName: senderName,
+      widgetNote: data.note || "",
+      widgetAlbumArtURL: data.song?.albumArtURL || "",
     },
     collapseId: `share-${event.params.shareId}`,
     threadId: "shares",
@@ -704,15 +723,23 @@ async function claimPendingSharesForUser(uid, phoneE164) {
       inviterIds.add(senderId);
 
       // Fire a magic-moment push to the new user for every claimed share.
+      // Includes the widget payload so the home-screen widget populates
+      // instantly the first time they receive a song post-signup.
       pushPromises.push(
         sendPush(uid, {
           title: "PlayMe",
           body: `${senderFirstName || "A friend"} sent you "${song.title || "a song"}"`,
+          mutableContent: true,
           data: {
             type: "new_share",
             id: doc.id,
             shareId: doc.id,
             claimedFromPending: "true",
+            widgetSongTitle: song.title || "",
+            widgetSongArtist: song.artist || "",
+            widgetSenderFirstName: senderFirstName || "",
+            widgetNote: note || "",
+            widgetAlbumArtURL: song.albumArtURL || "",
           },
           collapseId: `share-${doc.id}`,
           threadId: "shares",

@@ -46,9 +46,17 @@ struct QuickSendSongSheet: View {
         }
         .presentationBackground(.black)
         .sheet(item: $detailSong) { song in
-            SongDetailSheet(song: song, appState: appState)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+            SongDetailSheet(
+                song: song,
+                appState: appState,
+                onSend: {
+                    selectedSong = song
+                    detailSong = nil
+                    withAnimation(.spring(duration: 0.3)) { step = 1 }
+                }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -283,20 +291,6 @@ struct QuickSendSongSheet: View {
             }
 
             Spacer()
-
-            Button {
-                selectedSong = song
-                withAnimation(.spring(duration: 0.3)) { step = 1 }
-            } label: {
-                Text("NEXT")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color(red: 0.76, green: 0.38, blue: 0.35))
-                    .clipShape(.capsule)
-            }
-            .sensoryFeedback(.impact(weight: .light), trigger: selectedSong?.id)
 
             Text(song.duration)
                 .font(.system(size: 12))

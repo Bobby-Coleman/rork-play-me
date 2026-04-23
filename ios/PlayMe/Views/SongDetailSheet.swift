@@ -6,10 +6,16 @@ struct SongDetailSheet: View {
     let appState: AppState
     var share: SongShare?
     var onDismiss: (() -> Void)?
+    /// When non-nil, the paperplane button fires this callback and dismisses
+    /// the sheet instead of presenting the default internal `FriendSelectorView`
+    /// sheet. Lets search hosts (`SendSongSheet`, `QuickSendSongSheet`) route
+    /// into their own pre-wired step=1 compose flows with a selected recipient.
+    var onSend: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
     @State private var showShareFlow: Bool = false
+    @State private var showArtistView: Bool = false
     @State private var resolvedSpotifyURL: String?
     @State private var replyText: String = ""
     @State private var showSentConfirmation: Bool = false
@@ -130,6 +136,13 @@ struct SongDetailSheet: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showArtistView) {
+            if let aid = song.artistId {
+                ArtistView(artistId: aid, initialArtistName: song.artist, appState: appState)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
     }
 
     // MARK: - Header
@@ -148,9 +161,22 @@ struct SongDetailSheet: View {
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
 
-            Text(song.artist)
-                .font(.system(size: 15))
-                .foregroundStyle(.white.opacity(0.6))
+            if song.artistId != nil {
+                Button {
+                    showArtistView = true
+                } label: {
+                    Text(song.artist)
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .underline(false)
+                }
+                .buttonStyle(.plain)
+                .sensoryFeedback(.impact(weight: .light), trigger: showArtistView)
+            } else {
+                Text(song.artist)
+                    .font(.system(size: 15))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
         }
         .padding(.top, 16)
         .padding(.bottom, 20)
@@ -229,10 +255,15 @@ struct SongDetailSheet: View {
                 openInServiceButton(song: song, service: appState.preferredMusicService, resolvedSpotifyURL: resolvedSpotifyURL)
 
                 Button {
-                    showShareFlow = true
+                    if let onSend {
+                        dismiss()
+                        onSend()
+                    } else {
+                        showShareFlow = true
+                    }
                 } label: {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 15, weight: .medium))
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.6))
                         .frame(width: 40, height: 40)
                         .background(Color.white.opacity(0.08))

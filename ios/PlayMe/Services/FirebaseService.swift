@@ -287,6 +287,8 @@ class FirebaseService {
                 "spotifyURI": share.song.spotifyURI as Any,
                 "previewURL": share.song.previewURL as Any,
                 "appleMusicURL": share.song.appleMusicURL as Any,
+                "artistId": share.song.artistId as Any,
+                "albumId": share.song.albumId as Any,
             ],
             "sender": [
                 "id": uid,
@@ -906,6 +908,8 @@ class FirebaseService {
                 "spotifyURI": song.spotifyURI as Any,
                 "previewURL": song.previewURL as Any,
                 "appleMusicURL": song.appleMusicURL as Any,
+                "artistId": song.artistId as Any,
+                "albumId": song.albumId as Any,
             ],
         ]
 
@@ -1022,6 +1026,8 @@ class FirebaseService {
                 "spotifyURI": song.spotifyURI as Any,
                 "previewURL": song.previewURL as Any,
                 "appleMusicURL": song.appleMusicURL as Any,
+                "artistId": song.artistId as Any,
+                "albumId": song.albumId as Any,
             ]
         }
 
@@ -1211,7 +1217,9 @@ class FirebaseService {
                 duration: songData["duration"] as? String ?? "",
                 spotifyURI: songData["spotifyURI"] as? String,
                 previewURL: songData["previewURL"] as? String,
-                appleMusicURL: songData["appleMusicURL"] as? String
+                appleMusicURL: songData["appleMusicURL"] as? String,
+                artistId: songData["artistId"] as? String,
+                albumId: songData["albumId"] as? String
             )
         }
 
@@ -1238,7 +1246,9 @@ class FirebaseService {
             duration: songData["duration"] as? String ?? "",
             spotifyURI: songData["spotifyURI"] as? String,
             previewURL: songData["previewURL"] as? String,
-            appleMusicURL: songData["appleMusicURL"] as? String
+            appleMusicURL: songData["appleMusicURL"] as? String,
+            artistId: songData["artistId"] as? String,
+            albumId: songData["albumId"] as? String
         )
 
         let sender = AppUser(
