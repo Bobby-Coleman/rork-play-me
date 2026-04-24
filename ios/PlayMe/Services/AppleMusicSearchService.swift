@@ -227,6 +227,34 @@ actor AppleMusicSearchService {
         return merged
     }
 
+    // MARK: - Artist id resolution
+
+    /// Resolves a MusicKit artist id for a free-form artist name. Used
+    /// when a song was ingested before we started storing `artistId`
+    /// alongside shares — tapping the artist byline on that legacy
+    /// card should still route to the artist page, so we fall back to
+    /// a MusicKit search at tap time.
+    ///
+    /// Prefers an exact case/diacritic-insensitive name match. Returns
+    /// the first search hit when nothing matches exactly; returns nil
+    /// on empty input, unauthorized MusicKit, or a search failure.
+    func resolveArtistId(name: String) async -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+
+        let status = await currentAuthorizationStatus()
+        guard status == .authorized else { return nil }
+
+        let results = await search(term: trimmed, limit: 8)
+        let normalizedQuery = Self.normalize(trimmed)
+        if let exact = results.artists.first(where: {
+            Self.normalize($0.name) == normalizedQuery
+        }) {
+            return exact.id
+        }
+        return results.artists.first?.id
+    }
+
     // MARK: - Artist details
 
     /// MusicKit-backed artist page data: canonical `artistName` (pulled

@@ -130,6 +130,30 @@ struct DiscoveryView: View {
                                 visiblePageId = Self.heroId
                             }
                         }
+                        // Widget deep-link target: when the user taps the
+                        // home-screen widget, ContentView sets
+                        // `pendingDiscoveryShareId` and switches to this
+                        // tab. We scroll directly to that share and clear
+                        // the pending id. Guarded so we only scroll once
+                        // the matching share has actually landed in the
+                        // hydrated list (important on cold launch, where
+                        // the deep link fires before receivedShares
+                        // resolves).
+                        .onChange(of: appState.pendingDiscoveryShareId) { _, newValue in
+                            attemptPendingDiscoveryScroll(proxy: proxy, pendingId: newValue)
+                        }
+                        .onChange(of: shares.map(\.id)) { _, _ in
+                            attemptPendingDiscoveryScroll(
+                                proxy: proxy,
+                                pendingId: appState.pendingDiscoveryShareId
+                            )
+                        }
+                        .onAppear {
+                            attemptPendingDiscoveryScroll(
+                                proxy: proxy,
+                                pendingId: appState.pendingDiscoveryShareId
+                            )
+                        }
                     }
                 }
 
@@ -183,6 +207,27 @@ struct DiscoveryView: View {
         .onAppear {
             onHeroVisibilityChange?(isOnHero)
         }
+    }
+
+    // MARK: - Widget deep-link routing
+
+    /// Scrolls the feed to `pendingId` when it matches a loaded share
+    /// and clears `AppState.pendingDiscoveryShareId` so subsequent user
+    /// interaction (tab-tap to hero, pull-to-refresh, etc.) isn't
+    /// second-guessed by a stale target. If the id hasn't landed in
+    /// `shares` yet (typical on cold launch), this is a no-op — the
+    /// `.onChange(of: shares.map(\.id))` observer will retry once the
+    /// Firestore listener hydrates.
+    private func attemptPendingDiscoveryScroll(proxy: ScrollViewProxy, pendingId: String?) {
+        guard let pendingId, !pendingId.isEmpty else { return }
+        guard shares.contains(where: { $0.id == pendingId }) else { return }
+        isReplyFocused = false
+        replyText = ""
+        withAnimation(.easeInOut(duration: 0.4)) {
+            visiblePageId = pendingId
+            proxy.scrollTo(pendingId, anchor: .top)
+        }
+        appState.pendingDiscoveryShareId = nil
     }
 
     // MARK: - Hero page

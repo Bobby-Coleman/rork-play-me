@@ -93,6 +93,31 @@ struct ContentView: View {
             guard newPhase == .active, appState.isOnboarded else { return }
             Task { await appState.refreshShares() }
         }
+        .onOpenURL { url in
+            handleIncomingURL(url)
+        }
+    }
+
+    /// Routes incoming custom-scheme URLs. Currently handles the widget
+    /// deep link (`playme://share/<shareId>`): tapping the home-screen
+    /// widget should open the feed at the same song the widget was
+    /// showing, not the hero. Unknown URLs fall through to the
+    /// `.onOpenURL` attached at the app level (ChottuLink / Firebase
+    /// auth), so other deep links are unaffected.
+    private func handleIncomingURL(_ url: URL) {
+        guard url.scheme?.lowercased() == "playme" else { return }
+        guard url.host?.lowercased() == "share" else { return }
+        // URL.pathComponents starts with "/"; drop it to isolate the id.
+        let id = url.pathComponents.filter { $0 != "/" }.first
+            ?? url.lastPathComponent
+        let trimmed = id.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        // Force Discovery tab so the scroll target actually renders. The
+        // feed observer in DiscoveryView picks up the pending id and
+        // animates the scroll — this works whether the share list is
+        // already hydrated or arrives a moment later on cold launch.
+        selectedTab = 0
+        appState.pendingDiscoveryShareId = trimmed
     }
 
     /// First-launch-after-onboarding: ask iOS directly. No custom explainer.

@@ -17,6 +17,12 @@ struct SongCardView: View {
     @State private var isOpeningChat: Bool = false
     @State private var showDetailSheet: Bool = false
     @State private var showArtistView: Bool = false
+    /// Resolved MusicKit artist id used when `share.song.artistId` is
+    /// nil (legacy shares). Populated on-demand from the artist name
+    /// when the user taps the byline so the artist page still opens
+    /// for older data.
+    @State private var resolvedArtistId: String?
+    @State private var isResolvingArtist: Bool = false
     /// Measured height of the content above the artwork (header block).
     /// Updated in-place via a `PreferenceKey` probe so the art size
     /// recomputes when Dynamic Type or localized strings change the
@@ -148,7 +154,7 @@ struct SongCardView: View {
                     .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showArtistView) {
-                if let aid = share.song.artistId {
+                if let aid = share.song.artistId ?? resolvedArtistId {
                     ArtistView(artistId: aid, initialArtistName: share.song.artist, appState: appState)
                         .presentationDetents([.large])
                         .presentationDragIndicator(.visible)
@@ -211,18 +217,14 @@ struct SongCardView: View {
                 Text("  \u{00B7}  ")
                     .foregroundStyle(.white.opacity(0.4))
 
-                if share.song.artistId != nil {
-                    Button {
-                        showArtistView = true
-                    } label: {
-                        Text(share.song.artist)
-                            .foregroundStyle(.white.opacity(0.65))
-                    }
-                    .buttonStyle(.plain)
-                } else {
+                Button {
+                    openArtistPage()
+                } label: {
                     Text(share.song.artist)
-                        .foregroundStyle(.white.opacity(0.65))
+                        .foregroundStyle(.white.opacity(0.9))
                 }
+                .buttonStyle(.plain)
+                .disabled(isResolvingArtist)
             }
             .font(.system(size: 17))
             .lineLimit(1)
@@ -308,17 +310,50 @@ struct SongCardView: View {
             openChatWithSender()
         } label: {
             HStack(spacing: 6) {
+                // Sender name is tappable (opens chat); render it in a
+                // noticeably brighter white than the surrounding
+                // metadata so it reads as an affordance rather than
+                // dim caption text.
                 Text(viewerIsSender ? "You" : senderFullName)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.95))
                 Text("\u{00B7}")
+                    .foregroundStyle(.white.opacity(0.5))
                 Text(share.timestamp, format: .dateTime.month(.abbreviated).day())
+                    .foregroundStyle(.white.opacity(0.5))
             }
-            .foregroundStyle(.white.opacity(0.5))
             .font(.system(size: 13))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(viewerIsSender || isOpeningChat)
+    }
+
+    /// Opens the artist profile sheet. Uses the song's stored
+    /// `artistId` when present; falls back to a MusicKit search keyed
+    /// by artist name for legacy shares that pre-date the stored id.
+    /// Shows the sheet synchronously on the fast path so the tap
+    /// feels immediate; only spends a round-trip on the (rare)
+    /// unresolved case.
+    private func openArtistPage() {
+        if share.song.artistId != nil {
+            showArtistView = true
+            return
+        }
+        if let cached = resolvedArtistId, !cached.isEmpty {
+            showArtistView = true
+            return
+        }
+        guard !isResolvingArtist else { return }
+        isResolvingArtist = true
+        Task {
+            let resolved = await AppleMusicSearchService.shared.resolveArtistId(name: share.song.artist)
+            if let resolved, !resolved.isEmpty {
+                resolvedArtistId = resolved
+                showArtistView = true
+            }
+            isResolvingArtist = false
+        }
     }
 
     private func openChatWithSender() {

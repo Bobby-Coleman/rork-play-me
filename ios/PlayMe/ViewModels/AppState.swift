@@ -60,6 +60,14 @@ class AppState {
     /// counter instead of a boolean so consecutive taps always trigger a
     /// state change (vs. a sticky `true` that needs resetting).
     var discoveryScrollToTopCounter: Int = 0
+    /// Share ID to scroll to on the Discovery feed. Set by the widget
+    /// deep-link handler (`playme://share/<id>`) so tapping the home-screen
+    /// widget drops the user on the exact song the widget was displaying —
+    /// the most recently received share — instead of the hero page.
+    /// `DiscoveryView` observes this, scrolls, and clears it back to nil.
+    /// On a cold launch the share list may not be hydrated yet, so
+    /// `DiscoveryView` also re-checks when `receivedShares` changes.
+    var pendingDiscoveryShareId: String? = nil
     /// Firestore listener for incoming friend requests. Retained so we can
     /// detach on logout and reattach on sign-in.
     private var incomingRequestsListener: ListenerRegistration?
