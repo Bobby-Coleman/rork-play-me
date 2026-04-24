@@ -113,8 +113,34 @@ struct SongCardView: View {
                 }
             }
             .task {
-                if appState.preferredMusicService == .spotify, let amURL = share.song.appleMusicURL {
-                    resolvedSpotifyURL = await MusicSearchService.shared.resolveSpotifyURL(appleMusicURL: amURL)
+                // View-time prefetch for the "Open in Spotify" pill.
+                // `resolveSpotifyURL` is cache-first (local → Firestore
+                // global) and only hits the network on true cache
+                // misses — which, after catalog warm-up, is a rounding
+                // error. Our Cloud Function path has an app-wide rate
+                // pool (not per-IP), so it's safe to fire this on every
+                // card that scrolls by. Result: the tap handoff is
+                // instant because the URL is already cached locally.
+                guard appState.preferredMusicService == .spotify,
+                      share.song.spotifyURI == nil,
+                      let amURL = share.song.appleMusicURL else { return }
+
+                let resolved = await MusicSearchService.shared.resolveSpotifyURL(
+                    appleMusicURL: amURL,
+                    title: share.song.title,
+                    artist: share.song.artist
+                )
+                resolvedSpotifyURL = resolved
+                // Per-share writeback: lets the NEXT viewer of THIS
+                // specific share skip even the Firestore cache lookup
+                // (the URI ships embedded in the share doc itself).
+                // The global `spotifyResolutions` cache is already
+                // populated by `resolveSpotifyURL`.
+                if let resolved,
+                   let trackID = SpotifyDeepLinkResolver.spotifyTrackID(fromSpotifyURL: resolved) {
+                    let uri = "spotify:track:\(trackID)"
+                    print("event=open_in_spotify firestore_writeback source=prefetch shareId=\(share.id) uri=\(uri)")
+                    await FirebaseService.shared.patchShareSpotifyURI(shareId: share.id, spotifyURI: uri)
                 }
             }
             .sheet(isPresented: $showShareFlow) {
@@ -122,6 +148,7 @@ struct SongCardView: View {
                     FriendSelectorView(
                         song: share.song,
                         appState: appState,
+                        shareId: share.id,
                         onBack: { showShareFlow = false },
                         onSent: { showShareFlow = false }
                     )
@@ -401,7 +428,7 @@ struct SongCardView: View {
                 }
                 .sensoryFeedback(.impact(weight: .light), trigger: isPlayingThis)
 
-                openInServiceButton(song: share.song, service: appState.preferredMusicService, resolvedSpotifyURL: resolvedSpotifyURL)
+                openInServiceButton(song: share.song, service: appState.preferredMusicService, resolvedSpotifyURL: resolvedSpotifyURL, shareId: share.id)
 
                 Button {
                     showShareFlow = true

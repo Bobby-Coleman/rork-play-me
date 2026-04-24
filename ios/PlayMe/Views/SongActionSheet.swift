@@ -29,6 +29,7 @@ struct SongActionSheet: View {
             FriendSelectorView(
                 song: song,
                 appState: appState,
+                shareId: share?.id,
                 onBack: { dismiss() },
                 onSent: { dismiss() }
             )

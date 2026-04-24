@@ -6,11 +6,17 @@ import UIKit
 /// choice the user made at onboarding. Spotify path optionally takes a
 /// pre-resolved URL (from an iTunes Apple-Music-URL handoff) so callers
 /// that already resolved it once don't pay for a second network round-trip.
+///
+/// `shareId`, when non-nil, enables one-shot Firestore writeback: the
+/// moment we successfully resolve a Spotify URI for a share that was
+/// persisted without one (usually because send-time enrichment hit a
+/// 429), we patch `shares/{id}.song.spotifyURI`. Every other device
+/// that later views the same share skips song.link entirely.
 @MainActor
-func openInServiceButton(song: Song, service: MusicService, resolvedSpotifyURL: String? = nil) -> some View {
+func openInServiceButton(song: Song, service: MusicService, resolvedSpotifyURL: String? = nil, shareId: String? = nil) -> some View {
     Button {
         Task {
-            await openInService(song: song, service: service, resolvedSpotifyURL: resolvedSpotifyURL)
+            await openInService(song: song, service: service, resolvedSpotifyURL: resolvedSpotifyURL, shareId: shareId)
         }
     } label: {
         HStack(spacing: 6) {
@@ -28,7 +34,7 @@ func openInServiceButton(song: Song, service: MusicService, resolvedSpotifyURL: 
 }
 
 @MainActor
-private func openInService(song: Song, service: MusicService, resolvedSpotifyURL: String?) async {
+private func openInService(song: Song, service: MusicService, resolvedSpotifyURL: String?, shareId: String? = nil) async {
     switch service {
     case .appleMusic:
         if let url = appleMusicURL(for: song) {
@@ -36,24 +42,52 @@ private func openInService(song: Song, service: MusicService, resolvedSpotifyURL
         }
 
     case .spotify:
+        let hasURI = song.spotifyURI != nil
+        let hasAM = song.appleMusicURL != nil
+        print("event=open_in_spotify start title=\"\(song.title)\" artist=\"\(song.artist)\" hasSpotifyURI=\(hasURI) hasAppleMusicURL=\(hasAM) hasPrefetchedSpotifyURL=\(resolvedSpotifyURL != nil) shareId=\(shareId ?? "nil")")
+
         var candidateResolvedURL = resolvedSpotifyURL
 
         if SpotifyDeepLinkResolver.spotifyTrackID(for: song, resolvedSpotifyURL: candidateResolvedURL) == nil,
            let appleMusicURL = song.appleMusicURL {
-            candidateResolvedURL = await MusicSearchService.shared.resolveSpotifyURL(appleMusicURL: appleMusicURL)
+            print("event=open_in_spotify resolve_attempt reason=missing_track_id amURL=\"\(appleMusicURL)\"")
+            let newlyResolved = await MusicSearchService.shared.resolveSpotifyURL(appleMusicURL: appleMusicURL, title: song.title, artist: song.artist)
+            candidateResolvedURL = newlyResolved
+
+            // Writeback: if we got a hit AND we have a share context,
+            // patch the share doc so every other viewer skips songlink.
+            // Only the FIRST viewer of a share without a URI pays this
+            // write; all subsequent viewers read the URI from Firestore.
+            if let resolvedURL = newlyResolved,
+               let trackID = SpotifyDeepLinkResolver.spotifyTrackID(fromSpotifyURL: resolvedURL),
+               let shareId,
+               !shareId.isEmpty,
+               song.spotifyURI == nil {
+                let uri = "spotify:track:\(trackID)"
+                print("event=open_in_spotify firestore_writeback shareId=\(shareId) uri=\(uri)")
+                Task { await FirebaseService.shared.patchShareSpotifyURI(shareId: shareId, spotifyURI: uri) }
+            }
+        } else if SpotifyDeepLinkResolver.spotifyTrackID(for: song, resolvedSpotifyURL: candidateResolvedURL) == nil {
+            print("event=open_in_spotify resolve_skipped reason=no_apple_music_url title=\"\(song.title)\"")
         }
 
         if let trackURL = SpotifyDeepLinkResolver.trackURL(for: song, resolvedSpotifyURL: candidateResolvedURL) {
             let openedInApp = await openURL(trackURL, universalLinksOnly: true)
+            print("event=open_in_spotify handoff kind=universal opened=\(openedInApp) url=\"\(trackURL.absoluteString)\"")
             if !openedInApp,
                let uri = SpotifyDeepLinkResolver.trackURI(for: song, resolvedSpotifyURL: candidateResolvedURL) {
                 let openedViaURI = await openURL(uri)
+                print("event=open_in_spotify handoff kind=uri opened=\(openedViaURI) url=\"\(uri.absoluteString)\"")
                 if !openedViaURI {
-                    _ = await openURL(trackURL)
+                    let openedInSafari = await openURL(trackURL)
+                    print("event=open_in_spotify handoff kind=safari opened=\(openedInSafari) url=\"\(trackURL.absoluteString)\"")
                 }
             }
         } else if let searchURL = SpotifyDeepLinkResolver.spotifySearchURL(for: song) {
-            _ = await openURL(searchURL)
+            let openedSearch = await openURL(searchURL)
+            print("event=open_in_spotify handoff kind=search opened=\(openedSearch) url=\"\(searchURL.absoluteString)\" reason=no_track_id")
+        } else {
+            print("event=open_in_spotify handoff kind=none reason=no_track_id_no_search_url title=\"\(song.title)\"")
         }
     }
 }

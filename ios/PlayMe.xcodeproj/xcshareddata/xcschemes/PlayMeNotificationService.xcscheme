@@ -57,7 +57,8 @@
       debugServiceExtension = "internal"
       allowLocationSimulation = "YES"
       launchAutomaticallySubstyle = "2"
-      queueDebuggingEnableBacktraceRecording = "Yes">
+      queueDebuggingEnableBacktraceRecording = "Yes"
+      notificationPayloadFile = "Example/watchOSSample/SampleWatchAppWatchKitExtension/PushNotificationPayload.apns">
       <BuildableProductRunnable
          runnableDebuggingMode = "0">
          <BuildableReference

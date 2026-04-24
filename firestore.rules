@@ -137,5 +137,20 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll(['reporterUid', 'targetUid', 'targetType', 'createdAt']);
       allow read, update, delete: if false;
     }
+
+    // Global Spotify resolution cache keyed by SHA-256 of the normalized
+    // Apple Music song URL. One document per unique song, shared across
+    // the whole user base. Any authenticated user may read (cache check
+    // before a network call) and write (persist a successful resolution
+    // so every other user skips the upstream API on subsequent views).
+    // Deletes are admin-only; cache entries never need client eviction.
+    match /spotifyResolutions/{docId} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null
+        && request.resource.data.keys().hasAll(['trackId', 'spotifyURL', 'resolvedAt'])
+        && request.resource.data.trackId is string
+        && request.resource.data.spotifyURL is string;
+      allow delete: if false;
+    }
   }
 }

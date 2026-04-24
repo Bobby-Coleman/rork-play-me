@@ -8,6 +8,13 @@ struct FriendSelectorView: View {
     /// flow passes `appState.invitedContacts` so freshly registered users
     /// who have only SMS-invited people can still send their first song.
     var invitedContacts: [SimpleContact] = []
+    /// Share context when this view is acting as a song action destination
+    /// (feed tap / history tap via `SongActionSheet`) rather than a pre-send
+    /// surface. When present we thread it down to `openInServiceButton` so
+    /// any resolution that fires writes back to `shares/{id}.song.spotifyURI`.
+    /// `nil` means "no share yet" (the pre-send case) and writeback is
+    /// correctly skipped.
+    var shareId: String? = nil
     let onBack: () -> Void
     let onSent: () -> Void
 
@@ -90,13 +97,20 @@ struct FriendSelectorView: View {
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .task {
             // Resolve once per-appearance so the "Open in Spotify" pill can
-            // jump straight into the app. No-op when the user prefers Apple
-            // Music, when the song already ships with a Spotify URI, or when
-            // there's no Apple-Music URL to translate from.
+            // jump straight into the app. `resolveSpotifyURL` is
+            // cache-first (local → Firestore global) and only hits the
+            // network on true cache misses, so this is cheap to fire
+            // every time the view appears. No-op when the user prefers
+            // Apple Music, when the song already ships with a Spotify
+            // URI, or when there's no Apple-Music URL to translate from.
             if appState.preferredMusicService == .spotify,
                SpotifyDeepLinkResolver.spotifyTrackID(for: song, resolvedSpotifyURL: nil) == nil,
                let amURL = song.appleMusicURL {
-                resolvedSpotifyURL = await MusicSearchService.shared.resolveSpotifyURL(appleMusicURL: amURL)
+                resolvedSpotifyURL = await MusicSearchService.shared.resolveSpotifyURL(
+                    appleMusicURL: amURL,
+                    title: song.title,
+                    artist: song.artist
+                )
             }
         }
         .sheet(isPresented: $showAddFriends) {
@@ -209,7 +223,8 @@ struct FriendSelectorView: View {
                 openInServiceButton(
                     song: song,
                     service: appState.preferredMusicService,
-                    resolvedSpotifyURL: resolvedSpotifyURL
+                    resolvedSpotifyURL: resolvedSpotifyURL,
+                    shareId: shareId
                 )
             }
         }

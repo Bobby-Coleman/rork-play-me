@@ -1,6 +1,7 @@
 import Foundation
 import FirebaseAuth
 import FirebaseFirestore
+import CryptoKit
 
 @Observable
 @MainActor
@@ -310,6 +311,105 @@ class FirebaseService {
         } catch {
             print("FirebaseService: save share failed: \(error.localizedDescription)")
             return nil
+        }
+    }
+
+    /// Writes a freshly resolved Spotify URI back onto the share doc so
+    /// every other device that opens this share skips song.link entirely.
+    /// Called after `MusicSearchService.resolveSpotifyURL` succeeds for a
+    /// share that was persisted without a URI (usually because send-time
+    /// enrichment was rate-limited). The caller should pass the canonical
+    /// `spotify:track:<id>` URI, not the https URL.
+    func patchShareSpotifyURI(shareId: String, spotifyURI: String) async {
+        guard !shareId.isEmpty else { return }
+        do {
+            try await db.collection("shares").document(shareId).updateData([
+                "song.spotifyURI": spotifyURI
+            ])
+            print("FirebaseService: event=share_spotify_uri_patched shareId=\(shareId) uri=\(spotifyURI)")
+        } catch {
+            print("FirebaseService: event=share_spotify_uri_patch_failed shareId=\(shareId) error=\(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Global Spotify Resolution Cache
+    //
+    // `spotifyResolutions/{sha256(normalizedAmURL)}` is a global,
+    // user-base-wide cache of Apple-Music → Spotify resolutions. The iOS
+    // client checks it before any network resolve and writes to it on
+    // every success. This turns a per-share writeback into a per-SONG
+    // writeback: the very first successful resolution of "Love on the
+    // Brain" anywhere in the world serves every subsequent viewer
+    // regardless of which share they received. Offloads essentially all
+    // Odesli / Spotify /search traffic onto a Firestore read once the
+    // catalog has warmed.
+
+    /// Cached decode target for the global resolution collection.
+    struct SpotifyResolution {
+        let trackId: String
+        let spotifyURL: String
+        let resolvedAt: Date?
+        let source: String?
+    }
+
+    /// Deterministic Firestore document ID for a given Apple Music URL.
+    /// Must match exactly across reads and writes — the client-side
+    /// `MusicSearchService.normalizeAppleMusicURL` produces the input.
+    private static func resolutionDocId(forNormalizedAmURL normalized: String) -> String {
+        let digest = SHA256.hash(data: Data(normalized.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Reads a cached resolution for the given Apple Music URL. Returns
+    /// `nil` on miss or any error; callers should treat nil as "not
+    /// cached, proceed to network resolve". Safe to call every resolve
+    /// — Firestore reads are cheap and the alternative (song.link /
+    /// Spotify /search) is far more expensive and rate-limited.
+    func fetchSpotifyResolution(normalizedAmURL: String) async -> SpotifyResolution? {
+        guard firebaseUID != nil else { return nil }
+        let docId = Self.resolutionDocId(forNormalizedAmURL: normalizedAmURL)
+        do {
+            let snap = try await db.collection("spotifyResolutions").document(docId).getDocument()
+            guard snap.exists, let data = snap.data(),
+                  let trackId = data["trackId"] as? String,
+                  let spotifyURL = data["spotifyURL"] as? String,
+                  !trackId.isEmpty, !spotifyURL.isEmpty else {
+                return nil
+            }
+            let resolvedAt = (data["resolvedAt"] as? Timestamp)?.dateValue()
+            let source = data["source"] as? String
+            return SpotifyResolution(trackId: trackId, spotifyURL: spotifyURL, resolvedAt: resolvedAt, source: source)
+        } catch {
+            print("FirebaseService: event=spotify_resolution_fetch_failed docId=\(docId) error=\(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Upserts a resolution into the global cache. Idempotent — calling
+    /// it twice for the same URL just overwrites the metadata (resolvedAt
+    /// / source) without changing the trackId. `source` is freeform ("spotify_api",
+    /// "songlink") and exists purely for debugging / analytics.
+    func writeSpotifyResolution(
+        normalizedAmURL: String,
+        trackId: String,
+        spotifyURL: String,
+        source: String
+    ) async {
+        guard firebaseUID != nil else { return }
+        guard !trackId.isEmpty, !spotifyURL.isEmpty, !normalizedAmURL.isEmpty else { return }
+        let docId = Self.resolutionDocId(forNormalizedAmURL: normalizedAmURL)
+        let payload: [String: Any] = [
+            "trackId": trackId,
+            "spotifyURL": spotifyURL,
+            "resolvedAt": FieldValue.serverTimestamp(),
+            "source": source,
+            "amURL": normalizedAmURL
+        ]
+        do {
+            try await db.collection("spotifyResolutions").document(docId).setData(payload, merge: true)
+            print("FirebaseService: event=spotify_resolution_written docId=\(docId) source=\(source) trackId=\(trackId)")
+        } catch {
+            print("FirebaseService: event=spotify_resolution_write_failed docId=\(docId) error=\(error.localizedDescription)")
         }
     }
 

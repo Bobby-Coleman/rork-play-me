@@ -448,7 +448,7 @@ class AppState {
     private func enrichSongWithSpotifyURI(_ song: Song) async -> Song {
         if song.spotifyURI != nil { return song }
         guard let appleMusicURL = song.appleMusicURL else { return song }
-        guard let resolvedURL = await MusicSearchService.shared.resolveSpotifyURL(appleMusicURL: appleMusicURL) else { return song }
+        guard let resolvedURL = await MusicSearchService.shared.resolveSpotifyURL(appleMusicURL: appleMusicURL, title: song.title, artist: song.artist) else { return song }
         guard let trackID = SpotifyDeepLinkResolver.spotifyTrackID(fromSpotifyURL: resolvedURL) else { return song }
         return song.with(spotifyURI: "spotify:track:\(trackID)")
     }

@@ -9,11 +9,17 @@ enum SpotifyDeepLinkResolver {
         return URL(string: "https://open.spotify.com/track/\(trackID)")
     }
 
+    /// Spotify's URI scheme supports a `:play` suffix that tells the app
+    /// to start playback immediately after opening the track page. This
+    /// mirrors the behavior of shared-from-Spotify links handed off by
+    /// iOS universal-link dispatch and is the piece our previous
+    /// `spotify:track:<id>` URI was missing. Documented at
+    /// developer.spotify.com/documentation/ios/tutorials/content-linking.
     static func trackURI(for song: Song, resolvedSpotifyURL: String?) -> URL? {
         guard let trackID = spotifyTrackID(for: song, resolvedSpotifyURL: resolvedSpotifyURL) else {
             return nil
         }
-        return URL(string: "spotify:track:\(trackID)")
+        return URL(string: "spotify:track:\(trackID):play")
     }
 
     static func spotifyTrackID(for song: Song, resolvedSpotifyURL: String?) -> String? {

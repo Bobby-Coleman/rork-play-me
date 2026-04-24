@@ -1022,3 +1022,236 @@ exports.auth = onRequest({ secrets: [spotifyClientSecret] }, async (req, res) =>
     res.status(500).json({ error: "Auth failed", details: err.message });
   }
 });
+
+// --------------- Spotify Track Resolution (Client Credentials) ---------------
+//
+// Cross-platform resolver used by the iOS client's "Open in Spotify" flow.
+// The client sends { title, artist, amURL } and we return the Spotify track
+// ID + canonical URL. This is the PRIMARY resolution path; Odesli (song.link)
+// is only consulted client-side as a fallback if this function fails.
+//
+// Auth model:
+//   - Client: requires a valid Firebase ID token (Bearer) so randoms on the
+//     internet can't grind our Spotify rate limit on our dime.
+//   - Server: Client Credentials flow to Spotify (no user auth required,
+//     no scopes, no 5-user dev-mode cap). The app-level access token is
+//     cached in module memory across invocations of this function instance
+//     and refreshed 60 s before expiry. Cold starts re-mint it.
+//
+// Scale math:
+//   Spotify Dev Mode rate limit: ~180 req/min app-wide (rolling window).
+//   Combined with the iOS client's local cache + Firestore global
+//   `spotifyResolutions` cache, the client only ever calls this function
+//   on TRUE cache misses — which, after a few days of catalog warm-up, is
+//   a rounding error on total traffic. Comfortable headroom for ~100K MAU.
+
+const SPOTIFY_SEARCH_URL = "https://api.spotify.com/v1/search";
+
+// Module-scope token cache. Survives warm function invocations; rebuilt
+// on cold start. Never written to Firestore because (a) the secret to
+// mint it is cheap and fast, and (b) storing short-lived bearer tokens
+// in Firestore is a minor security smell.
+let cachedAppAccessToken = null;
+let cachedAppAccessTokenExpiresAt = 0;
+
+async function getSpotifyAppAccessToken(secretValue) {
+  const now = Date.now();
+  // 60 s skew buffer — never hand out a token that's about to expire
+  // mid-request, since the Spotify API call downstream takes a moment.
+  if (cachedAppAccessToken && now < cachedAppAccessTokenExpiresAt - 60_000) {
+    return cachedAppAccessToken;
+  }
+
+  const body = new URLSearchParams({ grant_type: "client_credentials" });
+  const basicAuth = Buffer.from(`${SPOTIFY_CLIENT_ID}:${secretValue}`).toString("base64");
+
+  const response = await fetch(SPOTIFY_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${basicAuth}`,
+    },
+    body: body.toString(),
+  });
+
+  if (!response.ok) {
+    const errBody = await response.text().catch(() => "");
+    throw new Error(`Spotify token request failed: HTTP ${response.status} ${errBody.slice(0, 200)}`);
+  }
+
+  const data = await response.json();
+  if (!data.access_token || !data.expires_in) {
+    throw new Error(`Spotify token response missing fields: ${JSON.stringify(data).slice(0, 200)}`);
+  }
+
+  cachedAppAccessToken = data.access_token;
+  cachedAppAccessTokenExpiresAt = now + data.expires_in * 1000;
+  return cachedAppAccessToken;
+}
+
+// Normalize a name ("Love On The Brain (feat. X)", "Drop Dead - Single
+// Version", etc.) down to a comparable base so we can tell if Spotify's
+// match is genuinely the same song the user asked for. Removes
+// parentheticals, bracketed suffixes, dash suffixes, and lowercases.
+function normalizeTrackName(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  return raw
+    .toLowerCase()
+    .replace(/\s*\(.*?\)\s*/g, " ")
+    .replace(/\s*\[.*?\]\s*/g, " ")
+    .replace(/\s+-\s+.*/, " ")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Best-match picker. Spotify's /search is pretty well-ranked, but the top
+// result is occasionally a different-artist remix or cover; we want the
+// official Rihanna version when the user asked for Rihanna. Strategy:
+//   1. First result whose artist list contains the requested artist
+//      (case-insensitive substring either way).
+//   2. Otherwise, first result whose track name normalizes to the same
+//      base as the requested title (catches remix/version drift).
+//   3. Otherwise, Spotify's top result — best we can do.
+function pickBestMatch(tracks, requestedTitle, requestedArtist) {
+  if (!Array.isArray(tracks) || tracks.length === 0) return null;
+
+  const normArtist = (requestedArtist || "").toLowerCase().trim();
+  const normTitle = normalizeTrackName(requestedTitle || "");
+
+  if (normArtist) {
+    for (const t of tracks) {
+      const artistNames = (t.artists || []).map((a) => (a.name || "").toLowerCase());
+      if (
+        artistNames.some((a) => a && (a.includes(normArtist) || normArtist.includes(a)))
+      ) {
+        return t;
+      }
+    }
+  }
+
+  if (normTitle) {
+    for (const t of tracks) {
+      if (normalizeTrackName(t.name) === normTitle) return t;
+    }
+  }
+
+  return tracks[0];
+}
+
+exports.resolveSpotifyTrack = onRequest({ secrets: [spotifyClientSecret] }, async (req, res) => {
+  res.set("Cache-Control", "no-store");
+
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  // Auth: require Firebase ID token so abuse is traceable to a real user.
+  const authHeader = req.get("Authorization") || "";
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!match) {
+    res.status(401).json({ error: "Missing bearer token" });
+    return;
+  }
+  try {
+    await admin.auth().verifyIdToken(match[1]);
+  } catch (err) {
+    console.error("resolveSpotifyTrack: token verification failed:", err.message);
+    res.status(401).json({ error: "Invalid token" });
+    return;
+  }
+
+  const title = typeof req.body.title === "string" ? req.body.title.trim() : "";
+  const artist = typeof req.body.artist === "string" ? req.body.artist.trim() : "";
+  const amURL = typeof req.body.amURL === "string" ? req.body.amURL.trim() : "";
+
+  if (!title || !artist) {
+    res.status(400).json({ error: "Missing title or artist" });
+    return;
+  }
+
+  let accessToken;
+  try {
+    accessToken = await getSpotifyAppAccessToken(spotifyClientSecret.value());
+  } catch (err) {
+    console.error("resolveSpotifyTrack: failed to mint app token:", err.message);
+    res.status(502).json({ error: "Spotify token mint failed", details: err.message });
+    return;
+  }
+
+  // Spotify search query. Quoting the field values keeps them as phrase
+  // searches, which gives noticeably better match quality than bare
+  // concatenation (especially for short or common titles).
+  const q = `track:"${title.replace(/"/g, '')}" artist:"${artist.replace(/"/g, '')}"`;
+  const searchParams = new URLSearchParams({
+    q,
+    type: "track",
+    market: "US",
+    limit: "10",
+  });
+  const searchURL = `${SPOTIFY_SEARCH_URL}?${searchParams.toString()}`;
+
+  let searchJson;
+  try {
+    const searchRes = await fetch(searchURL, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (searchRes.status === 429) {
+      const retryAfter = searchRes.headers.get("Retry-After") || "";
+      console.warn(`resolveSpotifyTrack: HTTP 429 rate limited; retry-after=${retryAfter}s title="${title}" artist="${artist}"`);
+      res.status(503).json({ error: "Rate limited", retryAfter });
+      return;
+    }
+
+    if (searchRes.status === 401) {
+      // Cached app token rejected — invalidate and retry once.
+      cachedAppAccessToken = null;
+      cachedAppAccessTokenExpiresAt = 0;
+      try {
+        accessToken = await getSpotifyAppAccessToken(spotifyClientSecret.value());
+      } catch (err) {
+        console.error("resolveSpotifyTrack: re-mint after 401 failed:", err.message);
+        res.status(502).json({ error: "Spotify token re-mint failed" });
+        return;
+      }
+      const retryRes = await fetch(searchURL, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!retryRes.ok) {
+        res.status(retryRes.status).json({ error: `Spotify search failed after re-auth: HTTP ${retryRes.status}` });
+        return;
+      }
+      searchJson = await retryRes.json();
+    } else if (!searchRes.ok) {
+      const body = await searchRes.text().catch(() => "");
+      console.error(`resolveSpotifyTrack: Spotify search HTTP ${searchRes.status}: ${body.slice(0, 200)}`);
+      res.status(502).json({ error: `Spotify search failed: HTTP ${searchRes.status}` });
+      return;
+    } else {
+      searchJson = await searchRes.json();
+    }
+  } catch (err) {
+    console.error("resolveSpotifyTrack: network error:", err.message);
+    res.status(502).json({ error: "Spotify search network error", details: err.message });
+    return;
+  }
+
+  const tracks = (searchJson && searchJson.tracks && searchJson.tracks.items) || [];
+  const best = pickBestMatch(tracks, title, artist);
+
+  if (!best || !best.id) {
+    console.log(`resolveSpotifyTrack: no_match title="${title}" artist="${artist}" amURL="${amURL}"`);
+    res.json({ error: "no_match" });
+    return;
+  }
+
+  const trackId = best.id;
+  const spotifyURL = (best.external_urls && best.external_urls.spotify) || `https://open.spotify.com/track/${trackId}`;
+  const matchedTitle = best.name || "";
+  const matchedArtist = (best.artists || []).map((a) => a.name || "").join(", ");
+
+  console.log(`resolveSpotifyTrack: ok title="${title}" artist="${artist}" → trackId=${trackId} matched="${matchedTitle}" by "${matchedArtist}"`);
+  res.json({ trackId, spotifyURL, matchedTitle, matchedArtist });
+});
