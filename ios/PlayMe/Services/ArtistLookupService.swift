@@ -79,15 +79,39 @@ actor ArtistLookupService {
 
     /// Fetch popular tracks + albums for an artist. Results are cached in
     /// memory. Pass `forceRefresh: true` to bypass.
+    ///
+    /// Path order:
+    /// 1. MusicKit catalog resource request for the artist + its
+    ///    `topSongs` and `albums` relationships. This returns the same
+    ///    canonical data the Apple Music app shows: artist name pulled
+    ///    off the `Artist` resource (never derived from a track row,
+    ///    which was the bug that relabeled "Taylor Swift" as
+    ///    "BOYS LIKE GIRLS" when a feat-collab track ranked #1), and
+    ///    `topSongs` as ranked by Apple.
+    /// 2. If MusicKit isn't authorized or the request fails, fall back
+    ///    to the legacy iTunes `/lookup` path so the page still
+    ///    renders *something*. iTunes returns a looser catalog order
+    ///    and can mis-attribute feat tracks, but it's better than an
+    ///    empty page.
     func fetchArtistDetails(artistId: String, forceRefresh: Bool = false) async throws -> ArtistDetails {
         if !forceRefresh, let cached = detailsCache[artistId] {
             return cached
+        }
+
+        if let viaMusicKit = await AppleMusicSearchService.shared.fetchArtistDetails(artistId: artistId) {
+            detailsCache[artistId] = viaMusicKit
+            return viaMusicKit
         }
 
         async let tracks = fetchTopTracks(artistId: artistId)
         async let albums = fetchAlbums(artistId: artistId)
 
         let (topTracks, albumList) = try await (tracks, albums)
+        // Pick the primary artist name from the first track whose
+        // primary artist is the *queried* artist, not a collaborator
+        // featuring them. Falls back to the first track's artist
+        // only if nothing else is available, matching the old
+        // behavior on truly empty responses.
         let name = topTracks.first?.artist ?? albumList.first.map { _ in "" } ?? ""
 
         let details = ArtistDetails(

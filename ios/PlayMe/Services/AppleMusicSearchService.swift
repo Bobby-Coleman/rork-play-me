@@ -227,7 +227,117 @@ actor AppleMusicSearchService {
         return merged
     }
 
+    // MARK: - Artist details
+
+    /// MusicKit-backed artist page data: canonical `artistName` (pulled
+    /// straight off the Artist resource — no deriving from a track row),
+    /// `topSongs` as ranked by Apple Music itself, and the full album
+    /// discography. This is the same data the Apple Music app shows
+    /// when you open an artist page.
+    ///
+    /// Returns `nil` when MusicKit isn't authorized or the resource
+    /// request fails, so the caller can fall back to iTunes `/lookup`.
+    ///
+    /// - Parameter artistId: MusicKit `Artist.id.rawValue` (identical to
+    ///   the iTunes `artistId` numeric string for the vast majority of
+    ///   catalog artists; MusicKit search already hands us this value).
+    func fetchArtistDetails(artistId: String) async -> ArtistDetails? {
+        let status = await currentAuthorizationStatus()
+        guard status == .authorized else { return nil }
+
+        do {
+            let request = MusicCatalogResourceRequest<MusicKit.Artist>(
+                matching: \.id,
+                equalTo: MusicItemID(artistId)
+            )
+            let response = try await request.response()
+            guard let baseArtist = response.items.first else { return nil }
+            // `.with([.topSongs, .albums])` triggers the relationship
+            // fetch so `baseArtist.topSongs` / `baseArtist.albums` are
+            // populated. Without this both come back nil.
+            let detailed = try await baseArtist.with([.topSongs, .albums])
+
+            let topSongs: [Song] = (detailed.topSongs ?? []).map { Self.mapArtistTopSong($0, fallbackArtistId: artistId) }
+            let albumsRaw: [Album] = (detailed.albums ?? []).map(Self.mapAlbum(_:))
+            let albums = Self.dedupeAlbums(albumsRaw)
+
+            return ArtistDetails(
+                artistId: artistId,
+                artistName: detailed.name,
+                topTracks: topSongs,
+                albums: albums
+            )
+        } catch is CancellationError {
+            return nil
+        } catch {
+            if (error as NSError).code == NSURLErrorCancelled { return nil }
+            print("[AppleMusicSearch] artist details error for '\(artistId)': \(error)")
+            return nil
+        }
+    }
+
     // MARK: - Mapping
+
+    /// Variant of `mapSong` used for the top-songs list on the artist
+    /// page. Unlike the search variant, there's no cross-result
+    /// `artistIdByName` table to consult, so we pin the song to the
+    /// page's artistId — good enough for the only tap target inside
+    /// the Popular list (the row itself opens `SongActionSheet`).
+    private static func mapArtistTopSong(_ song: MusicKit.Song, fallbackArtistId: String) -> Song {
+        let artwork600 = song.artwork?.url(width: 600, height: 600)?.absoluteString ?? ""
+        let durationString: String = {
+            guard let seconds = song.duration, seconds.isFinite, seconds > 0 else { return "" }
+            let total = Int(seconds.rounded())
+            let m = total / 60
+            let s = total % 60
+            return "\(m):\(String(format: "%02d", s))"
+        }()
+        let preview = song.previewAssets?.first?.url?.absoluteString
+        let appleURL = song.url?.absoluteString
+
+        return Song(
+            id: song.id.rawValue,
+            title: song.title,
+            artist: song.artistName,
+            albumArtURL: artwork600,
+            duration: durationString,
+            previewURL: preview,
+            appleMusicURL: appleURL,
+            artistId: fallbackArtistId,
+            albumId: nil
+        )
+    }
+
+    /// Conservative near-dup collapse for MusicKit album relationships:
+    /// MusicKit can return multiple editions of the same record (deluxe
+    /// / explicit / storefront variants) that all share a name+year.
+    /// Groups by normalized (name, year) and keeps the one with the
+    /// highest trackCount; tiebreaks on earliest release year. Matches
+    /// the behavior we had on the iTunes path so the grid doesn't
+    /// double up.
+    private static func dedupeAlbums(_ albums: [Album]) -> [Album] {
+        var groups: [String: Album] = [:]
+        for album in albums {
+            let nameKey = album.name
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let key = "\(nameKey)|\(album.releaseYear ?? "")"
+            if let existing = groups[key] {
+                let e = existing.trackCount ?? 0
+                let c = album.trackCount ?? 0
+                if c > e {
+                    groups[key] = album
+                } else if c == e, (album.releaseYear ?? "") < (existing.releaseYear ?? "") {
+                    groups[key] = album
+                }
+            } else {
+                groups[key] = album
+            }
+        }
+        return groups.values.sorted { (a, b) in
+            (a.releaseYear ?? "") > (b.releaseYear ?? "")
+        }
+    }
 
     private static func mapSong(_ song: MusicKit.Song, artistIdByName: [String: String]) -> Song {
         let artwork600 = song.artwork?.url(width: 600, height: 600)?.absoluteString ?? ""
