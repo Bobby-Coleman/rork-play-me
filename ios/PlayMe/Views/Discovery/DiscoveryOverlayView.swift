@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// Foreground components for the Discovery hero page. Exposed as two small,
 /// intrinsically-sized views so the parent VStack can control vertical
@@ -62,6 +63,59 @@ struct DiscoveryHistoryHint: View {
         .padding(.vertical, 8)
         .background(.ultraThinMaterial, in: Capsule())
         .shadow(color: .black.opacity(0.4), radius: 10, y: 2)
+    }
+}
+
+/// Small rotating album-art square rendered next to
+/// `DiscoveryHistoryHint` on the hero page. Crossfades through the
+/// first few received shares every ~2.2 seconds so users get a
+/// subtle preview of what's waiting in the feed below, encouraging
+/// them to scroll.
+///
+/// Pre-renders all provided thumbnails in a `ZStack` (toggled by
+/// opacity) rather than swapping a single image's URL, so Nuke's
+/// shared `ImageCache` serves each crossfade target instantly
+/// without a network round-trip — no flash, no placeholder state
+/// mid-rotation.
+struct HistoryAlbumPreview: View {
+    let shares: [SongShare]
+    let side: CGFloat
+
+    @State private var index: Int = 0
+
+    var body: some View {
+        ZStack {
+            ForEach(Array(shares.enumerated()), id: \.element.id) { pair in
+                AlbumArtSquare(
+                    url: pair.element.song.albumArtURL,
+                    cornerRadius: 6,
+                    showsPlaceholderProgress: false,
+                    showsShadow: false,
+                    targetDecodeSide: side
+                )
+                .frame(width: side, height: side)
+                .opacity(pair.offset == index ? 1 : 0)
+            }
+        }
+        .frame(width: side, height: side)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
+        .onReceive(Timer.publish(every: 2.2, on: .main, in: .common).autoconnect()) { _ in
+            guard shares.count > 1 else { return }
+            withAnimation(.easeInOut(duration: 0.45)) {
+                index = (index + 1) % shares.count
+            }
+        }
+        .onChange(of: shares.map(\.id)) { _, _ in
+            // When the underlying share list shrinks (e.g. user
+            // refreshes and a message is removed), clamp the index
+            // so we never index past the end of the new array.
+            if index >= shares.count { index = 0 }
+        }
     }
 }
 

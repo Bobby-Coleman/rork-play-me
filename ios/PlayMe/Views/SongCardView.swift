@@ -17,6 +17,14 @@ struct SongCardView: View {
     @State private var isOpeningChat: Bool = false
     @State private var showDetailSheet: Bool = false
     @State private var showArtistView: Bool = false
+    /// Measured height of the content above the artwork (header block).
+    /// Updated in-place via a `PreferenceKey` probe so the art size
+    /// recomputes when Dynamic Type or localized strings change the
+    /// header's rendered size.
+    @State private var topBlockHeight: CGFloat = 68
+    /// Measured height of the content below the artwork (sender row +
+    /// player controls).
+    @State private var bottomBlockHeight: CGFloat = 140
 
     private var isCurrentSong: Bool {
         audioPlayer.currentSongId == share.song.id
@@ -50,37 +58,52 @@ struct SongCardView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let horizontalInset: CGFloat = 24
-            let nonArtReserve: CGFloat = 180
-            let maxArtByWidth = max(0, proxy.size.width - horizontalInset * 2)
-            let maxArtByHeight = max(220, proxy.size.height - nonArtReserve)
-            let artSize = min(maxArtByWidth, maxArtByHeight)
+            let nonArt = topBlockHeight + bottomBlockHeight
+            let artSize = FeedLayout.artSize(forPageSize: proxy.size, nonArtHeight: nonArt)
 
             ZStack {
                 Color.black
 
+                // Symmetric flexible spacers geometrically center the
+                // content within the page. The page size is the scroll
+                // container's visible region (see `DiscoveryView`'s
+                // top + bottom safe-area insets), so there's no need
+                // for an asymmetric bottom padding to "push content up
+                // above the reply pill" — the reply pill lives outside
+                // the page entirely.
                 VStack(spacing: 0) {
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 0)
+
+                    header
+                        .padding(.top, 8)
+                        .padding(.bottom, 24)
+                        .padding(.horizontal, 24)
+                        .background(heightProbe(TopBlockHeightKey.self))
+
+                    artwork(size: artSize)
 
                     VStack(spacing: 0) {
-                        header
-                            .padding(.top, 8)
-                            .padding(.bottom, 24)
-                            .padding(.horizontal, 24)
-
-                        artwork(size: artSize)
-                            .padding(.bottom, 20)
-
                         senderDateRow
+                            .padding(.top, 20)
                             .padding(.bottom, 12)
 
                         playerControls
                             .padding(.horizontal, 32)
                             .padding(.bottom, 12)
                     }
-                    .padding(.bottom, 72)
+                    .background(heightProbe(BottomBlockHeightKey.self))
 
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 0)
+                }
+            }
+            .onPreferenceChange(TopBlockHeightKey.self) { newValue in
+                if abs(newValue - topBlockHeight) > 0.5 {
+                    topBlockHeight = newValue
+                }
+            }
+            .onPreferenceChange(BottomBlockHeightKey.self) { newValue in
+                if abs(newValue - bottomBlockHeight) > 0.5 {
+                    bottomBlockHeight = newValue
                 }
             }
             .task {
@@ -365,6 +388,32 @@ struct SongCardView: View {
                     .padding(.top, 4)
             }
         }
+    }
+
+    // MARK: - Height probe
+
+    /// Transparent `GeometryReader` background that publishes the host
+    /// view's rendered height through the supplied `PreferenceKey`. Used
+    /// by `SongCardView` to discover the real size of the top/bottom
+    /// non-art blocks and size the artwork to the leftover space.
+    private func heightProbe<Key: PreferenceKey>(_ key: Key.Type) -> some View where Key.Value == CGFloat {
+        GeometryReader { geo in
+            Color.clear.preference(key: key, value: geo.size.height)
+        }
+    }
+}
+
+private struct TopBlockHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 68
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct BottomBlockHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 140
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

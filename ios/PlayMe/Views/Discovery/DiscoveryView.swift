@@ -61,65 +61,85 @@ struct DiscoveryView: View {
     // MARK: - Body
 
     var body: some View {
+        // Root `ZStack(alignment: .bottom)` floats the focus-dim and
+        // reply pill above the paging stack. The pager lives inside a
+        // `VStack` with a fixed `Color.clear` sibling reserving exactly
+        // the reply-pill slot — that gives `GeometryReader` inside a
+        // single, unambiguous page size to hand down to every page.
+        //
+        // This layout deliberately avoids mixing
+        // `.containerRelativeFrame([.horizontal, .vertical])` with
+        // `.safeAreaInset(edge: .bottom)` on the same ScrollView:
+        // `containerRelativeFrame` measures against the ScrollView's
+        // full frame while `.scrollTargetBehavior(.paging)` snaps by
+        // the visible content region, and on some iPhones those two
+        // numbers disagree enough that the next page's top leaks past
+        // the snap seam. Measuring once with `GeometryReader` and
+        // `.frame(height:)` each page explicitly guarantees page
+        // height == snap distance on every device.
         ZStack(alignment: .bottom) {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical) {
-                    LazyVStack(spacing: 0) {
-                        hero
-                            .containerRelativeFrame([.horizontal, .vertical])
-                            .id(Self.heroId)
+            VStack(spacing: 0) {
+                GeometryReader { pageGeo in
+                    let pageSize = pageGeo.size
+                    ScrollViewReader { proxy in
+                        ScrollView(.vertical) {
+                            LazyVStack(spacing: 0) {
+                                hero(pageSize: pageSize, scrollProxy: proxy)
+                                    .frame(width: pageSize.width, height: pageSize.height)
+                                    .id(Self.heroId)
 
-                        ForEach(shares) { share in
-                            SongCardView(
-                                share: share,
-                                isLiked: appState.isLiked(shareId: share.id),
-                                appState: appState,
-                                onToggleLike: { appState.toggleLike(shareId: share.id) }
-                            )
-                            .containerRelativeFrame([.horizontal, .vertical])
-                            .clipped()
-                            .id(share.id)
+                                ForEach(shares) { share in
+                                    SongCardView(
+                                        share: share,
+                                        isLiked: appState.isLiked(shareId: share.id),
+                                        appState: appState,
+                                        onToggleLike: { appState.toggleLike(shareId: share.id) }
+                                    )
+                                    .frame(width: pageSize.width, height: pageSize.height)
+                                    .clipped()
+                                    .id(share.id)
+                                }
+                            }
+                            .scrollTargetLayout()
+                        }
+                        .scrollTargetBehavior(.paging)
+                        .scrollPosition(id: $visiblePageId)
+                        .scrollIndicators(.hidden)
+                        .scrollDismissesKeyboard(.immediately)
+                        .ignoresSafeArea(.keyboard, edges: .bottom)
+                        .refreshable { await appState.refreshShares() }
+                        .onChange(of: visiblePageId) { oldValue, newValue in
+                            guard let newValue, let oldValue, newValue != oldValue else { return }
+                            // Silence the tiny haptic when transitioning
+                            // to or from the hero page — card-to-card
+                            // swipes still get the subtle tick so the
+                            // feed feels tactile.
+                            let toFromHero = newValue == Self.heroId || oldValue == Self.heroId
+                            if !toFromHero {
+                                scrollHaptic.prepare()
+                                scrollHaptic.impactOccurred(intensity: 0.65)
+                            }
+                            if isReplyFocused { isReplyFocused = false }
+                            if !replyText.isEmpty { replyText = "" }
+                            onHeroVisibilityChange?(newValue == Self.heroId)
+                        }
+                        .onChange(of: appState.discoveryScrollToTopCounter) { _, _ in
+                            isReplyFocused = false
+                            replyText = ""
+                            withAnimation(.easeInOut(duration: 0.35)) {
+                                visiblePageId = Self.heroId
+                            }
                         }
                     }
-                    .scrollTargetLayout()
                 }
-                .scrollTargetBehavior(.paging)
-                .scrollPosition(id: $visiblePageId)
-                .scrollIndicators(.hidden)
-                .scrollDismissesKeyboard(.immediately)
-                .ignoresSafeArea(.keyboard, edges: .bottom)
-                .refreshable { await appState.refreshShares() }
-                .onChange(of: visiblePageId) { oldValue, newValue in
-                    guard let newValue, let oldValue, newValue != oldValue else { return }
-                    // Silence the tiny haptic when transitioning to or from
-                    // the hero page — the spec explicitly calls out the
-                    // extra bounce/haptic as distracting when entering /
-                    // leaving the landing experience. Card-to-card swipes
-                    // still get the subtle tick so the feed feels tactile.
-                    let toFromHero = newValue == Self.heroId || oldValue == Self.heroId
-                    if !toFromHero {
-                        scrollHaptic.prepare()
-                        scrollHaptic.impactOccurred(intensity: 0.65)
-                    }
-                    if isReplyFocused { isReplyFocused = false }
-                    if !replyText.isEmpty { replyText = "" }
-                    onHeroVisibilityChange?(newValue == Self.heroId)
-                }
-                .onChange(of: appState.discoveryScrollToTopCounter) { _, _ in
-                    // Clear reply focus/text synchronously, then flip
-                    // `visiblePageId` inside `withAnimation`. The
-                    // `.scrollPosition(id:)` binding turns that into the
-                    // scroll animation, and because `isOnHero` goes true
-                    // *at the same instant*, the reply bar's gate drops
-                    // on frame 1 of the animation instead of lingering
-                    // until the scroll settles — which is what made the
-                    // pill appear to ride up with the scroll-to-hero.
-                    isReplyFocused = false
-                    replyText = ""
-                    withAnimation(.easeInOut(duration: 0.35)) {
-                        visiblePageId = Self.heroId
-                    }
-                }
+
+                // Fixed slot the reply pill renders into. Kept as a
+                // VStack sibling (rather than a ScrollView
+                // safeAreaInset) so the `pageGeo` above measures the
+                // exact scrollable area and every page matches the
+                // paging snap distance.
+                Color.clear
+                    .frame(height: FeedLayout.replyBarReservedHeight)
             }
 
             if isReplyFocused {
@@ -167,56 +187,32 @@ struct DiscoveryView: View {
 
     // MARK: - Hero page
 
-    /// Hero layout. `gridSide` is derived from `UIScreen.main.bounds` rather
-    /// than a `GeometryReader` so the computation doesn't re-run while the
-    /// paging scroll is mid-transition (a GeometryReader inside a
-    /// `containerRelativeFrame` page re-publishes its size during animation,
-    /// which can kick off layout work during the snap and cause the bounce
-    /// feel the spec wants gone).
+    /// Hero layout. Consumes the page size measured once by the
+    /// pager's outer `GeometryReader` so hero grid and the first
+    /// `SongCardView`'s artwork are identical on every iPhone — SE
+    /// through Pro Max — when the user swipes between them.
     ///
     /// Vertical layout (top → bottom):
-    ///   * Flexible top spacer — pushes everything down from the navbar.
-    ///   * Album art grid (square).
+    ///   * Flexible top spacer.
+    ///   * Album art grid (square, `FeedLayout.artSize`).
     ///   * Fixed gap.
     ///   * Search CTA (text + magnifier).
     ///   * Flexible spacer.
-    ///   * History chevron pinned near the bottom.
-    ///
-    /// The two flexible spacers sandwich the core content (grid + CTA) so it
-    /// ends up visually centered — addressing the "positioned too high"
-    /// feedback — while the history hint stays anchored.
-    private var hero: some View {
-        // All spacing is a fraction of the real screen height so the hero
-        // lands in the same visual position on every device (SE through
-        // Pro Max). `UIScreen.main.bounds` is deliberate: it's stable and
-        // doesn't re-publish mid-paging the way a `GeometryReader` would.
-        //
-        // The grid side mirrors `SongCardView.artSize` — which is
-        // `min(screenW - 48, max(220, screenH - 180))` — so when the user
-        // swipes from hero to the first song card the artwork keeps
-        // exactly the same on-screen size. On every modern phone the
-        // width formula wins, so the cap only matters on SE-class
-        // devices; `screenH * 0.42` leaves just enough headroom below
-        // the grid for the CTA + history chevron on those shorter
-        // viewports.
-        let screenW = UIScreen.main.bounds.width
-        let screenH = UIScreen.main.bounds.height
-        let gridSide = min(screenW - 48, screenH * 0.42)
-        // Lowered topSpace offsets the extra height the larger grid
-        // eats; the grid's BOTTOM edge ends up within a few points of
-        // where it sat with the previous (smaller) layout, preserving
-        // the "positioning is good" feedback while the bigger square is
-        // still visually anchored in the upper half.
-        let topSpace = max(60, screenH * 0.09)
-        let gridToCTAGap = max(18, screenH * 0.028)
-        let ctaToHistoryMin = max(18, screenH * 0.028)
-        // Raised from `max(12, screenH * 0.022)` so the history chevron
-        // clears the translucent tab bar on every device instead of
-        // sitting right under its edge.
-        let historyBottom = max(28, screenH * 0.04)
+    ///   * History row (tap-to-scroll + rotating album preview) —
+    ///     hidden entirely on accounts with no received shares.
+    private func hero(pageSize: CGSize, scrollProxy: ScrollViewProxy) -> some View {
+        // Non-grid content: search CTA (~80pt) + history row (~44pt)
+        // + inter-group spacing. Passed to `FeedLayout.artSize` so
+        // the grid shrinks gracefully on short viewports rather than
+        // clipping the CTA or row.
+        let nonGridHeight: CGFloat = 200
+        let gridSide = FeedLayout.artSize(forPageSize: pageSize, nonArtHeight: nonGridHeight)
+        let gridToCTAGap = max(18, pageSize.height * 0.028)
+        let ctaToHistoryMin = max(18, pageSize.height * 0.028)
+        let historyBottom = max(20, pageSize.height * 0.03)
 
         return VStack(spacing: 0) {
-            Spacer().frame(minHeight: topSpace)
+            Spacer(minLength: 0)
 
             AlbumArtGridBackgroundView(
                 items: gridVM.dedupedDisplayItems,
@@ -230,20 +226,47 @@ struct DiscoveryView: View {
 
             Spacer(minLength: ctaToHistoryMin)
 
-            DiscoveryHistoryHint()
-                .padding(.bottom, historyBottom)
-                // Fade out within the first ~25% of a hero → card swipe
-                // so the chevron never crosses the friends pill. The
-                // scroll transition phase value is 0 when the hint is
-                // centered and approaches ±1 as it exits the viewport;
-                // the ×4 multiplier collapses opacity to zero well
-                // before the hint can reach the top bar.
-                .scrollTransition(axis: .vertical) { content, phase in
-                    content.opacity(max(0, 1 - abs(phase.value) * 4))
-                }
+            if !shares.isEmpty {
+                historyRow(scrollProxy: scrollProxy)
+                    .padding(.bottom, historyBottom)
+                    // Fade out within the first ~25% of a hero → card
+                    // swipe so the row never crosses the friends pill.
+                    .scrollTransition(axis: .vertical) { content, phase in
+                        content.opacity(max(0, 1 - abs(phase.value) * 4))
+                    }
+            } else {
+                Spacer().frame(height: historyBottom)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: pageSize.width, height: pageSize.height)
         .background(Color.black)
+    }
+
+    /// Single tappable surface on the hero combining the existing
+    /// history pill with a small rotating album-art preview. Tapping
+    /// anywhere on the row fires the haptic and animates the scroll
+    /// view to the first received share, so users don't have to
+    /// discover the swipe gesture themselves. Only rendered when
+    /// there's at least one share to show.
+    private func historyRow(scrollProxy: ScrollViewProxy) -> some View {
+        Button {
+            guard let firstId = shares.first?.id else { return }
+            scrollHaptic.prepare()
+            scrollHaptic.impactOccurred(intensity: 0.7)
+            withAnimation(.easeInOut(duration: 0.45)) {
+                scrollProxy.scrollTo(firstId, anchor: .top)
+            }
+        } label: {
+            HStack(spacing: 10) {
+                DiscoveryHistoryHint()
+
+                HistoryAlbumPreview(
+                    shares: Array(shares.prefix(6)),
+                    side: 34
+                )
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Reply bar (mirrors HomeFeedView behavior)
