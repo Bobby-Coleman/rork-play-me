@@ -23,6 +23,25 @@ actor AppleMusicSearchService {
     /// keystroke hitting MusicKit.
     private var cachedAuthStatus: MusicAuthorization.Status?
 
+    /// Per-query LRU result cache. Stores the typeahead and expanded
+    /// payloads independently because the two-phase pipeline issues them
+    /// on separate trips — phase 2's expanded fetch should hit the cache
+    /// even if phase 1 was a fresh network round-trip a few hundred ms
+    /// earlier. Cache is in-memory only; search responses change too
+    /// often for disk persistence to be worth it, and 60 s is a generous
+    /// ceiling for "typo + backspace + retype the same query."
+    private struct CachedSearch {
+        var typeahead: AppleMusicSearchResults?
+        var expanded: AppleMusicSearchResults?
+        var storedAt: Date
+    }
+    private var resultCache: [String: CachedSearch] = [:]
+    /// Maintains LRU recency. The most-recently-touched key is at the
+    /// end; on overflow we evict from the front.
+    private var cacheOrder: [String] = []
+    private let cacheTTL: TimeInterval = 60
+    private let cacheCap: Int = 50
+
     /// Returns the current authorization status, requesting permission if
     /// the user hasn't been prompted yet. Safe to call on every search —
     /// MusicKit itself deduplicates the prompt.
@@ -40,31 +59,30 @@ actor AppleMusicSearchService {
         return current
     }
 
-    /// Performs a catalog search for the given term and maps MusicKit
-    /// models onto the app's internal `Song` / `ArtistSummary` / `Album`
-    /// types. Honors cancellation — if the caller's `Task` is cancelled
-    /// mid-flight (typical with typeahead), we return an empty result
-    /// without touching the cache.
+    /// Populates `cachedAuthStatus` so the first real keystroke doesn't
+    /// pay the `MusicAuthorization.currentStatus` round-trip. Called
+    /// once at app launch from `AppState.init()` — fire-and-forget.
+    func prewarmAuthorization() async {
+        _ = await currentAuthorizationStatus()
+    }
+
+    /// Phase 1 of the two-phase search pipeline: Apple's typeahead
+    /// endpoint only. Returns prefix-aware top results — the same data
+    /// the Apple Music app shows above its autocomplete list — and is
+    /// what the user sees first. Cheap on Apple's side and what makes
+    /// the UI feel "instant."
     ///
-    /// Fans out two requests in parallel:
-    /// 1. `MusicCatalogSearchSuggestionsRequest` — Apple's typeahead
-    ///    endpoint. Handles prefix completion ("suf" → Sufjan Stevens)
-    ///    the same way the Apple Music app does. Drives the top hit and
-    ///    leads every per-type bucket.
-    /// 2. `MusicCatalogSearchRequest` — the full catalog search. Pads
-    ///    the tail of each bucket with extra items so per-tab filter
-    ///    lists ("Songs", "Albums", "Artists") feel full even when
-    ///    suggestions only returned a handful of items.
-    ///
-    /// Merge rule: suggestions items take priority and keep their order;
-    /// full-search items are appended only when their `id` hasn't already
-    /// appeared from suggestions.
-    ///
-    /// - Parameter term: User-typed search text. Whitespace-trimmed here.
-    /// - Parameter limit: Max items per bucket for the full search.
-    func search(term: String, limit: Int = 20) async -> AppleMusicSearchResults {
+    /// Cancellation-safe (returns `.empty` without writing to cache) and
+    /// LRU-cached for `cacheTTL` seconds, so a backspace/retype within
+    /// the window doesn't fire another request.
+    func searchTypeahead(term: String) async -> AppleMusicSearchResults {
         let trimmed = term.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return .empty }
+        let key = Self.normalize(trimmed)
+
+        if let hit = cacheRead(key: key)?.typeahead {
+            return hit
+        }
 
         let status = await currentAuthorizationStatus()
         guard status == .authorized else {
@@ -74,15 +92,9 @@ actor AppleMusicSearchService {
             )
         }
 
-        async let suggestionsTask = Self.fetchSuggestions(term: trimmed, limit: 10)
-        async let fullTask = Self.fetchFullSearch(term: trimmed, limit: min(max(limit, 1), 25))
-        let (suggestionsResp, fullResp) = await (suggestionsTask, fullTask)
-
+        let suggestionsResp = await Self.fetchSuggestions(term: trimmed, limit: 10)
         if Task.isCancelled { return .empty }
 
-        // Union artist-name → id map across both responses so song rows
-        // get a tappable artist byline whether the matching artist came
-        // from suggestions or the fuller search.
         var artistIdByName: [String: String] = [:]
         if let s = suggestionsResp {
             for top in s.topResults {
@@ -92,15 +104,7 @@ actor AppleMusicSearchService {
                 }
             }
         }
-        if let f = fullResp {
-            for artist in f.artists {
-                let key = Self.normalize(artist.name)
-                if artistIdByName[key] == nil { artistIdByName[key] = artist.id.rawValue }
-            }
-        }
 
-        // Collect suggestions top results into our three buckets in the
-        // order Apple returned them.
         var suggSongs: [Song] = []
         var suggArtists: [ArtistSummary] = []
         var suggAlbums: [Album] = []
@@ -127,40 +131,136 @@ actor AppleMusicSearchService {
             }
         }
 
-        // Map full-search buckets, then pad onto suggestions with dedupe
-        // by id. Preserves typeahead ordering while giving the per-tab
-        // lists enough depth to feel complete.
+        let topHit: SearchResults.TopHit? = {
+            if let hit = suggTopHit { return hit }
+            if let artist = suggArtists.first,
+               Self.queryMatchesArtistName(trimmed, artist: artist) {
+                return .artist(artist)
+            }
+            if let song = suggSongs.first { return .song(song) }
+            if let artist = suggArtists.first { return .artist(artist) }
+            if let album = suggAlbums.first { return .album(album) }
+            return nil
+        }()
+
+        let result = AppleMusicSearchResults(
+            songs: suggSongs,
+            artists: suggArtists,
+            albums: suggAlbums,
+            topHit: topHit,
+            authStatus: .authorized
+        )
+        cacheWrite(key: key, typeahead: result)
+        return result
+    }
+
+    /// Phase 2 of the two-phase search pipeline: the deeper full-catalog
+    /// search. Used to pad each per-type bucket beyond what Apple's
+    /// typeahead returns; merged by id on top of the typeahead payload
+    /// in `AppState.searchSongs` so the per-tab lists ("Songs",
+    /// "Albums", "Artists") feel complete.
+    ///
+    /// Lower default limit (12 vs. the old unified 25) since this only
+    /// pads the tail and the user almost always taps something in the
+    /// first few rows. Cancellation-safe and LRU-cached.
+    func searchExpanded(term: String, limit: Int = 12) async -> AppleMusicSearchResults {
+        let trimmed = term.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return .empty }
+        let key = Self.normalize(trimmed)
+
+        if let hit = cacheRead(key: key)?.expanded {
+            return hit
+        }
+
+        let status = await currentAuthorizationStatus()
+        guard status == .authorized else {
+            return AppleMusicSearchResults(
+                songs: [], artists: [], albums: [],
+                topHit: nil, authStatus: status
+            )
+        }
+
+        let fullResp = await Self.fetchFullSearch(term: trimmed, limit: min(max(limit, 1), 25))
+        if Task.isCancelled { return .empty }
+
+        var artistIdByName: [String: String] = [:]
+        if let f = fullResp {
+            for artist in f.artists {
+                let key = Self.normalize(artist.name)
+                if artistIdByName[key] == nil { artistIdByName[key] = artist.id.rawValue }
+            }
+        }
+
         let fullSongs: [Song] = fullResp?.songs.map { Self.mapSong($0, artistIdByName: artistIdByName) } ?? []
         let fullArtists: [ArtistSummary] = fullResp?.artists.map(Self.mapArtist(_:)) ?? []
         let fullAlbums: [Album] = fullResp?.albums.map(Self.mapAlbum(_:)) ?? []
 
-        let mergedSongs = Self.mergeDedupe(primary: suggSongs, fallback: fullSongs, id: \Song.id)
-        let mergedArtists = Self.mergeDedupe(primary: suggArtists, fallback: fullArtists, id: \ArtistSummary.id)
-        let mergedAlbums = Self.mergeDedupe(primary: suggAlbums, fallback: fullAlbums, id: \Album.id)
-
-        // topHit: suggestions wins — that's exactly what the Apple Music
-        // app surfaces above the autocomplete list. Only fall back to
-        // the name-match heuristic when suggestions returned nothing
-        // (rare: gibberish queries).
+        // Phase 2 is rarely used as the only payload (typeahead almost
+        // always returns first), so a permissive heuristic is fine for
+        // the standalone topHit.
         let topHit: SearchResults.TopHit? = {
-            if let hit = suggTopHit { return hit }
-            if let artist = mergedArtists.first,
+            if let artist = fullArtists.first,
                Self.queryMatchesArtistName(trimmed, artist: artist) {
                 return .artist(artist)
             }
-            if let song = mergedSongs.first { return .song(song) }
-            if let artist = mergedArtists.first { return .artist(artist) }
-            if let album = mergedAlbums.first { return .album(album) }
+            if let song = fullSongs.first { return .song(song) }
+            if let artist = fullArtists.first { return .artist(artist) }
+            if let album = fullAlbums.first { return .album(album) }
             return nil
         }()
 
-        return AppleMusicSearchResults(
-            songs: mergedSongs,
-            artists: mergedArtists,
-            albums: mergedAlbums,
+        let result = AppleMusicSearchResults(
+            songs: fullSongs,
+            artists: fullArtists,
+            albums: fullAlbums,
             topHit: topHit,
             authStatus: .authorized
         )
+        cacheWrite(key: key, expanded: result)
+        return result
+    }
+
+    // MARK: - LRU cache helpers
+
+    /// Returns the cached entry if still within `cacheTTL` and refreshes
+    /// recency. Stale entries are evicted lazily on read.
+    private func cacheRead(key: String) -> CachedSearch? {
+        guard let entry = resultCache[key] else { return nil }
+        if Date().timeIntervalSince(entry.storedAt) > cacheTTL {
+            resultCache.removeValue(forKey: key)
+            cacheOrder.removeAll { $0 == key }
+            return nil
+        }
+        if let idx = cacheOrder.firstIndex(of: key) {
+            cacheOrder.remove(at: idx)
+        }
+        cacheOrder.append(key)
+        return entry
+    }
+
+    /// Writes one half of the cached payload (typeahead or expanded),
+    /// preserving the other half if it was already there. Touches LRU
+    /// recency and evicts the least-recently-used key when over cap.
+    private func cacheWrite(
+        key: String,
+        typeahead: AppleMusicSearchResults? = nil,
+        expanded: AppleMusicSearchResults? = nil
+    ) {
+        var entry = resultCache[key] ?? CachedSearch(typeahead: nil, expanded: nil, storedAt: Date())
+        if let t = typeahead { entry.typeahead = t }
+        if let e = expanded { entry.expanded = e }
+        entry.storedAt = Date()
+        resultCache[key] = entry
+
+        if let idx = cacheOrder.firstIndex(of: key) {
+            cacheOrder.remove(at: idx)
+        }
+        cacheOrder.append(key)
+
+        while cacheOrder.count > cacheCap, let evict = cacheOrder.first {
+            cacheOrder.removeFirst()
+            resultCache.removeValue(forKey: evict)
+        }
     }
 
     // MARK: - Request fan-out
@@ -210,8 +310,10 @@ actor AppleMusicSearchService {
 
     /// Concatenates `primary` with the items from `fallback` whose id
     /// isn't already present in `primary`. Preserves primary ordering —
-    /// Apple's typeahead ranking wins on overlaps.
-    private static func mergeDedupe<T>(
+    /// Apple's typeahead ranking wins on overlaps. Public so
+    /// `AppState.searchSongs` can merge the two-phase payloads after
+    /// they each return.
+    static func mergeDedupe<T>(
         primary: [T],
         fallback: [T],
         id: KeyPath<T, String>
@@ -245,14 +347,23 @@ actor AppleMusicSearchService {
         let status = await currentAuthorizationStatus()
         guard status == .authorized else { return nil }
 
-        let results = await search(term: trimmed, limit: 8)
+        async let typeaheadTask = searchTypeahead(term: trimmed)
+        async let expandedTask = searchExpanded(term: trimmed, limit: 8)
+        let (typeahead, expanded) = await (typeaheadTask, expandedTask)
+
+        let merged = Self.mergeDedupe(
+            primary: typeahead.artists,
+            fallback: expanded.artists,
+            id: \ArtistSummary.id
+        )
+
         let normalizedQuery = Self.normalize(trimmed)
-        if let exact = results.artists.first(where: {
+        if let exact = merged.first(where: {
             Self.normalize($0.name) == normalizedQuery
         }) {
             return exact.id
         }
-        return results.artists.first?.id
+        return merged.first?.id
     }
 
     // MARK: - Artist details

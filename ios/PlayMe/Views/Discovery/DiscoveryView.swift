@@ -341,6 +341,17 @@ struct DiscoveryView: View {
                     .foregroundStyle(.white)
                     .tint(.white)
                     .focused($isReplyFocused)
+                    .submitLabel(.send)
+                    .onChange(of: replyText) { _, newValue in
+                        guard newValue.contains("\n") else { return }
+                        let stripped = newValue.replacingOccurrences(of: "\n", with: "")
+                        replyText = stripped
+                        if stripped.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            isReplyFocused = false
+                        } else {
+                            sendReply()
+                        }
+                    }
                     .disabled(replyRecipient == nil)
 
                     if isReplyFocused && replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

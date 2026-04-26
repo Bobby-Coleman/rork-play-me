@@ -152,7 +152,7 @@ struct FriendSelectorView: View {
         TextField(
             "",
             text: $note,
-            prompt: Text("Add a message").foregroundColor(.white.opacity(0.55)),
+            prompt: Text("Add a message").foregroundColor(.white.opacity(0.78)),
             axis: .vertical
         )
         .lineLimit(1...3)
@@ -167,7 +167,19 @@ struct FriendSelectorView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
         .background(.ultraThinMaterial, in: Capsule())
+        .background(Color.white.opacity(0.06), in: Capsule())
+        .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 0.5))
+        .shadow(color: .white.opacity(0.18), radius: 10, x: 0, y: 0)
         .onChange(of: note) { _, newValue in
+            // `axis: .vertical` TextFields swallow `onSubmit` on Return
+            // and insert a newline instead. Strip newlines as they arrive
+            // and treat them as a dismiss request, matching the spec
+            // (Enter = finish, never multiline-by-Enter).
+            if newValue.contains("\n") {
+                note = newValue.replacingOccurrences(of: "\n", with: "")
+                isNoteFocused = false
+                return
+            }
             if newValue.count > 70 { note = String(newValue.prefix(70)) }
         }
     }

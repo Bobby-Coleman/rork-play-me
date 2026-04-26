@@ -188,6 +188,9 @@ class AppState {
     init() {
         loadSavedUser()
         likedShareIds = Set(UserDefaults.standard.stringArray(forKey: "likedShareIds") ?? [])
+        // Fire-and-forget: caches MusicKit's auth status off the hot
+        // path so the first keystroke in search doesn't pay for it.
+        Task { await AppleMusicSearchService.shared.prewarmAuthorization() }
     }
 
     private func loadSavedUser() {
@@ -488,22 +491,45 @@ class AppState {
 
         isSearchingSongs = true
 
-        let response = await AppleMusicSearchService.shared.search(term: trimmed)
-
-        // Bail if the caller was cancelled mid-flight (debounce typed another key).
+        // Phase 1: typeahead. This is what makes search feel instant —
+        // it returns Apple's prefix-aware top results (the same data
+        // backing the Apple Music app's autocomplete) and is cheap on
+        // Apple's side. The user sees populated buckets and we drop the
+        // spinner here, before phase 2 has even fired.
+        let phase1 = await AppleMusicSearchService.shared.searchTypeahead(term: trimmed)
         if Task.isCancelled {
             isSearchingSongs = false
             return
         }
-
-        musicAuthStatus = response.authStatus
+        musicAuthStatus = phase1.authStatus
         searchResults = SearchResults(
-            artists: response.artists,
-            songs: response.songs,
-            albums: response.albums,
-            topHit: response.topHit
+            artists: phase1.artists,
+            songs: phase1.songs,
+            albums: phase1.albums,
+            topHit: phase1.topHit
         )
         isSearchingSongs = false
+
+        // Phase 2: expanded full-catalog search to pad each per-tab list
+        // with extra rows below the typeahead head. We never demote
+        // phase 1's topHit — that's the entry the user has been looking
+        // at since results appeared, and Apple's typeahead is the
+        // ranking model best-suited to surface it.
+        let phase2 = await AppleMusicSearchService.shared.searchExpanded(term: trimmed)
+        if Task.isCancelled { return }
+
+        searchResults = SearchResults(
+            artists: AppleMusicSearchService.mergeDedupe(
+                primary: phase1.artists, fallback: phase2.artists, id: \ArtistSummary.id
+            ),
+            songs: AppleMusicSearchService.mergeDedupe(
+                primary: phase1.songs, fallback: phase2.songs, id: \Song.id
+            ),
+            albums: AppleMusicSearchService.mergeDedupe(
+                primary: phase1.albums, fallback: phase2.albums, id: \Album.id
+            ),
+            topHit: searchResults.topHit
+        )
     }
 
     func refreshFriends() async {

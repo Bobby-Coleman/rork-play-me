@@ -13,6 +13,7 @@ struct QuickSendSongSheet: View {
     @State private var detailAlbum: Album?
     @State private var note: String = ""
     @State private var isSending: Bool = false
+    @FocusState private var isNoteFocused: Bool
     @State private var audioPlayer: AudioPlayerService = .shared
 
     var body: some View {
@@ -290,13 +291,27 @@ struct QuickSendSongSheet: View {
                 .foregroundStyle(.white.opacity(0.5))
                 .padding(.bottom, 16)
 
-            TextField("Add a note (optional)", text: $note)
+            TextField(
+                "",
+                text: $note,
+                prompt: Text("Add a note (optional)").foregroundColor(.white.opacity(0.78))
+            )
                 .font(.system(size: 15))
                 .foregroundStyle(.white)
+                .focused($isNoteFocused)
+                .submitLabel(.done)
+                .onSubmit { isNoteFocused = false }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
-                .background(Color.white.opacity(0.08))
-                .clipShape(.rect(cornerRadius: 12))
+                .background(
+                    Color.white.opacity(0.10),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.white.opacity(0.22), lineWidth: 0.5)
+                )
+                .shadow(color: .white.opacity(0.18), radius: 10, x: 0, y: 0)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)
 
