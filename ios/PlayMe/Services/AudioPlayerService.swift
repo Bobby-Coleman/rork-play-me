@@ -86,7 +86,14 @@ class AudioPlayerService {
         currentSongId = song.id
         currentSong = song
 
-        let playerItem = AVPlayerItem(url: url)
+        // Prefer a prewarmed `AVPlayerItem` if `AudioPrewarmer` already
+        // kicked off the asset fetch for this song (the fullscreen feed
+        // does this for upcoming neighbors). When present, `.readyToPlay`
+        // typically fires within a frame or two instead of after a full
+        // network round-trip, which is what makes swipe-to-next feel
+        // near-instant. Falls back to a fresh item when nothing is
+        // pooled — same behavior we always had.
+        let playerItem = AudioPrewarmer.shared.consume(songId: song.id) ?? AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
 
         statusObservation = playerItem.observe(\.status) { [weak self] item, _ in
