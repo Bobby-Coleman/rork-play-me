@@ -119,6 +119,17 @@ class AppState {
             UserDefaults.standard.set(Array(likedShareIds), forKey: "likedShareIds")
         }
     }
+    /// Index of which user-owned mixtapes contain a given `song.id`. Used
+    /// by every Save UI in the app to render the "Save" / "Saved" toggle
+    /// without per-cell scans of the mixtape graph. Source of truth for
+    /// the icon state; mutations route through `mixtapeStore` so both this
+    /// service and Firestore stay in sync.
+    let saveService = SaveService()
+    /// CRUD store for the user's mixtapes plus the synthetic "Liked"
+    /// mixtape derived from `likedShareIds`. `allMixtapes` recomputes the
+    /// synthetic piece on every read so the Liked surface stays reactive
+    /// to like-toggle changes without a separate listener.
+    let mixtapeStore = MixtapeStore()
     var conversations: [Conversation] = [] {
         didSet { recomputeBadge() }
     }
@@ -188,6 +199,12 @@ class AppState {
     init() {
         loadSavedUser()
         likedShareIds = Set(UserDefaults.standard.stringArray(forKey: "likedShareIds") ?? [])
+        // Wire MixtapeStore ↔ SaveService now (before any async load), and
+        // give the store a closure for `likedShares` so the synthetic
+        // Liked mixtape stays reactive to per-share like toggles without
+        // a separate observer hookup.
+        mixtapeStore.saveService = saveService
+        mixtapeStore.likedSharesProvider = { [weak self] in self?.likedShares ?? [] }
         // Fire-and-forget: caches MusicKit's auth status off the hot
         // path so the first keystroke in search doesn't pay for it.
         Task { await AppleMusicSearchService.shared.prewarmAuthorization() }
@@ -358,6 +375,15 @@ class AppState {
         if !serverSent.isEmpty {
             sentShares = serverSent
         }
+
+        // Hydrate the SaveService index and the user's mixtapes in
+        // parallel — they live in independent subcollections, and
+        // neither blocks first-paint of the home / discovery feeds. The
+        // Mixtapes screen will see populated data the moment the user
+        // navigates there.
+        async let saveIndex: () = saveService.loadFromFirestore()
+        async let mixtapeFetch: () = mixtapeStore.loadFromFirestore()
+        _ = await (saveIndex, mixtapeFetch)
 
         await loadConversations()
         syncWidgetWithLatestReceivedShare()
@@ -844,6 +870,8 @@ class AppState {
         sentShares = []
         likedShareIds = []
         conversations = []
+        saveService.clear()
+        mixtapeStore.clear()
         isOnboarded = false
         isBackendAvailable = false
         AudioPlayerService.shared.stop()
@@ -879,6 +907,12 @@ class AppState {
         if !serverLikes.isEmpty {
             likedShareIds = serverLikes
         }
+
+        // Refresh saves + mixtapes alongside shares so the Mixtapes screen
+        // reflects new saves made on another device since last refresh.
+        async let saveIndex: () = saveService.loadFromFirestore()
+        async let mixtapeFetch: () = mixtapeStore.loadFromFirestore()
+        _ = await (saveIndex, mixtapeFetch)
 
         syncWidgetWithLatestReceivedShare()
     }

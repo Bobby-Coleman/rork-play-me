@@ -3,38 +3,23 @@ import UIKit
 
 private let hasRequestedNotificationPermissionKey = "hasRequestedNotificationPermission"
 
-/// Renders the profile tab's circular initials avatar into a `UIImage` so it
-/// can be used directly as a `Tab` label. `.alwaysOriginal` prevents the tab
-/// bar from tinting it, preserving the avatar look across selected/unselected.
-private enum TabBarAvatar {
-    static func image(for initials: String, size: CGFloat = 28) -> UIImage {
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
-        let rendered = renderer.image { ctx in
-            let rect = CGRect(x: 0, y: 0, width: size, height: size)
-            UIColor(white: 1.0, alpha: 0.18).setFill()
-            ctx.cgContext.fillEllipse(in: rect)
-
-            let text = initials.isEmpty ? "?" : initials
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.alignment = .center
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: size * 0.42, weight: .semibold),
-                .foregroundColor: UIColor.white,
-                .paragraphStyle: paragraph
-            ]
-            let textSize = (text as NSString).size(withAttributes: attrs)
-            let textRect = CGRect(x: 0, y: (size - textSize.height) / 2, width: size, height: textSize.height)
-            (text as NSString).draw(in: textRect, withAttributes: attrs)
-        }
-        return rendered.withRenderingMode(.alwaysOriginal)
-    }
+/// Top-level tabs in their visual left-to-right order. Pinning the
+/// underlying `Int` values lets us preserve the existing onboarding /
+/// deep-link logic that already centers the magnifier as the "true home"
+/// while still being able to reorder labels in the bar without leaking
+/// magic numbers across the file.
+enum MainTab: Int, CaseIterable {
+    case home = 1
+    case messages = 2
+    case discovery = 0
+    case mixtapes = 3
 }
 
 struct ContentView: View {
     @State private var appState = AppState()
     @State private var showSendSheet = false
     @State private var showAddFriends = false
-    @State private var selectedTab: Int = 0
+    @State private var selectedTab: Int = MainTab.discovery.rawValue
     @State private var miniPlayerSong: Song?
     /// Tracks whether the Discovery tab is currently showing its hero page
     /// (vs. scrolled into the history feed). Mini-player stays hidden on the
@@ -78,12 +63,11 @@ struct ContentView: View {
                         appState.isOnboarded = true
                     }
                     // Force the Discovery (magnifier) tab on first landing.
-                    // `selectedTab` defaults to 0 for fresh installs, but
-                    // pinning it here defends against any future path that
-                    // might have mutated it during onboarding, or any iOS
-                    // state-restore that would otherwise drop the user on
-                    // Profile/Messages.
-                    selectedTab = 0
+                    // Despite the new Home tab being to its left visually,
+                    // the magnifier is still the "true home" of the app
+                    // and we want returning + brand-new users alike to
+                    // land there.
+                    selectedTab = MainTab.discovery.rawValue
                     Task { await appState.loadData() }
                 }
                 .preferredColorScheme(.dark)
@@ -116,7 +100,7 @@ struct ContentView: View {
         // feed observer in DiscoveryView picks up the pending id and
         // animates the scroll — this works whether the share list is
         // already hydrated or arrives a moment later on cold launch.
-        selectedTab = 0
+        selectedTab = MainTab.discovery.rawValue
         appState.pendingDiscoveryShareId = trimmed
     }
 
@@ -135,9 +119,14 @@ struct ContentView: View {
     }
 
     /// Tab indices that participate in horizontal swipe navigation. Ordered
-    /// left-to-right to match the visual tab bar: Messages, Discovery,
-    /// Profile.
-    private static let swipeableTabs: [Int] = [2, 0, 3]
+    /// left-to-right to match the visual tab bar: Home, Messages, Discovery,
+    /// Mixtapes.
+    private static let swipeableTabs: [Int] = [
+        MainTab.home.rawValue,
+        MainTab.messages.rawValue,
+        MainTab.discovery.rawValue,
+        MainTab.mixtapes.rawValue
+    ]
 
     /// Haptic used when entering Search from either the nav magnifier or the
     /// on-screen CTA — medium impact per spec so the transition feels
@@ -146,11 +135,11 @@ struct ContentView: View {
 
     @ViewBuilder
     private var miniPlayerOverlay: some View {
-        // Always hide on the Discovery tab — both the hero (so the CTA reads
-        // cleanly) and the history card pages (so the reply pill stays
-        // unobstructed). Shows on Messages and Profile so in-progress
-        // playback remains recoverable.
-        if selectedTab != 0, let song = AudioPlayerService.shared.currentSong {
+        // Hide on Home and Discovery so the staggered Pinterest grid /
+        // hero CTA reads cleanly. Shows on Messages and Mixtapes so
+        // in-progress playback remains recoverable from those surfaces.
+        let isImmersiveTab = selectedTab == MainTab.discovery.rawValue || selectedTab == MainTab.home.rawValue
+        if !isImmersiveTab, let song = AudioPlayerService.shared.currentSong {
             MiniPlayerBar(song: song) {
                 miniPlayerSong = song
             }
@@ -169,7 +158,8 @@ struct ContentView: View {
         Binding(
             get: { selectedTab },
             set: { new in
-                if new == 0 && selectedTab == 0 {
+                let discoveryRaw = MainTab.discovery.rawValue
+                if new == discoveryRaw && selectedTab == discoveryRaw {
                     if discoveryIsOnHero {
                         openSearch()
                     } else {
@@ -213,14 +203,25 @@ struct ContentView: View {
 
     private var mainTabView: some View {
         TabView(selection: selectedTabBinding) {
-            Tab(value: 2) {
+            // Visual order: Home | Messages | Discovery | Mixtapes.
+            // SwiftUI's `Tab` API lets us decouple `value` (used by
+            // selection/swipe logic) from declaration order, so we keep
+            // the existing Discovery == 0 contract for onboarding /
+            // deep-link routing.
+            Tab(value: MainTab.home.rawValue) {
+                HomeDiscoverView(appState: appState)
+            } label: {
+                Image(systemName: "house.fill")
+            }
+
+            Tab(value: MainTab.messages.rawValue) {
                 MessagesListView(appState: appState)
             } label: {
                 Image(systemName: "bubble.left.and.bubble.right.fill")
             }
             .badge(appState.totalUnreadCount)
 
-            Tab(value: 0) {
+            Tab(value: MainTab.discovery.rawValue) {
                 DiscoveryView(
                     shares: appState.receivedShares,
                     appState: appState,
@@ -234,10 +235,10 @@ struct ContentView: View {
                 Image(systemName: "magnifyingglass")
             }
 
-            Tab(value: 3) {
-                ProfileView(appState: appState)
+            Tab(value: MainTab.mixtapes.rawValue) {
+                MixtapesView(appState: appState)
             } label: {
-                Image(uiImage: TabBarAvatar.image(for: appState.currentUser?.initials ?? "?"))
+                Image(systemName: "rectangle.stack.fill")
             }
         }
         .tint(.white)
@@ -252,7 +253,7 @@ struct ContentView: View {
                 }
         )
         .onChange(of: selectedTab) { _, newValue in
-            if newValue == 2 {
+            if newValue == MainTab.messages.rawValue {
                 Task { await appState.loadConversations() }
             }
         }

@@ -1566,6 +1566,267 @@ class FirebaseService {
         )
     }
 
+    // MARK: - Mixtapes
+
+    /// Fetch all mixtapes owned by the signed-in user, hydrating the
+    /// embedded `songs` subcollection in a single fan-out so the Mixtapes
+    /// grid renders cover mosaics without per-row round-trips. Returns an
+    /// empty array on any failure.
+    func fetchMixtapes() async -> [Mixtape] {
+        guard let uid = firebaseUID else { return [] }
+        do {
+            let snapshot = try await db.collection("users").document(uid)
+                .collection("mixtapes")
+                .order(by: "updatedAt", descending: true)
+                .getDocuments()
+
+            // Fetch the song subcollection for each mixtape in parallel.
+            // For typical user-mixtape counts (tens, not hundreds) this is
+            // far cheaper than serial reads and the Firestore SDK already
+            // pools the connections.
+            return await withTaskGroup(of: Mixtape?.self) { group in
+                for doc in snapshot.documents {
+                    group.addTask { [weak self] in
+                        guard let self else { return nil }
+                        return await self.parseMixtape(from: doc, uid: uid)
+                    }
+                }
+                var result: [Mixtape] = []
+                for await mix in group {
+                    if let mix { result.append(mix) }
+                }
+                return result.sorted { $0.updatedAt > $1.updatedAt }
+            }
+        } catch {
+            print("FirebaseService: fetchMixtapes failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    private func parseMixtape(from doc: QueryDocumentSnapshot, uid: String) async -> Mixtape? {
+        let data = doc.data()
+        guard let name = data["name"] as? String else { return nil }
+        let createdAt = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
+        let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue() ?? createdAt
+        let songIds = data["songIds"] as? [String] ?? []
+
+        // Pull the embedded songs subcollection. We could query by
+        // `whereField("id", in: songIds)` but the in-place subcollection
+        // is simpler and gives us the writer-controlled ordering for
+        // free.
+        var songs: [Song] = []
+        do {
+            let songSnap = try await db.collection("users").document(uid)
+                .collection("mixtapes").document(doc.documentID)
+                .collection("songs").getDocuments()
+            songs = songSnap.documents.compactMap { snap in
+                Self.parseEmbeddedSong(from: snap.data())
+            }
+            // Preserve the parent doc's `songIds` ordering when present —
+            // it reflects the user's add-order which the subcollection
+            // alone can't.
+            if !songIds.isEmpty {
+                let bySongId: [String: Song] = Dictionary(uniqueKeysWithValues: songs.map { ($0.id, $0) })
+                songs = songIds.compactMap { bySongId[$0] }
+            }
+        } catch {
+            print("FirebaseService: fetch mixtape songs failed for \(doc.documentID): \(error.localizedDescription)")
+        }
+
+        return Mixtape(
+            id: doc.documentID,
+            ownerId: uid,
+            name: name,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            songs: songs
+        )
+    }
+
+    /// Decodes the embedded `Song` map shape used by mixtape song
+    /// subcollections. Mirrors the same fields written by `addSongToMixtape`
+    /// and `saveShare`.
+    private static func parseEmbeddedSong(from data: [String: Any]) -> Song? {
+        guard let id = data["id"] as? String, !id.isEmpty else { return nil }
+        return Song(
+            id: id,
+            title: data["title"] as? String ?? "",
+            artist: data["artist"] as? String ?? "",
+            albumArtURL: data["albumArtURL"] as? String ?? "",
+            duration: data["duration"] as? String ?? "",
+            spotifyURI: data["spotifyURI"] as? String,
+            previewURL: data["previewURL"] as? String,
+            appleMusicURL: data["appleMusicURL"] as? String,
+            artistId: data["artistId"] as? String,
+            albumId: data["albumId"] as? String
+        )
+    }
+
+    /// Creates a new (empty) mixtape and returns its Firestore document
+    /// id. Returns nil on failure or when not signed in.
+    func createMixtape(name: String) async -> String? {
+        guard let uid = firebaseUID else { return nil }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let ref = db.collection("users").document(uid).collection("mixtapes").document()
+        let payload: [String: Any] = [
+            "name": trimmed,
+            "createdAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp(),
+            "songIds": [],
+        ]
+        do {
+            try await ref.setData(payload)
+            return ref.documentID
+        } catch {
+            print("FirebaseService: createMixtape failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func renameMixtape(mixtapeId: String, to newName: String) async {
+        guard let uid = firebaseUID else { return }
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            try await db.collection("users").document(uid)
+                .collection("mixtapes").document(mixtapeId)
+                .updateData([
+                    "name": trimmed,
+                    "updatedAt": FieldValue.serverTimestamp(),
+                ])
+        } catch {
+            print("FirebaseService: renameMixtape failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Deletes a mixtape document and all of its embedded song entries.
+    /// Also fans out a per-song update to `savedSongs/{songId}` to remove
+    /// this mixtape id from each entry, so the Save index stays consistent
+    /// for any client that re-loads it later.
+    func deleteMixtape(mixtapeId: String) async {
+        guard let uid = firebaseUID else { return }
+        let mixRef = db.collection("users").document(uid)
+            .collection("mixtapes").document(mixtapeId)
+        do {
+            // Snapshot the song ids so we can update savedSongs after the
+            // delete propagates. Reading them BEFORE the delete avoids a
+            // race where a concurrent write resurrects the mixtape ref
+            // mid-cleanup.
+            let songSnap = try await mixRef.collection("songs").getDocuments()
+            let songIds = songSnap.documents.map { $0.documentID }
+
+            for doc in songSnap.documents {
+                try? await doc.reference.delete()
+            }
+            try await mixRef.delete()
+
+            for songId in songIds {
+                try? await db.collection("users").document(uid)
+                    .collection("savedSongs").document(songId)
+                    .updateData([
+                        "mixtapeIds": FieldValue.arrayRemove([mixtapeId]),
+                        "updatedAt": FieldValue.serverTimestamp(),
+                    ])
+            }
+        } catch {
+            print("FirebaseService: deleteMixtape failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Adds a song to a mixtape, writing both the embedded song document
+    /// and updating the parent's `songIds` array. Idempotent — if the song
+    /// is already in the mixtape, the call collapses to a touch on
+    /// `updatedAt`.
+    ///
+    /// Also writes through to `savedSongs/{songId}` so the
+    /// "is this song saved anywhere" lookup stays an O(1) read.
+    func addSongToMixtape(mixtapeId: String, song: Song) async {
+        guard let uid = firebaseUID else { return }
+        let mixRef = db.collection("users").document(uid)
+            .collection("mixtapes").document(mixtapeId)
+        let songRef = mixRef.collection("songs").document(song.id)
+        let savedRef = db.collection("users").document(uid)
+            .collection("savedSongs").document(song.id)
+
+        let songPayload: [String: Any] = [
+            "id": song.id,
+            "title": song.title,
+            "artist": song.artist,
+            "albumArtURL": song.albumArtURL,
+            "duration": song.duration,
+            "spotifyURI": song.spotifyURI as Any,
+            "previewURL": song.previewURL as Any,
+            "appleMusicURL": song.appleMusicURL as Any,
+            "artistId": song.artistId as Any,
+            "albumId": song.albumId as Any,
+            "addedAt": FieldValue.serverTimestamp(),
+        ]
+
+        do {
+            try await songRef.setData(songPayload, merge: true)
+            try await mixRef.updateData([
+                "songIds": FieldValue.arrayUnion([song.id]),
+                "updatedAt": FieldValue.serverTimestamp(),
+            ])
+            try await savedRef.setData([
+                "mixtapeIds": FieldValue.arrayUnion([mixtapeId]),
+                "updatedAt": FieldValue.serverTimestamp(),
+            ], merge: true)
+        } catch {
+            print("FirebaseService: addSongToMixtape failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Mirror of `addSongToMixtape`. Removes the embedded song doc, drops
+    /// the id from the parent's `songIds`, and updates `savedSongs`.
+    func removeSongFromMixtape(mixtapeId: String, songId: String) async {
+        guard let uid = firebaseUID else { return }
+        let mixRef = db.collection("users").document(uid)
+            .collection("mixtapes").document(mixtapeId)
+        let songRef = mixRef.collection("songs").document(songId)
+        let savedRef = db.collection("users").document(uid)
+            .collection("savedSongs").document(songId)
+
+        do {
+            try await songRef.delete()
+            try await mixRef.updateData([
+                "songIds": FieldValue.arrayRemove([songId]),
+                "updatedAt": FieldValue.serverTimestamp(),
+            ])
+            try await savedRef.updateData([
+                "mixtapeIds": FieldValue.arrayRemove([mixtapeId]),
+                "updatedAt": FieldValue.serverTimestamp(),
+            ])
+        } catch {
+            print("FirebaseService: removeSongFromMixtape failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Fetches the per-user "saved songs" index so `SaveService` can answer
+    /// "is this song saved" in O(1). Returns `[songId: Set<mixtapeId>]`.
+    /// Empty entries (where the array has been cleared by a removal) are
+    /// dropped so the in-memory `savedSongIds` set never claims a save
+    /// the user has already undone.
+    func fetchSavedSongIndex() async -> [String: Set<String>] {
+        guard let uid = firebaseUID else { return [:] }
+        do {
+            let snapshot = try await db.collection("users").document(uid)
+                .collection("savedSongs").getDocuments()
+            var out: [String: Set<String>] = [:]
+            for doc in snapshot.documents {
+                let ids = doc.data()["mixtapeIds"] as? [String] ?? []
+                if !ids.isEmpty {
+                    out[doc.documentID] = Set(ids)
+                }
+            }
+            return out
+        } catch {
+            print("FirebaseService: fetchSavedSongIndex failed: \(error.localizedDescription)")
+            return [:]
+        }
+    }
+
     // MARK: - Curated Grid
 
     /// Loads the editorial curated list for the Discovery background grid

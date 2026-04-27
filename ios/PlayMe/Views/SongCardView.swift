@@ -9,6 +9,7 @@ struct SongCardView: View {
     private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
     @State private var resolvedSpotifyURL: String?
     @State private var showShareFlow: Bool = false
+    @State private var showSaveSheet: Bool = false
     @State private var reportTarget: ReportTarget?
     @State private var showReportedToast: Bool = false
     @State private var pendingBlock: AppUser?
@@ -177,6 +178,11 @@ struct SongCardView: View {
             }
             .sheet(isPresented: $showDetailSheet) {
                 SongActionSheet(song: share.song, appState: appState, share: share)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showSaveSheet) {
+                SaveToMixtapeSheet(song: share.song, appState: appState)
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
@@ -429,6 +435,18 @@ struct SongCardView: View {
                 .sensoryFeedback(.impact(weight: .light), trigger: isPlayingThis)
 
                 openInServiceButton(song: share.song, service: appState.preferredMusicService, resolvedSpotifyURL: resolvedSpotifyURL, shareId: share.id)
+
+                Button {
+                    showSaveSheet = true
+                } label: {
+                    Image(systemName: appState.saveService.isSaved(songId: share.song.id) ? "bookmark.fill" : "bookmark")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white.opacity(appState.saveService.isSaved(songId: share.song.id) ? 0.9 : 0.6))
+                        .frame(width: 40, height: 40)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(.capsule)
+                }
+                .sensoryFeedback(.selection, trigger: appState.saveService.isSaved(songId: share.song.id))
 
                 Button {
                     showShareFlow = true

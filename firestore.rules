@@ -59,6 +59,25 @@ service cloud.firestore {
           && (request.auth.uid == senderId || request.auth.uid == userId);
         allow update: if false;
       }
+
+      // User-owned mixtapes (Pinterest-style boards of saved songs). Each
+      // mixtape doc owns an embedded `songs` subcollection that mirrors
+      // the same Song shape used by shares and chat messages, so cover
+      // mosaic loads don't pay an N+1 cost. Fully private to the owner —
+      // mixtapes are never shared cross-user in v1.
+      match /mixtapes/{mixtapeId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+        match /songs/{songId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+      }
+
+      // Per-song "where is this saved" index. Keyed by song id; value is
+      // `{ mixtapeIds: [...], updatedAt }`. Lets SaveService answer "is
+      // this song saved anywhere?" without scanning every mixtape.
+      match /savedSongs/{songId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
     }
 
     match /usernames/{username} {
