@@ -56,16 +56,6 @@ struct MixtapeCoverView: View {
                 }
             }
             .clipShape(.rect(cornerRadius: cornerRadius))
-            .overlay(alignment: .topLeading) {
-                if mixtape.isSystemLiked {
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.pink)
-                        .padding(8)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .padding(8)
-                }
-            }
             .shadow(color: showsShadow ? .white.opacity(0.05) : .clear, radius: 20, y: 10)
     }
 

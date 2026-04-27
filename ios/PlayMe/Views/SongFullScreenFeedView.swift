@@ -42,53 +42,100 @@ struct SongFullScreenFeedView: View {
     @State private var visibleSongId: String?
     @Environment(\.dismiss) private var dismiss
 
+    init(
+        songs: [Song],
+        startIndex: Int,
+        appState: AppState,
+        shareLookup: ((String) -> SongShare?)? = nil
+    ) {
+        self.songs = songs
+        self.startIndex = startIndex
+        self.appState = appState
+        self.shareLookup = shareLookup
+        // Seed `visibleSongId` synchronously at view-init so
+        // `.scrollPosition(id:)` has a target by the first layout pass.
+        // Without this, the LazyVStack only renders the first ~2 pages
+        // initially and a far-down seed (e.g. tapping the 50th song in
+        // the Discover grid) silently lands on page 0 — which the user
+        // experiences as "autoplay broken" because they hear the
+        // tapped song while looking at a different page.
+        let safe = min(max(0, startIndex), max(0, songs.count - 1))
+        let seedId = songs.indices.contains(safe) ? songs[safe].id : nil
+        _visibleSongId = State(initialValue: seedId)
+    }
+
     var body: some View {
+        // Top-level `.ignoresSafeArea()` so this view truly takes the full
+        // screen edge-to-edge — TikTok-style — and, critically, so the
+        // `GeometryReader`'s `pageGeo.size` matches the `ScrollView`'s
+        // visible viewport. Earlier this was inverted: the `GeometryReader`
+        // measured inside the safe area while the `ScrollView` itself
+        // ignored it, so each page was ~80pt shorter than the snap
+        // distance and every swipe accumulated that gap (the layout
+        // looked centered on page 0 and drifted further off on every
+        // following page).
+        //
+        // With `.ignoresSafeArea()` on the root: pageGeo.size == full
+        // screen on every device, snap interval == page height, the feed
+        // stays perfectly centered no matter how far you scroll, and
+        // `pageGeo.safeAreaInsets` still reports the system insets so we
+        // can keep the close button below the notch and let each page's
+        // top/bottom `Spacer(minLength: 0)` absorb the home-indicator
+        // strip naturally.
         GeometryReader { pageGeo in
             let pageSize = pageGeo.size
+            let topInset = pageGeo.safeAreaInsets.top
 
             ZStack(alignment: .topLeading) {
-                Color.black.ignoresSafeArea()
+                Color.black
 
-                ScrollView(.vertical) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(songs) { song in
-                            SongFullScreenPage(
-                                song: song,
-                                pageSize: pageSize,
-                                appState: appState,
-                                share: shareLookup?(song.id)
-                            )
-                            .frame(width: pageSize.width, height: pageSize.height)
-                            .clipped()
-                            .id(song.id)
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(songs) { song in
+                                SongFullScreenPage(
+                                    song: song,
+                                    pageSize: pageSize,
+                                    appState: appState,
+                                    share: shareLookup?(song.id)
+                                )
+                                .frame(width: pageSize.width, height: pageSize.height)
+                                .clipped()
+                                .id(song.id)
+                            }
                         }
+                        .scrollTargetLayout()
                     }
-                    .scrollTargetLayout()
-                }
-                .scrollTargetBehavior(.paging)
-                .scrollPosition(id: $visibleSongId)
-                .scrollIndicators(.hidden)
-                .ignoresSafeArea(.container, edges: .vertical)
-                .onChange(of: visibleSongId) { _, newValue in
-                    guard let newValue, let song = songs.first(where: { $0.id == newValue }) else { return }
-                    coordinator.onVisibleSongChanged(to: song)
+                    .scrollTargetBehavior(.paging)
+                    .scrollPosition(id: $visibleSongId)
+                    .scrollIndicators(.hidden)
+                    .onChange(of: visibleSongId) { _, newValue in
+                        guard let newValue, let song = songs.first(where: { $0.id == newValue }) else { return }
+                        coordinator.onVisibleSongChanged(to: song)
+                    }
+                    .onAppear {
+                        // Force the LazyVStack to materialize the seed
+                        // page — the bare `.scrollPosition` binding can
+                        // no-op on a far-down seed if that id hasn't been
+                        // laid out yet — then start playback immediately.
+                        // The 50ms artificial sleep that used to live here
+                        // was hiding latency, not avoiding a real race;
+                        // the actual race (audio session not yet active)
+                        // is handled inside `AudioPlayerService` setup.
+                        guard let target = visibleSongId,
+                              let song = songs.first(where: { $0.id == target }) else { return }
+                        proxy.scrollTo(target, anchor: .top)
+                        coordinator.startInitial(song: song)
+                    }
                 }
 
                 closeButton
-                    .padding(.top, pageGeo.safeAreaInsets.top + 12)
+                    .padding(.top, topInset + 12)
                     .padding(.leading, 16)
             }
         }
+        .ignoresSafeArea()
         .preferredColorScheme(.dark)
-        .onAppear {
-            // Clamp `startIndex` so a stale or out-of-range seed value
-            // (e.g. the source list shrank between tap and present) never
-            // crashes. Falling back to 0 keeps the feed usable.
-            let safeIndex = min(max(0, startIndex), max(0, songs.count - 1))
-            guard let seed = songs.indices.contains(safeIndex) ? songs[safeIndex] : nil else { return }
-            visibleSongId = seed.id
-            coordinator.startInitial(song: seed)
-        }
         .onDisappear {
             // Don't yank `AudioPlayerService.stop()` here unconditionally:
             // doing so kills the mini-player on every dismiss. Only stop

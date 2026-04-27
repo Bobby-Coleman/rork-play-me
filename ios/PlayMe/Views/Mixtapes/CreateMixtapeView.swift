@@ -119,7 +119,7 @@ struct CreateMixtapeView: View {
             onCreated?()
             dismiss()
         } else {
-            errorMessage = "Couldn't create mixtape. Try again."
+            errorMessage = "Couldn't create mixtape. Check your connection and try again."
             isCreating = false
         }
     }

@@ -40,6 +40,14 @@ struct HomeDiscoverView: View {
 
                 ScrollView {
                     LazyVStack(spacing: 0) {
+                        Text("Curated songs")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, horizontalPadding)
+                            .padding(.top, 12)
+                            .padding(.bottom, 4)
+
                         if items.isEmpty && isLoading {
                             ProgressView()
                                 .tint(.white)
@@ -53,21 +61,32 @@ struct HomeDiscoverView: View {
                                 cellSize: cellSize,
                                 spacing: spacing
                             ) { song, side in
-                                Button {
+                                AlbumArtSquare(
+                                    url: song.albumArtURL,
+                                    cornerRadius: 14,
+                                    showsPlaceholderProgress: false,
+                                    showsShadow: false,
+                                    targetDecodeSide: side
+                                )
+                                // Explicit tap surface: `Button { } label:`
+                                // wrapping `AlbumArtSquare` (whose body is
+                                // `Color.clear` + an overlay marked
+                                // `.allowsHitTesting(false)`) was producing
+                                // a Button with no concrete hit shape — the
+                                // label resolved to a transparent square
+                                // that SwiftUI refused to register taps on
+                                // when nested under multiple `LazyVStack`s.
+                                // A `Rectangle` content shape + plain tap
+                                // gesture forces the entire 1:1 cell to be
+                                // hit-testable so every grid tile reliably
+                                // opens the fullscreen feed.
+                                .contentShape(Rectangle())
+                                .onTapGesture {
                                     openFullscreen(at: song)
-                                } label: {
-                                    AlbumArtSquare(
-                                        url: song.albumArtURL,
-                                        cornerRadius: 14,
-                                        showsPlaceholderProgress: false,
-                                        showsShadow: false,
-                                        targetDecodeSide: side
-                                    )
                                 }
-                                .buttonStyle(.plain)
                             }
                             .padding(.horizontal, horizontalPadding)
-                            .padding(.top, 12)
+                            .padding(.top, 8)
                             .padding(.bottom, 24)
                         }
                     }
@@ -112,6 +131,14 @@ struct HomeDiscoverView: View {
 
     private func openFullscreen(at song: Song) {
         guard let idx = items.firstIndex(where: { $0.id == song.id }) else { return }
+        // Pre-warm the AVPlayer the moment the user taps so the preview
+        // MP3 download overlaps the fullScreenCover's ~300ms present
+        // transition. By the time the page lands the audio session is
+        // hot and the first song plays without the perceptible "first
+        // tap is laggy" delay. `FullScreenFeedPlaybackCoordinator.startInitial`
+        // is now a no-op when this song is already playing, so the
+        // double-call is safe.
+        AudioPlayerService.shared.play(song: song)
         fullscreenSeed = FullscreenSeed(songs: items, startIndex: idx)
     }
 

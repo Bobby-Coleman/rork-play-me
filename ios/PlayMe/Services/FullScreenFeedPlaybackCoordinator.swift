@@ -27,9 +27,22 @@ final class FullScreenFeedPlaybackCoordinator {
     /// same song doesn't restart the AVPlayer (and reset the scrub bar).
     private var lastTriggeredSongId: String?
 
-    /// Starts playback for the song the user just opened the feed at. Idempotent.
+    /// Starts playback for the song the user just opened the feed at.
+    /// Idempotent — and crucially, treats "already playing this song" as
+    /// success rather than calling `play(song:)` again. Tap sites
+    /// (Discover grid, Mixtape grids) pre-warm the AVPlayer at tap time
+    /// so the preview download overlaps the fullScreenCover's present
+    /// transition; once the cover lands, `AudioPlayerService.shared`
+    /// already has the right song queued and `isPlaying == true`, and
+    /// re-calling `play(song:)` on the same id would just toggle it
+    /// back to paused.
     func startInitial(song: Song) {
         visibleSongId = song.id
+        let audio = AudioPlayerService.shared
+        if audio.currentSongId == song.id, audio.isPlaying {
+            lastTriggeredSongId = song.id
+            return
+        }
         playIfNeeded(song: song)
     }
 

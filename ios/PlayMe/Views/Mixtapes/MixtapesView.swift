@@ -172,36 +172,61 @@ struct MixtapesView: View {
 
     // MARK: - Segment content
 
+    /// True when the search field has any non-whitespace text. Used to
+    /// switch the entire content area from the active segment view to a
+    /// flat unified results list across all categories.
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     @ViewBuilder
     private var contentForSegment: some View {
-        switch selectedSegment {
-        case .songs:
-            SongsGridView(
-                appState: appState,
-                searchText: searchText,
-                onTap: { songs, idx in
-                    fullscreenSeed = FullscreenSeed(songs: songs, startIndex: idx)
-                }
-            )
-        case .mixtapes:
-            MixtapesGridView(
-                appState: appState,
-                searchText: searchText,
-                onTap: { mixtape in
-                    detailMixtape = mixtape
-                }
-            )
-        case .sent:
-            shareList(appState.sentShares.filter(matchesSearch))
-        case .received:
-            shareList(appState.receivedShares.filter(matchesSearch))
-        case .liked:
-            shareList(appState.likedShares.filter(matchesSearch))
+        if isSearching {
+            searchResultsList
+        } else {
+            switch selectedSegment {
+            case .songs:
+                SongsGridView(
+                    appState: appState,
+                    searchText: searchText,
+                    onTap: { songs, idx in
+                        // Pre-warm AVPlayer so the preview download
+                        // overlaps the present transition. Coordinator
+                        // is idempotent for already-playing songs.
+                        if songs.indices.contains(idx) {
+                            AudioPlayerService.shared.play(song: songs[idx])
+                        }
+                        fullscreenSeed = FullscreenSeed(songs: songs, startIndex: idx)
+                    }
+                )
+            case .mixtapes:
+                MixtapesGridView(
+                    appState: appState,
+                    searchText: searchText,
+                    onTap: { mixtape in
+                        detailMixtape = mixtape
+                    }
+                )
+            case .sent:
+                shareList(appState.sentShares)
+            case .received:
+                shareList(appState.receivedShares)
+            case .liked:
+                shareList(appState.likedShares)
+            }
         }
     }
 
     private func shareList(_ shares: [SongShare]) -> some View {
-        let lookupMap: [String: SongShare] = Dictionary(uniqueKeysWithValues: shares.map { ($0.song.id, $0) })
+        // First-wins dedupe by `song.id`. The same song can legitimately
+        // appear multiple times in Sent (one share per recipient),
+        // Received (one per sender), or Liked (cross-sender duplicates),
+        // and `Dictionary(uniqueKeysWithValues:)` would `fatalError` on
+        // those duplicates and crash the tab.
+        let lookupMap: [String: SongShare] = Dictionary(
+            shares.map { ($0.song.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         return ScrollView {
             LazyVStack(spacing: 0) {
                 if shares.isEmpty {
@@ -214,6 +239,7 @@ struct MixtapesView: View {
                             isLiked: appState.isLiked(shareId: share.id),
                             onToggleLike: { appState.toggleLike(shareId: share.id) },
                             onTap: {
+                                AudioPlayerService.shared.play(song: share.song)
                                 fullscreenSeed = FullscreenSeed(
                                     songs: shares.map(\.song),
                                     startIndex: idx,
@@ -249,14 +275,6 @@ struct MixtapesView: View {
         }
     }
 
-    private func matchesSearch(_ share: SongShare) -> Bool {
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return true }
-        return share.song.title.lowercased().contains(q)
-            || share.song.artist.lowercased().contains(q)
-            || (share.note ?? "").lowercased().contains(q)
-    }
-
     private var emptyShareState: some View {
         VStack(spacing: 8) {
             Image(systemName: "music.note")
@@ -268,6 +286,152 @@ struct MixtapesView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 48)
+    }
+
+    // MARK: - Unified search results
+
+    /// One row in the global search list. Carries the provenance label
+    /// inline so the row view doesn't have to know which segment a hit
+    /// came from.
+    private enum MixtapesSearchResult: Identifiable {
+        case share(SongShare, personLabel: String)
+        case song(Song, contextLabel: String)
+
+        var id: String {
+            switch self {
+            case .share(let share, _): return "share:\(share.id)"
+            case .song(let song, _): return "song:\(song.id)"
+            }
+        }
+
+        var song: Song {
+            switch self {
+            case .share(let share, _): return share.song
+            case .song(let song, _): return song
+            }
+        }
+    }
+
+    /// Walks every source the search bar should cover (Sent, Received,
+    /// Liked, every user mixtape including the synthetic Liked one) and
+    /// returns a deduped `[MixtapesSearchResult]` ordered the same way
+    /// the visible segments order their content (sent → received → liked
+    /// → mixtapes). Dedupe key is `song.id` with share results preferred
+    /// over song-only ones, so a song that appears in both a share and a
+    /// mixtape is rendered once with its full share context.
+    private func aggregatedSearchResults() -> [MixtapesSearchResult] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return [] }
+
+        func matchesShare(_ share: SongShare) -> Bool {
+            share.song.title.lowercased().contains(q)
+                || share.song.artist.lowercased().contains(q)
+                || (share.note ?? "").lowercased().contains(q)
+        }
+
+        var seen = Set<String>()
+        var results: [MixtapesSearchResult] = []
+
+        for share in appState.sentShares
+        where matchesShare(share) && seen.insert(share.song.id).inserted {
+            results.append(.share(share, personLabel: "Sent to \(share.recipient.firstName)"))
+        }
+        for share in appState.receivedShares
+        where matchesShare(share) && seen.insert(share.song.id).inserted {
+            results.append(.share(share, personLabel: "From \(share.sender.firstName)"))
+        }
+        for share in appState.likedShares
+        where matchesShare(share) && seen.insert(share.song.id).inserted {
+            let label: String
+            if share.sender.id == appState.currentUser?.id {
+                label = "Liked · to \(share.recipient.firstName)"
+            } else {
+                label = "Liked · from \(share.sender.firstName)"
+            }
+            results.append(.share(share, personLabel: label))
+        }
+
+        for mix in appState.mixtapeStore.allMixtapes {
+            let mixNameMatches = mix.name.lowercased().contains(q)
+            for song in mix.songs where !seen.contains(song.id) {
+                let songMatches = song.title.lowercased().contains(q)
+                    || song.artist.lowercased().contains(q)
+                guard mixNameMatches || songMatches else { continue }
+                seen.insert(song.id)
+                results.append(.song(song, contextLabel: "From mixtape: \(mix.name)"))
+            }
+        }
+
+        return results
+    }
+
+    /// Replaces the active segment view whenever the search field has
+    /// any text. Mirrors the Sent/Received/Liked list visuals so the
+    /// transition feels like "the same row UI, scoped wider" — share
+    /// hits use `ProfileSongRow`, mixtape-only hits use the slim
+    /// `MixtapesSearchRow`. Tapping any row opens the fullscreen feed
+    /// seeded with the entire result list so the user can swipe through
+    /// all matches inline.
+    private var searchResultsList: some View {
+        let results = aggregatedSearchResults()
+        let allSongs = results.map(\.song)
+        let lookupMap: [String: SongShare] = Dictionary(
+            results.compactMap { result -> (String, SongShare)? in
+                if case .share(let share, _) = result {
+                    return (share.song.id, share)
+                }
+                return nil
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        return ScrollView {
+            LazyVStack(spacing: 0) {
+                if results.isEmpty {
+                    emptyShareState
+                } else {
+                    ForEach(Array(results.enumerated()), id: \.element.id) { idx, result in
+                        switch result {
+                        case .share(let share, let label):
+                            ProfileSongRow(
+                                share: share,
+                                personLabel: label,
+                                isLiked: appState.isLiked(shareId: share.id),
+                                onToggleLike: { appState.toggleLike(shareId: share.id) },
+                                onTap: {
+                                    AudioPlayerService.shared.play(song: share.song)
+                                    fullscreenSeed = FullscreenSeed(
+                                        songs: allSongs,
+                                        startIndex: idx,
+                                        shareLookup: { id in lookupMap[id] }
+                                    )
+                                }
+                            )
+                        case .song(let song, let label):
+                            MixtapesSearchRow(
+                                song: song,
+                                contextLabel: label,
+                                onTap: {
+                                    AudioPlayerService.shared.play(song: song)
+                                    fullscreenSeed = FullscreenSeed(
+                                        songs: allSongs,
+                                        startIndex: idx,
+                                        shareLookup: { id in lookupMap[id] }
+                                    )
+                                }
+                            )
+                        }
+                        if idx != results.count - 1 {
+                            Divider()
+                                .background(Color.white.opacity(0.06))
+                                .padding(.horizontal, 20)
+                        }
+                    }
+                }
+                Color.clear.frame(height: 40)
+            }
+        }
+        .scrollIndicators(.hidden)
     }
 }
 
@@ -332,20 +496,25 @@ private struct SongsGridView: View {
                             cellSize: cellSize,
                             spacing: spacing
                         ) { song, side in
-                            Button {
+                            AlbumArtSquare(
+                                url: song.albumArtURL,
+                                cornerRadius: 14,
+                                showsPlaceholderProgress: false,
+                                showsShadow: false,
+                                targetDecodeSide: side
+                            )
+                            // See HomeDiscoverView for the rationale —
+                            // an explicit content shape + `.onTapGesture`
+                            // is the only reliable way to make a
+                            // transparent `AlbumArtSquare` cell tappable
+                            // when nested under the staggered grid's
+                            // `LazyVStack`s.
+                            .contentShape(Rectangle())
+                            .onTapGesture {
                                 if let idx = filtered.firstIndex(where: { $0.id == song.id }) {
                                     onTap(filtered, idx)
                                 }
-                            } label: {
-                                AlbumArtSquare(
-                                    url: song.albumArtURL,
-                                    cornerRadius: 14,
-                                    showsPlaceholderProgress: false,
-                                    showsShadow: false,
-                                    targetDecodeSide: side
-                                )
                             }
-                            .buttonStyle(.plain)
                         }
                         .padding(.horizontal, horizontalPadding)
                         .padding(.top, 8)
@@ -411,20 +580,28 @@ private struct MixtapesGridView: View {
                             cellSize: cellSize,
                             spacing: spacing
                         ) { mixtape, _ in
-                            Button {
-                                onTap(mixtape)
-                            } label: {
-                                VStack(spacing: 6) {
-                                    MixtapeCoverView(mixtape: mixtape, cornerRadius: 14, showsShadow: false)
+                            VStack(spacing: 6) {
+                                MixtapeCoverView(mixtape: mixtape, cornerRadius: 14, showsShadow: false)
+                                VStack(alignment: .leading, spacing: 1) {
                                     Text(mixtape.name)
                                         .font(.system(size: 12, weight: .semibold))
                                         .foregroundStyle(.white)
                                         .lineLimit(1)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.horizontal, 4)
+                                    Text("\(mixtape.songCount) song\(mixtape.songCount == 1 ? "" : "s")")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.white.opacity(0.45))
+                                        .lineLimit(1)
                                 }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 4)
                             }
-                            .buttonStyle(.plain)
+                            // Same Button → tap-gesture conversion as the
+                            // song grids above; the cover + name stack
+                            // had the same transparent-label issue.
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                onTap(mixtape)
+                            }
                         }
                         .padding(.horizontal, horizontalPadding)
                         .padding(.top, 8)
@@ -504,23 +681,27 @@ struct MixtapeDetailView: View {
                                     cellSize: cellSize,
                                     spacing: spacing
                                 ) { song, side in
-                                    Button {
+                                    AlbumArtSquare(
+                                        url: song.albumArtURL,
+                                        cornerRadius: 14,
+                                        showsPlaceholderProgress: false,
+                                        showsShadow: false,
+                                        targetDecodeSide: side
+                                    )
+                                    // Same Button → tap-gesture rationale
+                                    // as the Discover grid; keeps the
+                                    // fullscreen feed reliably reachable
+                                    // from inside a mixtape.
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
                                         if let idx = liveMixtape.songs.firstIndex(where: { $0.id == song.id }) {
+                                            AudioPlayerService.shared.play(song: song)
                                             fullscreenSeed = FullscreenSeed(
                                                 songs: liveMixtape.songs,
                                                 startIndex: idx
                                             )
                                         }
-                                    } label: {
-                                        AlbumArtSquare(
-                                            url: song.albumArtURL,
-                                            cornerRadius: 14,
-                                            showsPlaceholderProgress: false,
-                                            showsShadow: false,
-                                            targetDecodeSide: side
-                                        )
                                     }
-                                    .buttonStyle(.plain)
                                 }
                                 .padding(.horizontal, horizontalPadding)
                                 .padding(.bottom, 32)
