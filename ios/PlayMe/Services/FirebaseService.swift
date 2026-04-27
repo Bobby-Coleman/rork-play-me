@@ -1095,7 +1095,8 @@ class FirebaseService {
                 lastMessageText: "",
                 lastMessageTimestamp: Date(),
                 unreadCount: 0,
-                songStreakCount: 0
+                songStreakCount: 0,
+                lastReadAt: [:]
             )
         } catch {
             print("FirebaseService: getOrCreateConversation FAILED: \(error)")
@@ -1103,7 +1104,12 @@ class FirebaseService {
         }
     }
 
-    func sendMessage(conversationId: String, text: String, song: Song? = nil) async {
+    func sendMessage(
+        conversationId: String,
+        text: String,
+        song: Song? = nil,
+        replyTo: ChatMessage? = nil
+    ) async {
         guard let uid = firebaseUID else {
             print("FirebaseService: sendMessage - not signed in")
             return
@@ -1129,6 +1135,25 @@ class FirebaseService {
                 "artistId": song.artistId as Any,
                 "albumId": song.albumId as Any,
             ]
+        }
+
+        if let replyTo {
+            // Embed a compact snapshot of the parent message so the
+            // quoted-reply chip on this bubble renders even after the
+            // parent has scrolled out of the live tail window. Text is
+            // truncated to 80 chars to keep doc size small; the song
+            // title (if any) is preserved verbatim because titles are
+            // short and bear high signal value.
+            msgData["replyToMessageId"] = replyTo.id
+            var preview: [String: Any] = [
+                "messageId": replyTo.id,
+                "senderId": replyTo.senderId,
+                "textSnippet": String(replyTo.text.prefix(80)),
+            ]
+            if let songTitle = replyTo.song?.title {
+                preview["songTitle"] = songTitle
+            }
+            msgData["replyToPreview"] = preview
         }
 
         do {
@@ -1244,25 +1269,139 @@ class FirebaseService {
             }
     }
 
-    func listenForMessages(conversationId: String, onUpdate: @escaping @Sendable ([ChatMessage]) -> Void) -> ListenerRegistration {
+    /// Real-time tail listener: subscribes to the most recent `limit`
+    /// messages of a conversation, ordered newest → oldest by Firestore
+    /// then reversed client-side so callers always receive ascending
+    /// chronological order. This keeps first-paint cost O(50) regardless
+    /// of how long the thread is — a critical fix for 1k+ message
+    /// conversations that previously blocked rendering for seconds while
+    /// the entire history streamed in.
+    ///
+    /// Older pages are fetched lazily via `loadEarlierMessages` when the
+    /// user scrolls back. Caller is responsible for `.remove()` on
+    /// dispose.
+    func listenForMessageTail(
+        conversationId: String,
+        limit: Int = 50,
+        onUpdate: @escaping @Sendable ([ChatMessage]) -> Void
+    ) -> ListenerRegistration {
         db.collection("conversations")
             .document(conversationId)
             .collection("messages")
-            .order(by: "timestamp", descending: false)
+            .order(by: "timestamp", descending: true)
+            .limit(to: limit)
             .addSnapshotListener { snapshot, _ in
                 guard let docs = snapshot?.documents else { return }
-                let messages = docs.compactMap { self.parseMessage(from: $0) }
+                let messages = Array(docs.compactMap { self.parseMessage(from: $0) }.reversed())
                 onUpdate(messages)
             }
     }
 
+    /// One-shot cursor fetch of messages strictly older than `before`,
+    /// returned in ascending chronological order. Used by `ChatView`'s
+    /// "Loading earlier…" loader to page back through long threads
+    /// without expanding the live listener's window. Returns an empty
+    /// array on any error or when there are no more older messages.
+    ///
+    /// We cursor on `Timestamp` rather than a `DocumentSnapshot` so the
+    /// caller doesn't need to retain the original snapshot — the
+    /// `ChatMessage.timestamp` already on the model is enough.
+    func loadEarlierMessages(
+        conversationId: String,
+        before: Date,
+        limit: Int = 50
+    ) async -> [ChatMessage] {
+        do {
+            let snapshot = try await db.collection("conversations")
+                .document(conversationId)
+                .collection("messages")
+                .order(by: "timestamp", descending: true)
+                .start(after: [Timestamp(date: before)])
+                .limit(to: limit)
+                .getDocuments()
+            return Array(snapshot.documents.compactMap { parseMessage(from: $0) }.reversed())
+        } catch {
+            print("FirebaseService: loadEarlierMessages failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// Per-conversation timestamp of the last successful read receipt
+    /// write, used by `markConversationRead` to enforce a 1Hz cap. Reset
+    /// on sign-out.
+    private var lastReadWriteAt: [String: Date] = [:]
+
     func markConversationRead(conversationId: String) async {
+        guard let uid = firebaseUID else { return }
+
+        // 1Hz throttle per conversation. The function is called from
+        // onAppear, scenePhase active, and every incoming message
+        // arrival while the chat is foregrounded — without this guard
+        // a chatty thread can hammer Firestore with redundant writes
+        // even though `lastReadAt_<uid>` only needs to advance to
+        // "after the most recent message", not to the exact instant.
+        let now = Date()
+        if let last = lastReadWriteAt[conversationId], now.timeIntervalSince(last) < 1.0 {
+            return
+        }
+        lastReadWriteAt[conversationId] = now
+
+        do {
+            // Zero the badge AND stamp `lastReadAt_<uid>` in the same
+            // write so the iMessage-style "Read" indicator on the
+            // sender's side flips the moment the recipient opens the
+            // thread. Server timestamp keeps the comparison
+            // wall-clock-monotonic vs. the message timestamps.
+            try await db.collection("conversations").document(conversationId)
+                .updateData([
+                    "unreadCount_\(uid)": 0,
+                    "lastReadAt_\(uid)": FieldValue.serverTimestamp(),
+                ])
+        } catch {
+            print("FirebaseService: markConversationRead failed: \(error.localizedDescription)")
+            // Roll back the throttle on failure so the caller can
+            // retry sooner than 1s if the network is flaky.
+            lastReadWriteAt[conversationId] = nil
+        }
+    }
+
+    // MARK: - Reactions
+
+    /// Set or change the current user's reaction on a message. Writes
+    /// `messages/{mid}.reactions.<uid> = emoji` via a dotted-path
+    /// `updateData` so the affected key set in the resulting diff is
+    /// exactly `{ "reactions.<myUid>" }` — which is what the
+    /// self-scoped reaction rule in `firestore.rules` checks for. This
+    /// is symmetrical with `clearReaction` below and avoids the
+    /// `setData(merge: true)` deep-merge ambiguity that can show up as
+    /// "the rule rejects my own write" on certain field shapes. The
+    /// snapshot listener observing the conversation's messages
+    /// collection picks up the change and pushes it back to every
+    /// connected client in real time.
+    func setReaction(conversationId: String, messageId: String, emoji: String) async {
+        guard let uid = firebaseUID else { return }
+        guard !emoji.isEmpty else { return }
+        do {
+            try await db.collection("conversations").document(conversationId)
+                .collection("messages").document(messageId)
+                .updateData(["reactions.\(uid)": emoji])
+        } catch {
+            print("FirebaseService: setReaction failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Remove the current user's reaction from a message (toggle-off
+    /// from the tray when they re-tap their existing emoji). Deletes
+    /// just their cell of the `reactions` map; other reactors are
+    /// untouched.
+    func clearReaction(conversationId: String, messageId: String) async {
         guard let uid = firebaseUID else { return }
         do {
             try await db.collection("conversations").document(conversationId)
-                .updateData(["unreadCount_\(uid)": 0])
+                .collection("messages").document(messageId)
+                .updateData(["reactions.\(uid)": FieldValue.delete()])
         } catch {
-            print("FirebaseService: markConversationRead failed: \(error.localizedDescription)")
+            print("FirebaseService: clearReaction failed: \(error.localizedDescription)")
         }
     }
 
@@ -1284,6 +1423,18 @@ class FirebaseService {
         let unread = data["unreadCount_\(uid)"] as? Int ?? 0
         let streak = data["songStreakCount"] as? Int ?? 0
 
+        // Read receipt map: scan participants for `lastReadAt_<uid>` and
+        // build a [uid: Date] dictionary. Missing entries mean that
+        // participant has never opened the thread (or hasn't yet on a
+        // build that supports the field), so the rendering layer treats
+        // them as "no reads to display".
+        var lastReadAt: [String: Date] = [:]
+        for p in participants {
+            if let ts = data["lastReadAt_\(p)"] as? Timestamp {
+                lastReadAt[p] = ts.dateValue()
+            }
+        }
+
         return Conversation(
             id: id,
             participants: participants,
@@ -1291,12 +1442,19 @@ class FirebaseService {
             lastMessageText: lastText,
             lastMessageTimestamp: lastTs,
             unreadCount: unread,
-            songStreakCount: streak
+            songStreakCount: streak,
+            lastReadAt: lastReadAt
         )
     }
 
     private func parseMessage(from doc: QueryDocumentSnapshot) -> ChatMessage? {
-        let data = doc.data()
+        parseMessage(documentId: doc.documentID, data: doc.data())
+    }
+
+    /// Document-id-agnostic variant used by `parseMessage(from:)` and by
+    /// any direct-document parsing path (e.g. one-shot `DocumentSnapshot`
+    /// fetches that aren't `QueryDocumentSnapshot`).
+    private func parseMessage(documentId: String, data: [String: Any]) -> ChatMessage? {
         guard let senderId = data["senderId"] as? String,
               let text = data["text"] as? String else { return nil }
 
@@ -1323,12 +1481,36 @@ class FirebaseService {
             )
         }
 
+        // Inline reply metadata. `replyToMessageId` may exist without
+        // `replyToPreview` on legacy clients; the reverse should never
+        // happen because preview is set in the same write.
+        let replyToMessageId = data["replyToMessageId"] as? String
+        var replyToPreview: ReplyPreview? = nil
+        if let preview = data["replyToPreview"] as? [String: Any],
+           let parentId = preview["messageId"] as? String,
+           let parentSenderId = preview["senderId"] as? String {
+            replyToPreview = ReplyPreview(
+                messageId: parentId,
+                senderId: parentSenderId,
+                textSnippet: preview["textSnippet"] as? String ?? "",
+                songTitle: preview["songTitle"] as? String
+            )
+        }
+
+        // Reactions: stored as a top-level map `{ <uid>: <emoji> }`.
+        // Missing or empty map both decode to an empty dictionary so
+        // call sites can treat reactions as "always present".
+        let reactions = (data["reactions"] as? [String: String]) ?? [:]
+
         return ChatMessage(
-            id: doc.documentID,
+            id: documentId,
             senderId: senderId,
             text: text,
             timestamp: timestamp,
-            song: song
+            song: song,
+            replyToMessageId: replyToMessageId,
+            replyToPreview: replyToPreview,
+            reactions: reactions
         )
     }
 

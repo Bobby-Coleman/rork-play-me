@@ -466,8 +466,18 @@ class AppState {
         }
     }
 
-    func sendMessage(conversationId: String, text: String, song: Song? = nil) async {
-        await FirebaseService.shared.sendMessage(conversationId: conversationId, text: text, song: song)
+    func sendMessage(
+        conversationId: String,
+        text: String,
+        song: Song? = nil,
+        replyTo: ChatMessage? = nil
+    ) async {
+        await FirebaseService.shared.sendMessage(
+            conversationId: conversationId,
+            text: text,
+            song: song,
+            replyTo: replyTo
+        )
         await loadConversations()
     }
 

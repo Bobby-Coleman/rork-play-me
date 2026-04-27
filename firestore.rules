@@ -88,6 +88,14 @@ service cloud.firestore {
         && (resource == null || request.auth.uid in resource.data.participants);
       allow create: if request.auth != null
         && request.auth.uid in request.resource.data.participants;
+      // Update: any participant of a 2-person DM may write. The legitimate
+      // cross-participant write is `sendMessage`, which atomically bumps
+      // the OTHER participant's `unreadCount_<otherUid>` while updating
+      // `lastMessageText` / `lastMessageTimestamp` / `songStreakCount`
+      // and (now) the writer's own `lastReadAt_<myUid>` for read receipts.
+      // Constraining to "self-scoped fields only" would break that
+      // transaction, so we keep the participant-trust model and rely on
+      // the message-level rule below to prevent reaction spoofing.
       allow update: if request.auth != null
         && request.auth.uid in resource.data.participants;
 
@@ -98,6 +106,23 @@ service cloud.firestore {
           && request.resource.data.senderId == request.auth.uid
           && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participants
           && !isBlockedBy(otherParticipant(convId, request.auth.uid), request.auth.uid);
+
+        // Self-scoped reaction edits. A participant may add, change, or
+        // remove ONLY their own entry in the `reactions` map (keyed by
+        // their own Firebase UID). No other field on the message may
+        // change in the same write — guaranteed by the
+        // affectedKeys().hasOnly(['reactions']) clause — and no entry
+        // for any other UID may be touched, guaranteed by the inner map
+        // diff. The .get('reactions', {}) defaults make this work for
+        // both freshly reacted-to messages (where `reactions` didn't
+        // exist before) and follow-up edits (where it does).
+        allow update: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participants
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+          && request.resource.data.get('reactions', {})
+              .diff(resource.data.get('reactions', {}))
+              .affectedKeys()
+              .hasOnly([request.auth.uid]);
       }
     }
 
