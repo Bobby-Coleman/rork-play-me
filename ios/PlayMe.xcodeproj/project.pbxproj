@@ -15,6 +15,7 @@
 		XX3DF24C364CC9BFC26E41XX /* PlayMeWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = XX8D76BE4CCED1AB217465XX /* PlayMeWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		XXFB01A1E3C4D5B6A7F8E9XX /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = XXFB01A2E3C4D5B6A7F8E9XX /* FirebaseAuth */; };
 		XXFB01A3E3C4D5B6A7F8E9XX /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = XXFB01A4E3C4D5B6A7F8E9XX /* FirebaseFirestore */; };
+		XXFB01A8E3C4D5B6A7F8E9XX /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = XXFB01A9E3C4D5B6A7F8E9XX /* FirebaseStorage */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -141,6 +142,7 @@
 				8491A0A32F8841230088392D /* FirebaseMessaging in Frameworks */,
 				XXFB01A1E3C4D5B6A7F8E9XX /* FirebaseAuth in Frameworks */,
 				XXFB01A3E3C4D5B6A7F8E9XX /* FirebaseFirestore in Frameworks */,
+				XXFB01A8E3C4D5B6A7F8E9XX /* FirebaseStorage in Frameworks */,
 				NK01A5E3C4D5B6A7F8E9A004 /* Nuke in Frameworks */,
 				NK01A5E3C4D5B6A7F8E9A005 /* NukeUI in Frameworks */,
 			);
@@ -234,6 +236,7 @@
 			packageProductDependencies = (
 				XXFB01A2E3C4D5B6A7F8E9XX /* FirebaseAuth */,
 				XXFB01A4E3C4D5B6A7F8E9XX /* FirebaseFirestore */,
+				XXFB01A9E3C4D5B6A7F8E9XX /* FirebaseStorage */,
 				8491A0A22F8841230088392D /* FirebaseMessaging */,
 				84B7E0302F91B95F00B59DD6 /* ChottuLinkSDK */,
 				NK01A5E3C4D5B6A7F8E9A002 /* Nuke */,
@@ -997,6 +1000,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseFirestore;
+		};
+		XXFB01A9E3C4D5B6A7F8E9XX /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -40,7 +40,7 @@ struct SongFullScreenFeedView: View {
 
     @State private var coordinator = FullScreenFeedPlaybackCoordinator()
     @State private var visibleSongId: String?
-    /// Pinterest-style horizontal-drag offset for swipe-right-to-dismiss.
+    /// Horizontal-drag offset for edge-initiated swipe-right-to-dismiss.
     /// Driven by the `.simultaneousGesture` below; on release we either
     /// animate it back to 0 (cancel) or out to screen-width (commit dismiss)
     /// so the page visibly slides off the right edge before the
@@ -143,29 +143,36 @@ struct SongFullScreenFeedView: View {
                 }
 
                 closeButton
-                    .padding(.top, topInset + 20)
+                    .padding(.top, topInset + 36)
                     .padding(.leading, 16)
             }
             .offset(x: dragOffsetX)
-            // Swipe-right-to-dismiss. `.simultaneousGesture` so the
-            // vertical paging gesture on the inner `ScrollView` keeps
-            // working — we only react when the drag is *predominantly*
-            // rightward (h > 0 and |h| > |v| * 1.5), which leaves the
-            // vertical pager untouched on diagonal flicks.
+            // Edge-initiated swipe-right-to-dismiss only (gesture must
+            // begin within ~24pt of the leading edge) so vertical paging
+            // is not hijacked by drags from the middle of the screen.
+            // `.simultaneousGesture` keeps the inner pager working when
+            // the drag is not predominantly horizontal.
             .simultaneousGesture(
-                DragGesture(minimumDistance: 15)
+                DragGesture(minimumDistance: 28)
                     .onChanged { value in
                         guard !isDismissing else { return }
+                        guard value.startLocation.x < 24 else { return }
                         let h = value.translation.width
                         let v = value.translation.height
-                        guard h > 0, abs(h) > abs(v) * 1.5 else { return }
+                        guard h > 0, abs(h) > abs(v) * 2.0 else { return }
                         dragOffsetX = h
                     }
                     .onEnded { value in
                         guard !isDismissing else { return }
+                        if value.startLocation.x >= 24 {
+                            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                                dragOffsetX = 0
+                            }
+                            return
+                        }
                         let h = value.translation.width
                         let predicted = value.predictedEndTranslation.width
-                        if h > 100 || predicted > 220 {
+                        if h > 150 || predicted > 320 {
                             performSlideDismiss(width: pageSize.width)
                         } else {
                             withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {

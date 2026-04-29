@@ -27,7 +27,7 @@ struct SongActionSheet: View {
     var body: some View {
         NavigationStack {
             FriendSelectorView(
-                song: song,
+                item: .song(song),
                 appState: appState,
                 shareId: share?.id,
                 onBack: { dismiss() },

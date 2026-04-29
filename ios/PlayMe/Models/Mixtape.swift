@@ -11,10 +11,28 @@ import Foundation
 /// instance with `isSystemLiked = true` whose `songs` are derived from the
 /// user's existing `likedShareIds` set. That keeps the existing per-share
 /// like model intact while giving the Mixtapes UI a unified surface.
+///
+/// Curated Discover feed mixtapes use `ownerId == featuredOwnerId` and live
+/// in the top-level `featured_mixtapes` collection — same struct so detail
+/// and share views stay unified.
 nonisolated struct Mixtape: Identifiable, Hashable, Sendable {
     let id: String
     let ownerId: String
     var name: String
+    /// Optional short paragraph the owner can write under the title — a
+    /// "what is this mixtape about" blurb. Nil until the owner adds one;
+    /// rendered under the song count on `MixtapeDetailView` and travels
+    /// alongside the mixtape in any mixtape-share snapshot. Capped at
+    /// 300 chars at the edit-sheet entry point so we never need to
+    /// truncate at render time.
+    var description: String?
+    /// Firebase Storage download URL for the board cover. Required for
+    /// every newly created user mixtape; nil on legacy docs and the
+    /// synthetic Liked mixtape (mosaic fallback from songs).
+    var coverImageURL: String?
+    /// When community Discover ships, only `isPrivate == false` mixtapes
+    /// surface publicly. Not shown in UI yet — defaults to false.
+    var isPrivate: Bool
     var createdAt: Date
     var updatedAt: Date
     /// Ordered list of songs in this mixtape, newest-added-first. Always
@@ -30,6 +48,9 @@ nonisolated struct Mixtape: Identifiable, Hashable, Sendable {
         id: String,
         ownerId: String,
         name: String,
+        description: String? = nil,
+        coverImageURL: String? = nil,
+        isPrivate: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         songs: [Song] = [],
@@ -38,6 +59,9 @@ nonisolated struct Mixtape: Identifiable, Hashable, Sendable {
         self.id = id
         self.ownerId = ownerId
         self.name = name
+        self.description = description
+        self.coverImageURL = coverImageURL
+        self.isPrivate = isPrivate
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.songs = songs
@@ -56,4 +80,9 @@ nonisolated struct Mixtape: Identifiable, Hashable, Sendable {
     /// Stable doc-ID prefix for the system Liked mixtape. Never collides with
     /// Firestore-generated IDs (which are lowercase alphanumeric, 20 chars).
     static let systemLikedId = "__system_liked__"
+
+    /// Sentinel `ownerId` for documents in `featured_mixtapes/`. Never a
+    /// real Firebase Auth uid — used so `MixtapeDetailView` can hide owner
+    /// chrome without a separate view type.
+    static let featuredOwnerId = "__featured__"
 }

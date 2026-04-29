@@ -74,6 +74,11 @@ class AppState {
     /// Firestore listener for the current user's received shares. Drives
     /// real-time home-feed updates; detached on logout.
     private var receivedSharesListener: ListenerRegistration?
+    /// Listener for received mixtape shares (parallel collection so it
+    /// doesn't compete with the song-share listener's index).
+    private var receivedMixtapeSharesListener: ListenerRegistration?
+    /// Listener for received album shares.
+    private var receivedAlbumSharesListener: ListenerRegistration?
     /// Firestore listener for the current user's conversation inbox. Drives
     /// real-time inbox row updates (unread badge flips, new conversations,
     /// last-message preview) without requiring a manual `loadConversations`
@@ -114,6 +119,15 @@ class AppState {
     var isMusicSearchDenied: Bool { musicAuthStatus == .denied }
     var receivedShares: [SongShare] = []
     var sentShares: [SongShare] = []
+    /// Mixtapes shared with the current user. Ordered newest-first to
+    /// match `receivedShares`. Listener-driven once `loadData` runs.
+    var receivedMixtapeShares: [MixtapeShare] = []
+    /// Mixtape shares the current user authored.
+    var sentMixtapeShares: [MixtapeShare] = []
+    /// Albums shared with the current user, newest-first.
+    var receivedAlbumShares: [AlbumShare] = []
+    /// Album shares the current user authored.
+    var sentAlbumShares: [AlbumShare] = []
     var likedShareIds: Set<String> = [] {
         didSet {
             UserDefaults.standard.set(Array(likedShareIds), forKey: "likedShareIds")
@@ -363,6 +377,8 @@ class AppState {
         await refreshFriendRequests()
         startIncomingRequestsListener()
         startReceivedSharesListener()
+        startReceivedMixtapeSharesListener()
+        startReceivedAlbumSharesListener()
         startConversationsListener()
 
         notificationsEnabled = await firebase.loadNotificationsEnabled()
@@ -375,6 +391,19 @@ class AppState {
         if !serverSent.isEmpty {
             sentShares = serverSent
         }
+
+        // Initial paint of mixtape/album shares before the listener
+        // delivers its first snapshot. Filter `blockedUserIds` so a
+        // newly-blocked sender's history disappears immediately.
+        async let recvMix: [MixtapeShare] = firebase.loadReceivedMixtapeShares()
+        async let sentMix: [MixtapeShare] = firebase.loadSentMixtapeShares()
+        async let recvAlb: [AlbumShare] = firebase.loadReceivedAlbumShares()
+        async let sentAlb: [AlbumShare] = firebase.loadSentAlbumShares()
+        let (rm, sm, ra, sa) = await (recvMix, sentMix, recvAlb, sentAlb)
+        receivedMixtapeShares = rm.filter { !blockedUserIds.contains($0.sender.id) }
+        sentMixtapeShares = sm
+        receivedAlbumShares = ra.filter { !blockedUserIds.contains($0.sender.id) }
+        sentAlbumShares = sa
 
         // Hydrate the SaveService index and the user's mixtapes in
         // parallel — they live in independent subcollections, and
@@ -428,6 +457,152 @@ class AppState {
             try? await Task.sleep(for: .seconds(2))
             showSentToast = false
         }
+    }
+
+    /// Fan-out send of a whole mixtape to one or more friends. Mirrors
+    /// `sendSong` for songs: optimistic local insert into
+    /// `sentMixtapeShares`, durable Firestore writes in parallel,
+    /// `showSentToast` flicker. The mixtape payload is snapshotted at
+    /// send time — the recipient sees what was sent regardless of
+    /// future edits.
+    func sendMixtape(_ mixtape: Mixtape, to friends: [AppUser], note: String? = nil) async {
+        guard let user = currentUser, !friends.isEmpty else { return }
+        let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedNote = (trimmedNote?.isEmpty ?? true) ? nil : trimmedNote
+        let snapshot = mixtape
+
+        let me = AppUser(
+            id: user.id, firstName: user.firstName, lastName: user.lastName,
+            username: user.username, phone: user.phone
+        )
+        var locallyInserted: [MixtapeShare] = []
+        for friend in friends {
+            let share = MixtapeShare(
+                mixtape: snapshot,
+                sender: me,
+                recipient: friend,
+                note: cleanedNote
+            )
+            locallyInserted.append(share)
+        }
+        sentMixtapeShares.insert(contentsOf: locallyInserted, at: 0)
+        showSentToast = true
+
+        await withTaskGroup(of: Void.self) { group in
+            let firebase = FirebaseService.shared
+            for share in locallyInserted {
+                group.addTask { await firebase.saveMixtapeShare(share) }
+            }
+            // Bump per-friend send stats so the chip row reorders.
+            for friend in friends {
+                group.addTask { @MainActor [weak self] in
+                    guard let self else { return }
+                    let prev = self.sendStats[friend.id]?.count ?? 0
+                    self.sendStats[friend.id] = SendStat(count: prev + 1, lastSentAt: Date())
+                    await firebase.incrementSendStat(friendUid: friend.id)
+                }
+            }
+        }
+
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            showSentToast = false
+        }
+    }
+
+    /// Fan-out send of a whole album. Identical pattern to
+    /// `sendMixtape`. Tracklist is fetched once via
+    /// `ArtistLookupService` and reused across all recipients so we
+    /// don't re-hit iTunes per friend.
+    func sendAlbum(_ album: Album, to friends: [AppUser], note: String? = nil) async {
+        guard let user = currentUser, !friends.isEmpty else { return }
+        let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedNote = (trimmedNote?.isEmpty ?? true) ? nil : trimmedNote
+        let tracks = (try? await ArtistLookupService.shared.fetchAlbumTracks(albumId: album.id)) ?? []
+        guard !tracks.isEmpty else { return }
+
+        let me = AppUser(
+            id: user.id, firstName: user.firstName, lastName: user.lastName,
+            username: user.username, phone: user.phone
+        )
+        var locallyInserted: [AlbumShare] = []
+        for friend in friends {
+            let share = AlbumShare(
+                album: album,
+                songs: tracks,
+                sender: me,
+                recipient: friend,
+                note: cleanedNote
+            )
+            locallyInserted.append(share)
+        }
+        sentAlbumShares.insert(contentsOf: locallyInserted, at: 0)
+        showSentToast = true
+
+        await withTaskGroup(of: Void.self) { group in
+            let firebase = FirebaseService.shared
+            for share in locallyInserted {
+                group.addTask { await firebase.saveAlbumShare(share) }
+            }
+            for friend in friends {
+                group.addTask { @MainActor [weak self] in
+                    guard let self else { return }
+                    let prev = self.sendStats[friend.id]?.count ?? 0
+                    self.sendStats[friend.id] = SendStat(count: prev + 1, lastSentAt: Date())
+                    await firebase.incrementSendStat(friendUid: friend.id)
+                }
+            }
+        }
+
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            showSentToast = false
+        }
+    }
+
+    /// Adds every track of `album` to the user's mixtape as individual
+    /// `Song` entries (each tagged with `albumId = album.id` so the
+    /// origin is preserved). Caller is responsible for the user-facing
+    /// confirmation — by the time we reach this method the user has
+    /// already acknowledged "this will add N songs". Fetches the
+    /// tracklist via `ArtistLookupService` (cached) so a re-add of the
+    /// same album is essentially free. Returns the count actually added,
+    /// or 0 on any failure.
+    @discardableResult
+    func addAlbumToMixtape(_ album: Album, mixtapeId: String) async -> Int {
+        guard currentUser != nil else { return 0 }
+        let tracks: [Song]
+        do {
+            tracks = try await ArtistLookupService.shared.fetchAlbumTracks(albumId: album.id)
+        } catch {
+            print("AppState: addAlbumToMixtape fetch failed: \(error.localizedDescription)")
+            return 0
+        }
+        guard !tracks.isEmpty else { return 0 }
+
+        var added = 0
+        for song in tracks {
+            // Make sure every persisted song carries the album id so the
+            // origin survives a refetch. Most `fetchAlbumTracks` results
+            // already do (the service passes `overrideAlbumId`), but
+            // we belt-and-suspender here so we never persist an
+            // unattributed copy.
+            let tagged = song.albumId == album.id ? song : Song(
+                id: song.id,
+                title: song.title,
+                artist: song.artist,
+                albumArtURL: song.albumArtURL,
+                duration: song.duration,
+                spotifyURI: song.spotifyURI,
+                previewURL: song.previewURL,
+                appleMusicURL: song.appleMusicURL,
+                artistId: song.artistId,
+                albumId: album.id
+            )
+            await mixtapeStore.addSong(tagged, to: mixtapeId)
+            added += 1
+        }
+        return added
     }
 
     /// Queue a song for a contact who hasn't signed up yet. Written to
@@ -612,6 +787,30 @@ class AppState {
                 guard let self else { return }
                 self.receivedShares = shares.filter { !self.blockedUserIds.contains($0.sender.id) }
                 self.syncWidgetWithLatestReceivedShare()
+            }
+        }
+    }
+
+    /// Listener for inbound mixtape shares. Mirrors `startReceivedSharesListener`
+    /// so the Received segment updates in real time when a friend sends a
+    /// whole mixtape. Idempotent — detached cleanly on logout.
+    private func startReceivedMixtapeSharesListener() {
+        receivedMixtapeSharesListener?.remove()
+        receivedMixtapeSharesListener = FirebaseService.shared.listenReceivedMixtapeShares { [weak self] shares in
+            Task { @MainActor in
+                guard let self else { return }
+                self.receivedMixtapeShares = shares.filter { !self.blockedUserIds.contains($0.sender.id) }
+            }
+        }
+    }
+
+    /// Listener for inbound album shares.
+    private func startReceivedAlbumSharesListener() {
+        receivedAlbumSharesListener?.remove()
+        receivedAlbumSharesListener = FirebaseService.shared.listenReceivedAlbumShares { [weak self] shares in
+            Task { @MainActor in
+                guard let self else { return }
+                self.receivedAlbumShares = shares.filter { !self.blockedUserIds.contains($0.sender.id) }
             }
         }
     }
@@ -856,6 +1055,10 @@ class AppState {
         incomingRequestsListener = nil
         receivedSharesListener?.remove()
         receivedSharesListener = nil
+        receivedMixtapeSharesListener?.remove()
+        receivedMixtapeSharesListener = nil
+        receivedAlbumSharesListener?.remove()
+        receivedAlbumSharesListener = nil
         conversationsListener?.remove()
         conversationsListener = nil
         widgetReloadTask?.cancel()
@@ -868,6 +1071,10 @@ class AppState {
         sendStats = [:]
         receivedShares = []
         sentShares = []
+        receivedMixtapeShares = []
+        sentMixtapeShares = []
+        receivedAlbumShares = []
+        sentAlbumShares = []
         likedShareIds = []
         conversations = []
         saveService.clear()
@@ -902,6 +1109,20 @@ class AppState {
         if !serverSent.isEmpty {
             sentShares = serverSent
         }
+
+        // Mixtape + album shares refresh in parallel — they live in
+        // independent collections, neither blocks the song-share
+        // first paint, and both are bounded to 50 docs at the
+        // service.
+        async let recvMix: [MixtapeShare] = firebase.loadReceivedMixtapeShares()
+        async let sentMix: [MixtapeShare] = firebase.loadSentMixtapeShares()
+        async let recvAlb: [AlbumShare] = firebase.loadReceivedAlbumShares()
+        async let sentAlb: [AlbumShare] = firebase.loadSentAlbumShares()
+        let (rm, sm, ra, sa) = await (recvMix, sentMix, recvAlb, sentAlb)
+        receivedMixtapeShares = rm.filter { !blockedUserIds.contains($0.sender.id) }
+        sentMixtapeShares = sm
+        receivedAlbumShares = ra.filter { !blockedUserIds.contains($0.sender.id) }
+        sentAlbumShares = sa
 
         let serverLikes = await firebase.loadLikedShareIds()
         if !serverLikes.isEmpty {

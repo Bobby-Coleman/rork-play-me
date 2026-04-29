@@ -1,39 +1,63 @@
 import SwiftUI
 
+/// Unified share view. The single destination for any "send this to a
+/// friend" entry point in the app — songs from the feed/search/history,
+/// whole albums from search results / album detail, and whole mixtapes
+/// from the mixtape detail screen all flow through here. Variation
+/// between the kinds is contained to the artwork strip, the
+/// preview-controls row (songs only — albums and mixtapes can't be
+/// auditioned as a single track), and the final dispatch in
+/// `commitSend()`. Recipient selection, the note pill, and the Send
+/// button work the same regardless of payload.
+///
+/// Pending-signup contacts (the `invitedContacts` parameter) only
+/// receive songs today. Sending an album or mixtape to a still-invited
+/// contact would require expanding the invite-redeem flow to fan-out
+/// every song in the payload, which is out of scope for v1, so the
+/// chip row hides invited contacts when the payload isn't a song.
 struct FriendSelectorView: View {
-    let song: Song
+    let item: Shareable
     let appState: AppState
-    /// Pending-signup contacts to render alongside real friends. Defaults to
-    /// empty so every main-app call site stays friends-only. The onboarding
-    /// flow passes `appState.invitedContacts` so freshly registered users
-    /// who have only SMS-invited people can still send their first song.
+    /// Pending-signup contacts to render alongside real friends. Only
+    /// rendered when `item == .song`. See type doc for rationale.
     var invitedContacts: [SimpleContact] = []
-    /// Share context when this view is acting as a song action destination
-    /// (feed tap / history tap via `SongActionSheet`) rather than a pre-send
-    /// surface. When present we thread it down to `openInServiceButton` so
-    /// any resolution that fires writes back to `shares/{id}.song.spotifyURI`.
-    /// `nil` means "no share yet" (the pre-send case) and writeback is
-    /// correctly skipped.
+    /// Share context when this view is acting as a song action
+    /// destination (feed tap / history tap via `SongActionSheet`)
+    /// rather than a pre-send surface. Threaded down to
+    /// `openInServiceButton` so any resolution that fires writes back
+    /// to `shares/{id}.song.spotifyURI`. `nil` means "no share yet"
+    /// (the pre-send case) and writeback is correctly skipped.
+    /// Only meaningful for `.song` payloads — albums and mixtapes use
+    /// their own share collections.
     var shareId: String? = nil
     let onBack: () -> Void
     let onSent: () -> Void
 
     private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
-    private var isCurrentSong: Bool { audioPlayer.currentSongId == song.id }
+    private var song: Song? { item.song }
+    private var isCurrentSong: Bool {
+        guard let song else { return false }
+        return audioPlayer.currentSongId == song.id
+    }
     private var isPlayingThis: Bool { isCurrentSong && audioPlayer.isPlaying }
 
     @State private var selectedFriends: Set<String> = []
     /// Parallel selection set for invited contacts. Lives alongside
-    /// `selectedFriends` rather than merging into one set so we can route
-    /// sends to the correct backend path (`sendSong` vs
-    /// `sendSongToPendingContact`) without any later disambiguation.
+    /// `selectedFriends` rather than merging into one set so we can
+    /// route sends to the correct backend path (`sendSong` vs
+    /// `sendSongToPendingContact`) without later disambiguation.
     @State private var selectedContacts: Set<String> = []
     @State private var note: String = ""
     @State private var showSentAnimation = false
     @State private var showAddFriends = false
-    /// Pre-resolved Spotify URL for the "Open in Spotify" button. When the
-    /// user prefers Spotify and the song only carries an Apple-Music URL,
-    /// we resolve it once on appear so the tap-through is instant.
+    /// Drives the save-to-mixtape sheet. The kind of sheet rendered
+    /// branches off `item.kind` — songs use `SaveToMixtapeSheet`,
+    /// albums use `SaveAlbumToMixtapeSheet`. Mixtapes hide the save
+    /// affordance entirely (saving a mixtape would mean duplicating
+    /// every song into another mixtape, which we haven't designed).
+    @State private var showSaveSheet: Bool = false
+    /// Pre-resolved Spotify URL for the "Open in Spotify" button. Only
+    /// resolved for `.song` payloads.
     @State private var resolvedSpotifyURL: String?
     @FocusState private var isNoteFocused: Bool
 
@@ -41,12 +65,18 @@ struct FriendSelectorView: View {
         appState.friendsRankedByActivity
     }
 
+    /// Invited contacts are only meaningful when sharing a song. For
+    /// other payloads the chip row hides them — see type doc for why.
+    private var renderableInvitedContacts: [SimpleContact] {
+        item.kind == .song ? invitedContacts : []
+    }
+
     private var allSelected: Bool {
         let friendsAllOn = rankedFriends.isEmpty
             || rankedFriends.allSatisfy { selectedFriends.contains($0.id) }
-        let contactsAllOn = invitedContacts.isEmpty
-            || invitedContacts.allSatisfy { selectedContacts.contains($0.id) }
-        let anyRecipients = !rankedFriends.isEmpty || !invitedContacts.isEmpty
+        let contactsAllOn = renderableInvitedContacts.isEmpty
+            || renderableInvitedContacts.allSatisfy { selectedContacts.contains($0.id) }
+        let anyRecipients = !rankedFriends.isEmpty || !renderableInvitedContacts.isEmpty
         return anyRecipients && friendsAllOn && contactsAllOn
     }
 
@@ -67,9 +97,11 @@ struct FriendSelectorView: View {
                 Spacer(minLength: 16)
                 titleBlock
                 Spacer(minLength: 16)
-                previewControls
-                    .padding(.horizontal, 40)
-                Spacer(minLength: 20)
+                if item.kind == .song {
+                    previewControls
+                        .padding(.horizontal, 40)
+                    Spacer(minLength: 20)
+                }
                 sendButton
                 Spacer()
                 friendChipRow
@@ -96,13 +128,10 @@ struct FriendSelectorView: View {
         .animation(.spring(duration: 0.3), value: showSentAnimation)
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .task {
-            // Resolve once per-appearance so the "Open in Spotify" pill can
-            // jump straight into the app. `resolveSpotifyURL` is
-            // cache-first (local → Firestore global) and only hits the
-            // network on true cache misses, so this is cheap to fire
-            // every time the view appears. No-op when the user prefers
-            // Apple Music, when the song already ships with a Spotify
-            // URI, or when there's no Apple-Music URL to translate from.
+            // Resolve once per-appearance so the "Open in Spotify"
+            // pill can jump straight into the app. Skipped for
+            // non-song payloads — there's no single track to resolve.
+            guard let song else { return }
             if appState.preferredMusicService == .spotify,
                SpotifyDeepLinkResolver.spotifyTrackID(for: song, resolvedSpotifyURL: nil) == nil,
                let amURL = song.appleMusicURL {
@@ -118,36 +147,83 @@ struct FriendSelectorView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showSaveSheet) {
+            // Branch the save sheet by payload. Mixtapes never reach
+            // here (the bookmark button is hidden) so we only need
+            // song / album cases.
+            switch item {
+            case .song(let s):
+                SaveToMixtapeSheet(song: s, appState: appState)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            case .album(let a):
+                SaveAlbumToMixtapeSheet(album: a, appState: appState)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            case .mixtape:
+                EmptyView()
+            }
+        }
+    }
+
+    /// Whether the bookmark/save-to-mixtape affordance should render.
+    /// Hidden for mixtapes (see `showSaveSheet` doc).
+    private var canSaveItem: Bool {
+        switch item.kind {
+        case .song, .album: return true
+        case .mixtape:      return false
+        }
     }
 
     // MARK: - Artwork + title
 
+    /// Square artwork tile. Songs and albums render their server-side
+    /// artwork URL; mixtapes composite from their songs via
+    /// `MixtapeCoverView`. The note pill overlay is the same in all
+    /// three cases — it's part of the share affordance, not the
+    /// payload's identity.
     private var artwork: some View {
+        ZStack {
+            switch item {
+            case .song(let s):
+                artworkURL(s.albumArtURL)
+            case .album(let a):
+                artworkURL(a.artworkURL)
+            case .mixtape(let m):
+                MixtapeCoverView(mixtape: m, cornerRadius: 20, showsShadow: false)
+            }
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .frame(maxWidth: 280)
+        .clipShape(.rect(cornerRadius: 20))
+        .shadow(color: .black.opacity(0.4), radius: 16, x: 0, y: 8)
+        .overlay(alignment: .bottom) {
+            notePill
+                .padding(.horizontal, 16)
+                .padding(.bottom, 20)
+        }
+        .padding(.horizontal, 40)
+    }
+
+    /// Renders a server-side artwork URL with the same placeholder fill
+    /// the original song-only view used. Pulled into a helper so
+    /// song/album branches in `artwork` stay short.
+    private func artworkURL(_ url: String) -> some View {
         Color(.systemGray5)
-            .aspectRatio(1, contentMode: .fit)
-            .frame(maxWidth: 280)
             .overlay {
-                AsyncImage(url: URL(string: song.albumArtURL)) { phase in
+                AsyncImage(url: URL(string: url)) { phase in
                     if let image = phase.image {
                         image.resizable().aspectRatio(contentMode: .fill)
                     }
                 }
                 .allowsHitTesting(false)
             }
-            .clipShape(.rect(cornerRadius: 20))
-            .shadow(color: .black.opacity(0.4), radius: 16, x: 0, y: 8)
-            .overlay(alignment: .bottom) {
-                notePill
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 20)
-            }
-            .padding(.horizontal, 40)
     }
 
-    /// Blur-material message bubble overlaid on the album art. The root
-    /// ZStack ignores the keyboard safe area, so nothing in the layout shifts
-    /// when this field focuses — the keyboard simply slides up over the
-    /// chip row and Send button below.
+    /// Blur-material message bubble overlaid on the artwork. The root
+    /// ZStack ignores the keyboard safe area, so nothing in the layout
+    /// shifts when this field focuses — the keyboard simply slides up
+    /// over the chip row and Send button below.
     private var notePill: some View {
         TextField(
             "",
@@ -172,9 +248,9 @@ struct FriendSelectorView: View {
         .shadow(color: .white.opacity(0.18), radius: 10, x: 0, y: 0)
         .onChange(of: note) { _, newValue in
             // `axis: .vertical` TextFields swallow `onSubmit` on Return
-            // and insert a newline instead. Strip newlines as they arrive
-            // and treat them as a dismiss request, matching the spec
-            // (Enter = finish, never multiline-by-Enter).
+            // and insert a newline instead. Strip newlines as they
+            // arrive and treat them as a dismiss request, matching
+            // the spec (Enter = finish, never multiline-by-Enter).
             if newValue.contains("\n") {
                 note = newValue.replacingOccurrences(of: "\n", with: "")
                 isNoteFocused = false
@@ -186,96 +262,156 @@ struct FriendSelectorView: View {
 
     private var titleBlock: some View {
         VStack(spacing: 4) {
-            Text(song.title)
+            Text(item.title)
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
-            Text(song.artist)
-                .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.55))
-                .lineLimit(1)
+            if !item.subtitle.isEmpty {
+                Text(item.subtitle)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(1)
+            }
         }
         .padding(.horizontal, 24)
     }
 
     // MARK: - Preview controls
 
-    /// Inline scrub bar + play/pause so users can audition the track while
-    /// picking recipients. The "Open in Spotify / Apple Music" pill sits
-    /// on the same row as the play button — same layout as the feed card
-    /// so the share view feels like a continuation rather than a separate
-    /// surface. Service honors `appState.preferredMusicService`, set once
-    /// during onboarding.
+    /// Inline scrub bar + play/pause for the song-only case. Albums
+    /// and mixtapes don't have a single audition target, so the parent
+    /// `body` skips this row when `item.kind != .song`.
     private var previewControls: some View {
         VStack(spacing: 10) {
-            ScrubBarView(songId: song.id, fallbackDuration: song.duration)
+            if let song {
+                ScrubBarView(songId: song.id, fallbackDuration: song.duration)
 
-            HStack(spacing: 10) {
-                Button {
-                    audioPlayer.play(song: song)
-                } label: {
-                    ZStack {
-                        if isCurrentSong && audioPlayer.isLoading {
-                            ProgressView()
-                                .tint(.black)
-                                .scaleEffect(0.8)
-                        } else {
-                            Image(systemName: isPlayingThis ? "pause.fill" : "play.fill")
-                                .font(.system(size: 15, weight: .semibold))
-                                .contentTransition(.symbolEffect(.replace))
+                HStack(spacing: 10) {
+                    Button {
+                        audioPlayer.play(song: song)
+                    } label: {
+                        ZStack {
+                            if isCurrentSong && audioPlayer.isLoading {
+                                ProgressView()
+                                    .tint(.black)
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: isPlayingThis ? "pause.fill" : "play.fill")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .contentTransition(.symbolEffect(.replace))
+                            }
                         }
+                        .foregroundStyle(.black)
+                        .frame(width: 52, height: 40)
+                        .background(.white)
+                        .clipShape(.capsule)
                     }
-                    .foregroundStyle(.black)
-                    .frame(width: 52, height: 40)
-                    .background(.white)
-                    .clipShape(.capsule)
-                }
-                .sensoryFeedback(.impact(weight: .light), trigger: isPlayingThis)
+                    .sensoryFeedback(.impact(weight: .light), trigger: isPlayingThis)
 
-                openInServiceButton(
-                    song: song,
-                    service: appState.preferredMusicService,
-                    resolvedSpotifyURL: resolvedSpotifyURL,
-                    shareId: shareId
-                )
+                    openInServiceButton(
+                        song: song,
+                        service: appState.preferredMusicService,
+                        resolvedSpotifyURL: resolvedSpotifyURL,
+                        shareId: shareId
+                    )
+                }
             }
         }
     }
 
     // MARK: - Send button
 
+    /// Send + (optional) save row. The Send button stays the primary
+    /// affordance — same 72pt accent circle as before. The bookmark
+    /// floats off to the side as a secondary 44pt circle so it is
+    /// clearly demoted in visual weight (Send is the action the user
+    /// is here to take; save is a "while I'm at it" detour). Hidden
+    /// entirely for mixtape payloads — see `canSaveItem`.
     private var sendButton: some View {
-        Button {
-            guard canSend else { return }
-            showSentAnimation = true
-            let friends = resolveSelectedFriends()
-            let contacts = resolveSelectedContacts()
-            let noteToSend = note
-            Task {
-                for friend in friends {
-                    await appState.sendSong(song, to: friend, note: noteToSend)
+        ZStack {
+            Button {
+                commitSend()
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(canSend ? Color(red: 0.76, green: 0.38, blue: 0.35) : Color.white.opacity(0.1))
+                        .frame(width: 72, height: 72)
+
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(canSend ? .white : .white.opacity(0.3))
+                        .offset(x: -2)
                 }
-                for contact in contacts {
-                    _ = await appState.sendSongToPendingContact(song, contact: contact, note: noteToSend)
-                }
-                try? await Task.sleep(for: .seconds(1.2))
-                onSent()
             }
+            .disabled(!canSend)
+            .sensoryFeedback(.success, trigger: showSentAnimation)
+            .animation(.easeInOut(duration: 0.15), value: canSend)
+
+            if canSaveItem {
+                // Anchored 44pt to the trailing side of the Send
+                // circle. Using a ZStack + offset (rather than an
+                // HStack) keeps Send centered horizontally; otherwise
+                // adding a sibling button would visually shift Send
+                // off-axis. 56pt of horizontal space between centers
+                // (36 + 20) keeps the two affordances clearly
+                // separate without crowding.
+                saveButton
+                    .offset(x: 72)
+            }
+        }
+    }
+
+    /// Secondary save-to-mixtape affordance. Bookmark icon, neutral
+    /// fill, no badge — the share view is for outbound action; saving
+    /// is a sidecar. Hidden for mixtape payloads.
+    private var saveButton: some View {
+        Button {
+            showSaveSheet = true
         } label: {
             ZStack {
                 Circle()
-                    .fill(canSend ? Color(red: 0.76, green: 0.38, blue: 0.35) : Color.white.opacity(0.1))
-                    .frame(width: 72, height: 72)
+                    .fill(Color.white.opacity(0.1))
+                    .frame(width: 44, height: 44)
 
-                Image(systemName: "paperplane.fill")
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(canSend ? .white : .white.opacity(0.3))
-                    .offset(x: -2)
+                Image(systemName: "bookmark")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.85))
             }
         }
-        .disabled(!canSend)
-        .sensoryFeedback(.success, trigger: showSentAnimation)
-        .animation(.easeInOut(duration: 0.15), value: canSend)
+        .accessibilityLabel(item.kind == .album ? "Save album to mixtape" : "Save to mixtape")
+    }
+
+    /// Dispatches the send based on the payload kind. Songs fan out
+    /// per-recipient (so each `SongShare` gets its own Firestore doc
+    /// and each invited contact gets its own pending invite write);
+    /// albums and mixtapes hit `appState` once with the whole
+    /// recipient list, since those backends batch the fan-out
+    /// server-side.
+    private func commitSend() {
+        guard canSend else { return }
+        showSentAnimation = true
+        let friends = resolveSelectedFriends()
+        let contacts = resolveSelectedContacts()
+        let noteToSend = note.isEmpty ? nil : note
+        let payload = item
+
+        Task {
+            switch payload {
+            case .song(let s):
+                for friend in friends {
+                    await appState.sendSong(s, to: friend, note: noteToSend)
+                }
+                for contact in contacts {
+                    _ = await appState.sendSongToPendingContact(s, contact: contact, note: noteToSend)
+                }
+            case .album(let a):
+                await appState.sendAlbum(a, to: friends, note: noteToSend)
+            case .mixtape(let m):
+                await appState.sendMixtape(m, to: friends, note: noteToSend)
+            }
+            try? await Task.sleep(for: .seconds(1.2))
+            onSent()
+        }
     }
 
     // MARK: - Friend chip row
@@ -287,7 +423,7 @@ struct FriendSelectorView: View {
                 ForEach(rankedFriends) { friend in
                     friendChip(friend)
                 }
-                ForEach(invitedContacts) { contact in
+                ForEach(renderableInvitedContacts) { contact in
                     contactChip(contact)
                 }
                 addFriendsChip
@@ -303,14 +439,14 @@ struct FriendSelectorView: View {
                 for user in rankedFriends {
                     selectedFriends.remove(user.id)
                 }
-                for contact in invitedContacts {
+                for contact in renderableInvitedContacts {
                     selectedContacts.remove(contact.id)
                 }
             } else {
                 for user in rankedFriends {
                     selectedFriends.insert(user.id)
                 }
-                for contact in invitedContacts {
+                for contact in renderableInvitedContacts {
                     selectedContacts.insert(contact.id)
                 }
             }
@@ -322,7 +458,7 @@ struct FriendSelectorView: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(rankedFriends.isEmpty && invitedContacts.isEmpty)
+        .disabled(rankedFriends.isEmpty && renderableInvitedContacts.isEmpty)
     }
 
     private func friendChip(_ friend: AppUser) -> some View {
@@ -344,9 +480,9 @@ struct FriendSelectorView: View {
     }
 
     /// Chip for a pending-signup contact. Visually consistent with
-    /// `friendChip` but carries an "INVITED" micro-badge so the user can
-    /// tell apart a real account from someone who will only receive the
-    /// song once they finish signup.
+    /// `friendChip` but carries an "INVITED" micro-badge so the user
+    /// can tell apart a real account from someone who will only
+    /// receive the song once they finish signup.
     private func contactChip(_ contact: SimpleContact) -> some View {
         let isSelected = selectedContacts.contains(contact.id)
         let label = contact.firstName.isEmpty ? contact.phoneNumber : contact.firstName
@@ -402,8 +538,8 @@ struct FriendSelectorView: View {
         .buttonStyle(.plain)
     }
 
-    /// Shared chip layout: 56 pt circular body + first-name caption, with a
-    /// selection ring that mirrors the Send button's accent color.
+    /// Shared chip layout: 56 pt circular body + first-name caption,
+    /// with a selection ring that mirrors the Send button's accent.
     @ViewBuilder
     private func chipLayout<Content: View>(
         label: String,
@@ -455,7 +591,7 @@ struct FriendSelectorView: View {
     private func resolveSelectedContacts() -> [SimpleContact] {
         var seen = Set<String>()
         var result: [SimpleContact] = []
-        for contact in invitedContacts where selectedContacts.contains(contact.id) && !seen.contains(contact.id) {
+        for contact in renderableInvitedContacts where selectedContacts.contains(contact.id) && !seen.contains(contact.id) {
             seen.insert(contact.id)
             result.append(contact)
         }

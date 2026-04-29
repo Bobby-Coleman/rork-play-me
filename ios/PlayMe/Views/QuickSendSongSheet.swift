@@ -11,9 +11,15 @@ struct QuickSendSongSheet: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var detailArtist: ArtistSummary?
     @State private var detailAlbum: Album?
+    /// Album the user wants to share with a friend. Save-to-mixtape for
+    /// albums lives behind the share view's bookmark icon, not the
+    /// search-result row, so this view doesn't need a `saveAlbum`
+    /// counterpart.
+    @State private var shareAlbum: Album?
     @State private var note: String = ""
     @State private var isSending: Bool = false
     @FocusState private var isNoteFocused: Bool
+    @FocusState private var isSearchFocused: Bool
     @State private var audioPlayer: AudioPlayerService = .shared
 
     var body: some View {
@@ -65,6 +71,23 @@ struct QuickSendSongSheet: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(item: $shareAlbum) { album in
+            // Routes album shares through the unified share view, same
+            // as the song flow. Internal branching renders the album
+            // artwork and dispatches via `appState.sendAlbum` rather
+            // than per-recipient song writes.
+            NavigationStack {
+                FriendSelectorView(
+                    item: .album(album),
+                    appState: appState,
+                    onBack: { shareAlbum = nil },
+                    onSent: { shareAlbum = nil }
+                )
+            }
+            .presentationBackground(.black)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private var songSearchView: some View {
@@ -83,6 +106,12 @@ struct QuickSendSongSheet: View {
                 TextField("Search songs or artists...", text: $searchText)
                     .foregroundStyle(.white)
                     .autocorrectionDisabled()
+                    .focused($isSearchFocused)
+                    .submitLabel(.search)
+                    // Return collapses focus; swipe-down on the
+                    // results scroll view also dismisses the keyboard
+                    // via `scrollDismissesKeyboard(.interactively)`.
+                    .onSubmit { isSearchFocused = false }
                     .onChange(of: searchText) { _, newValue in
                         performSearch(newValue)
                     }
@@ -200,9 +229,11 @@ struct QuickSendSongSheet: View {
                 appState.searchFilter = .albums
             } : nil)
             ForEach(albums) { album in
-                AlbumResultRow(album: album) {
-                    detailAlbum = album
-                }
+                AlbumResultRow(
+                    album: album,
+                    onTap: { detailAlbum = album },
+                    onShareTap: { shareAlbum = album }
+                )
                 .id(album.id)
                 .overlay(alignment: .bottom) {
                     Color.white.opacity(0.05).frame(height: 0.5)
@@ -234,9 +265,11 @@ struct QuickSendSongSheet: View {
     @ViewBuilder
     private var albumsFullList: some View {
         ForEach(appState.searchResults.albums) { album in
-            AlbumResultRow(album: album) {
-                detailAlbum = album
-            }
+            AlbumResultRow(
+                album: album,
+                onTap: { detailAlbum = album },
+                onShareTap: { shareAlbum = album }
+            )
             .id(album.id)
             .overlay(alignment: .bottom) {
                 Color.white.opacity(0.05).frame(height: 0.5)
@@ -255,9 +288,11 @@ struct QuickSendSongSheet: View {
         case .song(let song):
             songRow(song)
         case .album(let album):
-            AlbumResultRow(album: album) {
-                detailAlbum = album
-            }
+            AlbumResultRow(
+                album: album,
+                onTap: { detailAlbum = album },
+                onShareTap: { shareAlbum = album }
+            )
             .id(album.id)
         }
     }

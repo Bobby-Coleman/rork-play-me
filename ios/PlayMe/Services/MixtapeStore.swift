@@ -78,18 +78,22 @@ final class MixtapeStore {
     // MARK: - CRUD
 
     @discardableResult
-    func create(name: String) async -> Mixtape? {
+    func create(name: String, coverImageURL: String, isPrivate: Bool = false) async -> Mixtape? {
         let firebase = FirebaseService.shared
         guard firebase.isSignedIn, let uid = firebase.firebaseUID else { return nil }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        let cover = coverImageURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cover.isEmpty else { return nil }
 
-        guard let id = await firebase.createMixtape(name: trimmed) else { return nil }
+        guard let id = await firebase.createMixtape(name: trimmed, coverImageURL: cover, isPrivate: isPrivate) else { return nil }
         let now = Date()
         let mixtape = Mixtape(
             id: id,
             ownerId: uid,
             name: trimmed,
+            coverImageURL: cover,
+            isPrivate: isPrivate,
             createdAt: now,
             updatedAt: now,
             songs: []
@@ -105,6 +109,22 @@ final class MixtapeStore {
         await FirebaseService.shared.renameMixtape(mixtapeId: mixtapeId, to: trimmed)
         if let idx = userMixtapes.firstIndex(where: { $0.id == mixtapeId }) {
             userMixtapes[idx].name = trimmed
+            userMixtapes[idx].updatedAt = Date()
+            resortByUpdatedAt()
+        }
+    }
+
+    /// Writes the owner's "what is this mixtape about" blurb. Pass `nil`
+    /// or an empty/whitespace string to clear it — we normalize both into
+    /// `description = nil` locally so the detail header hides the line
+    /// without the caller having to nil-coalesce.
+    func updateDescription(mixtapeId: String, to newDescription: String?) async {
+        guard !isSystemLiked(mixtapeId) else { return }
+        let trimmed = newDescription?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let normalized: String? = trimmed.isEmpty ? nil : trimmed
+        await FirebaseService.shared.updateMixtapeDescription(mixtapeId: mixtapeId, to: normalized)
+        if let idx = userMixtapes.firstIndex(where: { $0.id == mixtapeId }) {
+            userMixtapes[idx].description = normalized
             userMixtapes[idx].updatedAt = Date()
             resortByUpdatedAt()
         }

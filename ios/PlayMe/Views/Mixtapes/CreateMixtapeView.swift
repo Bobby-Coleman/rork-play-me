@@ -1,29 +1,44 @@
 import SwiftUI
+import PhotosUI
 
-/// Modal name-entry sheet pushed from `SaveToMixtapeSheet` when the user
-/// taps "Create new mixtape". Creates the mixtape via `MixtapeStore.create`
-/// and, on success, immediately adds the song that triggered the sheet so
-/// the user lands back in `SaveToMixtapeSheet` with the new mixtape
-/// already containing the song.
+/// Modal pushed from `SaveToMixtapeSheet` (or album-save) when the user
+/// creates a new mixtape. Cover image is **required** — the user picks
+/// from the photo library, we resize/crop/JPEG and upload to Firebase
+/// Storage, then create the Firestore doc with the download URL.
 struct CreateMixtapeView: View {
-    let song: Song
+    /// When non-nil, the new mixtape is created with this song already
+    /// added (save-to-mixtape flow). When nil, creates an empty mixtape
+    /// (album-save "new mixtape" path).
+    var seedSong: Song?
     let appState: AppState
-    /// Callback invoked once the mixtape is created and the song is added,
-    /// so the parent sheet can either dismiss itself or refresh state.
+    /// Callback invoked once the mixtape is created (and the seed song
+    /// added when applicable).
     var onCreated: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var name: String = ""
+    @State private var details: String = ""
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var pickedImage: UIImage?
     @State private var isCreating: Bool = false
     @State private var errorMessage: String?
-    @FocusState private var nameFocused: Bool
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable { case name, details }
+
+    private let descriptionLimit = 300
 
     private var trimmed: String {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var trimmedDetails: String? {
+        let t = details.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+
     private var canCreate: Bool {
-        !trimmed.isEmpty && !isCreating
+        !trimmed.isEmpty && pickedImage != nil && !isCreating
     }
 
     var body: some View {
@@ -32,37 +47,66 @@ struct CreateMixtapeView: View {
                 Color.black.ignoresSafeArea()
 
                 VStack(spacing: 24) {
-                    AlbumArtSquare(url: song.albumArtURL, showsShadow: true)
-                        .frame(width: 140, height: 140)
-                        .padding(.top, 32)
+                    coverPickerSection
+                        .padding(.top, 24)
 
-                    VStack(spacing: 6) {
+                    if let seedSong {
+                        VStack(spacing: 6) {
+                            Text("New mixtape")
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundStyle(.white)
+                            Text("Save \(seedSong.title) to a new collection.")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.white.opacity(0.6))
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
+                        }
+                        .padding(.horizontal, 24)
+                    } else {
                         Text("New mixtape")
                             .font(.system(size: 22, weight: .bold))
                             .foregroundStyle(.white)
-                        Text("Save \(song.title) to a new collection.")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
                     }
-                    .padding(.horizontal, 24)
 
-                    TextField(
-                        "",
-                        text: $name,
-                        prompt: Text("Mixtape name").foregroundColor(.white.opacity(0.4))
-                    )
-                    .focused($nameFocused)
-                    .submitLabel(.done)
-                    .onSubmit { Task { await create() } }
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(.white)
-                    .tint(.white)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 14)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(.rect(cornerRadius: 14))
+                    VStack(spacing: 12) {
+                        TextField(
+                            "",
+                            text: $name,
+                            prompt: Text("Mixtape name").foregroundColor(.white.opacity(0.4))
+                        )
+                        .focused($focusedField, equals: .name)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .details }
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(.white)
+                        .tint(.white)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 14)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(.rect(cornerRadius: 14))
+
+                        TextField(
+                            "",
+                            text: $details,
+                            prompt: Text("Description (optional)").foregroundColor(.white.opacity(0.4)),
+                            axis: .vertical
+                        )
+                        .lineLimit(2...4)
+                        .focused($focusedField, equals: .details)
+                        .submitLabel(.done)
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white)
+                        .tint(.white)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 12)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(.rect(cornerRadius: 14))
+                        .onChange(of: details) { _, newValue in
+                            if newValue.count > descriptionLimit {
+                                details = String(newValue.prefix(descriptionLimit))
+                            }
+                        }
+                    }
                     .padding(.horizontal, 24)
 
                     if let errorMessage {
@@ -107,19 +151,103 @@ struct CreateMixtapeView: View {
         }
         .presentationBackground(.black)
         .preferredColorScheme(.dark)
-        .onAppear { nameFocused = true }
+        .onAppear { focusedField = .name }
+        .onChange(of: pickerItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                await loadPickedImage(from: newItem)
+            }
+        }
+    }
+
+    private var coverPickerSection: some View {
+        VStack(spacing: 12) {
+            PhotosPicker(selection: $pickerItem, matching: .images) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.white.opacity(0.08))
+                        .frame(width: 160, height: 160)
+
+                    if let pickedImage {
+                        Image(uiImage: pickedImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 160, height: 160)
+                            .clipShape(.rect(cornerRadius: 16))
+                            .overlay(alignment: .topTrailing) {
+                                Text("Change")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(.black.opacity(0.55))
+                                    .clipShape(.capsule)
+                                    .padding(8)
+                            }
+                    } else {
+                        VStack(spacing: 8) {
+                            Image(systemName: "photo.on.rectangle.angled")
+                                .font(.system(size: 32))
+                                .foregroundStyle(.white.opacity(0.45))
+                            Text("Add cover")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.75))
+                        }
+                    }
+
+                    if isCreating {
+                        Color.black.opacity(0.45)
+                        ProgressView()
+                            .tint(.white)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isCreating)
+
+            Text("Cover is required")
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.35))
+        }
+    }
+
+    private func loadPickedImage(from item: PhotosPickerItem) async {
+        do {
+            if let data = try await item.loadTransferable(type: Data.self),
+               let ui = UIImage(data: data) {
+                await MainActor.run {
+                    pickedImage = ui
+                    errorMessage = nil
+                }
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Couldn't read that photo. Try another."
+            }
+        }
     }
 
     private func create() async {
-        guard canCreate else { return }
+        guard canCreate, let image = pickedImage else { return }
         isCreating = true
         errorMessage = nil
-        if let mixtape = await appState.mixtapeStore.create(name: trimmed) {
-            await appState.mixtapeStore.addSong(song, to: mixtape.id)
-            onCreated?()
-            dismiss()
-        } else {
-            errorMessage = "Couldn't create mixtape. Check your connection and try again."
+        do {
+            let coverURL = try await MixtapeCoverUploader.shared.uploadPickedImage(image)
+            if let mixtape = await appState.mixtapeStore.create(name: trimmed, coverImageURL: coverURL) {
+                if let seedSong {
+                    await appState.mixtapeStore.addSong(seedSong, to: mixtape.id)
+                }
+                if let blurb = trimmedDetails {
+                    await appState.mixtapeStore.updateDescription(mixtapeId: mixtape.id, to: blurb)
+                }
+                onCreated?()
+                dismiss()
+            } else {
+                errorMessage = "Couldn't create mixtape. Check your connection and try again."
+                isCreating = false
+            }
+        } catch {
+            errorMessage = "Couldn't upload cover. \(error.localizedDescription)"
             isCreating = false
         }
     }

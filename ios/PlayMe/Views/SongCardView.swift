@@ -147,7 +147,7 @@ struct SongCardView: View {
             .sheet(isPresented: $showShareFlow) {
                 NavigationStack {
                     FriendSelectorView(
-                        song: share.song,
+                        item: .song(share.song),
                         appState: appState,
                         shareId: share.id,
                         onBack: { showShareFlow = false },

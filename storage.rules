@@ -1,0 +1,17 @@
+rules_version = '2';
+
+// Public read on mixtape cover images; writes restricted to the owning
+// Firebase Auth uid path. JPEG only, max 5 MB — matches client-side crop
+// (~30–80 KB typical) but leaves headroom for accidental PNG uploads
+// before client validation tightens.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /mixtape-covers/{userId}/{fileName} {
+      allow read: if true;
+      allow write: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType == 'image/jpeg';
+    }
+  }
+}

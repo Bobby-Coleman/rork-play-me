@@ -20,6 +20,12 @@ struct SendSongSheet: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var detailArtist: ArtistSummary?
     @State private var detailAlbum: Album?
+    /// Album the user wants to share with friends. Optional-driven
+    /// recipient picker — same pattern as the mixtape-share button.
+    /// Save-to-mixtape for albums is reached from the share view's
+    /// bookmark icon, not from the search-result row, so there is no
+    /// `saveAlbum` state mirrored here.
+    @State private var shareAlbum: Album?
     @State private var audioPlayer: AudioPlayerService = .shared
     @FocusState private var isSearchFocused: Bool
 
@@ -33,7 +39,7 @@ struct SendSongSheet: View {
                         .transition(.asymmetric(insertion: .move(edge: .leading), removal: .move(edge: .leading)))
                 } else {
                     FriendSelectorView(
-                        song: selectedSong!,
+                        item: .song(selectedSong!),
                         appState: appState,
                         invitedContacts: invitedContacts,
                         onBack: { withAnimation(.spring(duration: 0.3)) { step = 0 } },
@@ -94,6 +100,24 @@ struct SendSongSheet: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(item: $shareAlbum) { album in
+            // Album shares run through the same unified share view as
+            // songs. The view branches internally on `.album(...)` to
+            // render the album artwork and dispatch via
+            // `appState.sendAlbum` instead of the per-recipient song
+            // fan-out.
+            NavigationStack {
+                FriendSelectorView(
+                    item: .album(album),
+                    appState: appState,
+                    onBack: { shareAlbum = nil },
+                    onSent: { shareAlbum = nil }
+                )
+            }
+            .presentationBackground(.black)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private var songSearchView: some View {
@@ -114,6 +138,12 @@ struct SendSongSheet: View {
                     .tint(.white)
                     .autocorrectionDisabled()
                     .focused($isSearchFocused)
+                    .submitLabel(.search)
+                    // Return collapses focus so the user can browse
+                    // results without the keyboard occluding rows.
+                    // Swipe-to-dismiss is handled by the ScrollView's
+                    // `scrollDismissesKeyboard(.interactively)` below.
+                    .onSubmit { isSearchFocused = false }
                     .onChange(of: searchText) { _, newValue in
                         performSearch(newValue)
                     }
@@ -239,9 +269,11 @@ struct SendSongSheet: View {
                 appState.searchFilter = .albums
             } : nil)
             ForEach(albums) { album in
-                AlbumResultRow(album: album) {
-                    detailAlbum = album
-                }
+                AlbumResultRow(
+                    album: album,
+                    onTap: { detailAlbum = album },
+                    onShareTap: { shareAlbum = album }
+                )
                 .id(album.id)
                 .overlay(alignment: .bottom) {
                     Color.white.opacity(0.05).frame(height: 0.5)
@@ -273,9 +305,11 @@ struct SendSongSheet: View {
     @ViewBuilder
     private var albumsFullList: some View {
         ForEach(appState.searchResults.albums) { album in
-            AlbumResultRow(album: album) {
-                detailAlbum = album
-            }
+            AlbumResultRow(
+                album: album,
+                onTap: { detailAlbum = album },
+                onShareTap: { shareAlbum = album }
+            )
             .id(album.id)
             .overlay(alignment: .bottom) {
                 Color.white.opacity(0.05).frame(height: 0.5)
@@ -298,9 +332,11 @@ struct SendSongSheet: View {
         case .song(let song):
             songRow(song)
         case .album(let album):
-            AlbumResultRow(album: album) {
-                detailAlbum = album
-            }
+            AlbumResultRow(
+                album: album,
+                onTap: { detailAlbum = album },
+                onShareTap: { shareAlbum = album }
+            )
             .id(album.id)
         }
     }

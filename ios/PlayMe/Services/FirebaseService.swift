@@ -463,6 +463,317 @@ class FirebaseService {
             }
     }
 
+    // MARK: - Mixtape Shares
+
+    /// Persists one row per recipient in `mixtapeShares/{id}`. Returns
+    /// the new doc IDs in `recipient.id` order so the caller can map
+    /// back to who got what (rarely needed, but cheap to surface).
+    /// Snapshot semantics match `saveShare`: the full mixtape payload —
+    /// name, description, embedded songs — is frozen into the share
+    /// doc so the recipient's view never needs a cross-account read.
+    @discardableResult
+    func saveMixtapeShare(_ share: MixtapeShare) async -> String? {
+        guard let uid = firebaseUID else { return nil }
+        let payload: [String: Any] = [
+            "senderId": uid,
+            "recipientId": share.recipient.id,
+            "recipientUsername": share.recipient.username,
+            "note": share.note as Any,
+            "timestamp": FieldValue.serverTimestamp(),
+            "mixtape": [
+                "id": share.mixtape.id,
+                "ownerId": share.mixtape.ownerId,
+                "name": share.mixtape.name,
+                "description": share.mixtape.description as Any,
+                "coverImageURL": share.mixtape.coverImageURL as Any,
+                "isPrivate": share.mixtape.isPrivate,
+                "createdAt": Timestamp(date: share.mixtape.createdAt),
+                "updatedAt": Timestamp(date: share.mixtape.updatedAt),
+                "songs": share.mixtape.songs.map(Self.embedSong),
+            ],
+            "sender": [
+                "id": uid,
+                "firstName": share.sender.firstName,
+                "lastName": share.sender.lastName,
+                "username": share.sender.username,
+            ],
+            "recipient": [
+                "id": share.recipient.id,
+                "firstName": share.recipient.firstName,
+                "lastName": share.recipient.lastName,
+                "username": share.recipient.username,
+            ],
+        ]
+        do {
+            let ref = try await db.collection("mixtapeShares").addDocument(data: payload)
+            return ref.documentID
+        } catch {
+            print("FirebaseService: saveMixtapeShare failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func loadReceivedMixtapeShares() async -> [MixtapeShare] {
+        guard let uid = firebaseUID else { return [] }
+        do {
+            let snap = try await db.collection("mixtapeShares")
+                .whereField("recipientId", isEqualTo: uid)
+                .order(by: "timestamp", descending: true)
+                .limit(to: 50)
+                .getDocuments()
+            return snap.documents.compactMap { Self.parseMixtapeShare(from: $0) }
+        } catch {
+            print("FirebaseService: loadReceivedMixtapeShares failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func loadSentMixtapeShares() async -> [MixtapeShare] {
+        guard let uid = firebaseUID else { return [] }
+        do {
+            let snap = try await db.collection("mixtapeShares")
+                .whereField("senderId", isEqualTo: uid)
+                .order(by: "timestamp", descending: true)
+                .limit(to: 50)
+                .getDocuments()
+            return snap.documents.compactMap { Self.parseMixtapeShare(from: $0) }
+        } catch {
+            print("FirebaseService: loadSentMixtapeShares failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func listenReceivedMixtapeShares(onChange: @escaping @Sendable ([MixtapeShare]) -> Void) -> ListenerRegistration? {
+        guard let uid = firebaseUID else { return nil }
+        return db.collection("mixtapeShares")
+            .whereField("recipientId", isEqualTo: uid)
+            .order(by: "timestamp", descending: true)
+            .limit(to: 50)
+            .addSnapshotListener { snapshot, error in
+                if let error {
+                    print("FirebaseService: listen mixtape shares failed: \(error.localizedDescription)")
+                    return
+                }
+                guard let docs = snapshot?.documents else { return }
+                onChange(docs.compactMap { Self.parseMixtapeShare(from: $0) })
+            }
+    }
+
+    // MARK: - Album Shares
+
+    /// Persists one row per recipient in `albumShares/{id}`. Same
+    /// snapshot semantics as song / mixtape shares — full track list
+    /// is frozen into the doc so the recipient view is self-contained.
+    @discardableResult
+    func saveAlbumShare(_ share: AlbumShare) async -> String? {
+        guard let uid = firebaseUID else { return nil }
+        let payload: [String: Any] = [
+            "senderId": uid,
+            "recipientId": share.recipient.id,
+            "recipientUsername": share.recipient.username,
+            "note": share.note as Any,
+            "timestamp": FieldValue.serverTimestamp(),
+            "album": [
+                "id": share.album.id,
+                "name": share.album.name,
+                "artworkURL": share.album.artworkURL,
+                "releaseYear": share.album.releaseYear as Any,
+                "trackCount": share.album.trackCount as Any,
+                "primaryGenre": share.album.primaryGenre as Any,
+                "artistName": share.album.artistName as Any,
+            ],
+            "songs": share.songs.map(Self.embedSong),
+            "sender": [
+                "id": uid,
+                "firstName": share.sender.firstName,
+                "lastName": share.sender.lastName,
+                "username": share.sender.username,
+            ],
+            "recipient": [
+                "id": share.recipient.id,
+                "firstName": share.recipient.firstName,
+                "lastName": share.recipient.lastName,
+                "username": share.recipient.username,
+            ],
+        ]
+        do {
+            let ref = try await db.collection("albumShares").addDocument(data: payload)
+            return ref.documentID
+        } catch {
+            print("FirebaseService: saveAlbumShare failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func loadReceivedAlbumShares() async -> [AlbumShare] {
+        guard let uid = firebaseUID else { return [] }
+        do {
+            let snap = try await db.collection("albumShares")
+                .whereField("recipientId", isEqualTo: uid)
+                .order(by: "timestamp", descending: true)
+                .limit(to: 50)
+                .getDocuments()
+            return snap.documents.compactMap { Self.parseAlbumShare(from: $0) }
+        } catch {
+            print("FirebaseService: loadReceivedAlbumShares failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func loadSentAlbumShares() async -> [AlbumShare] {
+        guard let uid = firebaseUID else { return [] }
+        do {
+            let snap = try await db.collection("albumShares")
+                .whereField("senderId", isEqualTo: uid)
+                .order(by: "timestamp", descending: true)
+                .limit(to: 50)
+                .getDocuments()
+            return snap.documents.compactMap { Self.parseAlbumShare(from: $0) }
+        } catch {
+            print("FirebaseService: loadSentAlbumShares failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func listenReceivedAlbumShares(onChange: @escaping @Sendable ([AlbumShare]) -> Void) -> ListenerRegistration? {
+        guard let uid = firebaseUID else { return nil }
+        return db.collection("albumShares")
+            .whereField("recipientId", isEqualTo: uid)
+            .order(by: "timestamp", descending: true)
+            .limit(to: 50)
+            .addSnapshotListener { snapshot, error in
+                if let error {
+                    print("FirebaseService: listen album shares failed: \(error.localizedDescription)")
+                    return
+                }
+                guard let docs = snapshot?.documents else { return }
+                onChange(docs.compactMap { Self.parseAlbumShare(from: $0) })
+            }
+    }
+
+    // MARK: - Share parse helpers (mixtape / album)
+
+    /// Embed a `Song` value into a Firestore-friendly map. Centralised
+    /// so the song-share, mixtape-share, and album-share writers all
+    /// agree on shape, which keeps `parseEmbeddedSong` (used for
+    /// reads) the single source of truth.
+    private static func embedSong(_ song: Song) -> [String: Any] {
+        [
+            "id": song.id,
+            "title": song.title,
+            "artist": song.artist,
+            "albumArtURL": song.albumArtURL,
+            "duration": song.duration,
+            "spotifyURI": song.spotifyURI as Any,
+            "previewURL": song.previewURL as Any,
+            "appleMusicURL": song.appleMusicURL as Any,
+            "artistId": song.artistId as Any,
+            "albumId": song.albumId as Any,
+        ]
+    }
+
+    private static func parseMixtapeShare(from doc: QueryDocumentSnapshot) -> MixtapeShare? {
+        let data = doc.data()
+        guard let mixtapeData = data["mixtape"] as? [String: Any],
+              let senderData = data["sender"] as? [String: Any],
+              let recipientData = data["recipient"] as? [String: Any] else { return nil }
+
+        let mixtape = parseMixtapeFromShare(mixtapeData)
+        let sender = AppUser(
+            id: senderData["id"] as? String ?? "",
+            firstName: senderData["firstName"] as? String ?? "",
+            lastName: senderData["lastName"] as? String ?? "",
+            username: senderData["username"] as? String ?? "",
+            phone: ""
+        )
+        let recipient = AppUser(
+            id: recipientData["id"] as? String ?? "",
+            firstName: recipientData["firstName"] as? String ?? "",
+            lastName: recipientData["lastName"] as? String ?? "",
+            username: recipientData["username"] as? String ?? "",
+            phone: ""
+        )
+        let timestamp = (data["timestamp"] as? Timestamp)?.dateValue() ?? Date()
+
+        return MixtapeShare(
+            id: doc.documentID,
+            mixtape: mixtape,
+            sender: sender,
+            recipient: recipient,
+            note: data["note"] as? String,
+            timestamp: timestamp
+        )
+    }
+
+    private static func parseMixtapeFromShare(_ data: [String: Any]) -> Mixtape {
+        let id = data["id"] as? String ?? ""
+        let ownerId = data["ownerId"] as? String ?? ""
+        let name = data["name"] as? String ?? "Untitled mixtape"
+        let description = (data["description"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let createdAt = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
+        let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue() ?? createdAt
+        let rawSongs = data["songs"] as? [[String: Any]] ?? []
+        let songs = rawSongs.compactMap { parseEmbeddedSong(from: $0) }
+        let coverImageURL = (data["coverImageURL"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let isPrivate = data["isPrivate"] as? Bool ?? false
+        return Mixtape(
+            id: id,
+            ownerId: ownerId,
+            name: name,
+            description: description,
+            coverImageURL: coverImageURL,
+            isPrivate: isPrivate,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            songs: songs
+        )
+    }
+
+    private static func parseAlbumShare(from doc: QueryDocumentSnapshot) -> AlbumShare? {
+        let data = doc.data()
+        guard let albumData = data["album"] as? [String: Any],
+              let senderData = data["sender"] as? [String: Any],
+              let recipientData = data["recipient"] as? [String: Any] else { return nil }
+
+        let album = Album(
+            id: albumData["id"] as? String ?? "",
+            name: albumData["name"] as? String ?? "Untitled album",
+            artworkURL: albumData["artworkURL"] as? String ?? "",
+            releaseYear: albumData["releaseYear"] as? String,
+            trackCount: albumData["trackCount"] as? Int,
+            primaryGenre: albumData["primaryGenre"] as? String,
+            artistName: albumData["artistName"] as? String
+        )
+        let rawSongs = data["songs"] as? [[String: Any]] ?? []
+        let songs = rawSongs.compactMap { parseEmbeddedSong(from: $0) }
+
+        let sender = AppUser(
+            id: senderData["id"] as? String ?? "",
+            firstName: senderData["firstName"] as? String ?? "",
+            lastName: senderData["lastName"] as? String ?? "",
+            username: senderData["username"] as? String ?? "",
+            phone: ""
+        )
+        let recipient = AppUser(
+            id: recipientData["id"] as? String ?? "",
+            firstName: recipientData["firstName"] as? String ?? "",
+            lastName: recipientData["lastName"] as? String ?? "",
+            username: recipientData["username"] as? String ?? "",
+            phone: ""
+        )
+        let timestamp = (data["timestamp"] as? Timestamp)?.dateValue() ?? Date()
+
+        return AlbumShare(
+            id: doc.documentID,
+            album: album,
+            songs: songs,
+            sender: sender,
+            recipient: recipient,
+            note: data["note"] as? String,
+            timestamp: timestamp
+        )
+    }
+
     // MARK: - Friends
 
     /// Remove a bidirectional friendship. Deletes both sides so neither user
@@ -1606,6 +1917,7 @@ class FirebaseService {
     private func parseMixtape(from doc: QueryDocumentSnapshot, uid: String) async -> Mixtape? {
         let data = doc.data()
         guard let name = data["name"] as? String else { return nil }
+        let description = (data["description"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let createdAt = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
         let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue() ?? createdAt
         let songIds = data["songIds"] as? [String] ?? []
@@ -1633,10 +1945,16 @@ class FirebaseService {
             print("FirebaseService: fetch mixtape songs failed for \(doc.documentID): \(error.localizedDescription)")
         }
 
+        let coverImageURL = (data["coverImageURL"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let isPrivate = data["isPrivate"] as? Bool ?? false
+
         return Mixtape(
             id: doc.documentID,
             ownerId: uid,
             name: name,
+            description: description,
+            coverImageURL: coverImageURL,
+            isPrivate: isPrivate,
             createdAt: createdAt,
             updatedAt: updatedAt,
             songs: songs
@@ -1663,14 +1981,20 @@ class FirebaseService {
     }
 
     /// Creates a new (empty) mixtape and returns its Firestore document
-    /// id. Returns nil on failure or when not signed in.
-    func createMixtape(name: String) async -> String? {
+    /// id. `coverImageURL` must be a non-empty Firebase Storage download URL
+    /// (upload happens client-side before this call). Returns nil on
+    /// failure or when not signed in.
+    func createMixtape(name: String, coverImageURL: String, isPrivate: Bool = false) async -> String? {
         guard let uid = firebaseUID else { return nil }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        let cover = coverImageURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cover.isEmpty else { return nil }
         let ref = db.collection("users").document(uid).collection("mixtapes").document()
         let payload: [String: Any] = [
             "name": trimmed,
+            "coverImageURL": cover,
+            "isPrivate": isPrivate,
             "createdAt": FieldValue.serverTimestamp(),
             "updatedAt": FieldValue.serverTimestamp(),
             "songIds": [],
@@ -1682,6 +2006,59 @@ class FirebaseService {
             print("FirebaseService: createMixtape failed: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    // MARK: - Featured Discover mixtapes
+
+    /// Paginated read of `featured_mixtapes` ordered by `order` ascending.
+    /// Pass `startAfterDocumentId` from the previous page's last document.
+    /// Returns the last Firestore document id in this page (for the next
+    /// `startAfterDocumentId`), or nil when the page is empty or there is
+    /// no subsequent page.
+    func fetchFeaturedMixtapes(limit: Int = 20, startAfterDocumentId: String? = nil) async -> ([Mixtape], String?) {
+        do {
+            var query: Query = db.collection("featured_mixtapes")
+                .order(by: "order", descending: false)
+                .limit(to: limit)
+            if let afterId = startAfterDocumentId, !afterId.isEmpty {
+                let afterDoc = try await db.collection("featured_mixtapes").document(afterId).getDocument()
+                if afterDoc.exists {
+                    query = query.start(afterDocument: afterDoc)
+                }
+            }
+            let snapshot = try await query.getDocuments()
+            let mixtapes = snapshot.documents.compactMap { Self.parseFeaturedMixtape(from: $0) }
+            let lastId = snapshot.documents.last?.documentID
+            return (mixtapes, lastId)
+        } catch {
+            print("FirebaseService: fetchFeaturedMixtapes failed: \(error.localizedDescription)")
+            return ([], nil)
+        }
+    }
+
+    /// Decodes a top-level `featured_mixtapes/{id}` document into a
+    /// `Mixtape` with `ownerId == Mixtape.featuredOwnerId`.
+    private static func parseFeaturedMixtape(from doc: QueryDocumentSnapshot) -> Mixtape? {
+        let data = doc.data()
+        guard let name = data["name"] as? String else { return nil }
+        let description = (data["description"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let coverImageURL = (data["coverImageURL"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let isPrivate = data["isPrivate"] as? Bool ?? false
+        let createdAt = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
+        let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue() ?? createdAt
+        let rawSongs = data["songs"] as? [[String: Any]] ?? []
+        let songs = rawSongs.compactMap { parseEmbeddedSong(from: $0) }
+        return Mixtape(
+            id: doc.documentID,
+            ownerId: Mixtape.featuredOwnerId,
+            name: name,
+            description: description,
+            coverImageURL: coverImageURL,
+            isPrivate: isPrivate,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            songs: songs
+        )
     }
 
     func renameMixtape(mixtapeId: String, to newName: String) async {
@@ -1697,6 +2074,26 @@ class FirebaseService {
                 ])
         } catch {
             print("FirebaseService: renameMixtape failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Writes the owner-authored description blurb. Pass `nil` (or an
+    /// empty string after trim) to clear it — we delete the field
+    /// rather than store an empty string so `parseMixtape` doesn't have
+    /// to special-case both nil and "".
+    func updateMixtapeDescription(mixtapeId: String, to newDescription: String?) async {
+        guard let uid = firebaseUID else { return }
+        let trimmed = newDescription?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let payload: [String: Any] = [
+            "description": trimmed.isEmpty ? FieldValue.delete() : trimmed,
+            "updatedAt": FieldValue.serverTimestamp(),
+        ]
+        do {
+            try await db.collection("users").document(uid)
+                .collection("mixtapes").document(mixtapeId)
+                .updateData(payload)
+        } catch {
+            print("FirebaseService: updateMixtapeDescription failed: \(error.localizedDescription)")
         }
     }
 

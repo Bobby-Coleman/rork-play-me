@@ -79,7 +79,7 @@ struct SaveToMixtapeSheet: View {
         .presentationBackground(.black)
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showCreate) {
-            CreateMixtapeView(song: song, appState: appState)
+            CreateMixtapeView(seedSong: song, appState: appState)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }

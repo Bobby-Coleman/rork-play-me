@@ -91,6 +91,13 @@ struct AddFriendsView: View {
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
                                 .focused($searchFocused)
+                                .submitLabel(.search)
+                                // Return-key dismisses focus so the
+                                // user can scan results without the
+                                // keyboard occluding rows. The parent
+                                // `scrollDismissesKeyboard(.interactively)`
+                                // handles the swipe-down case.
+                                .onSubmit { searchFocused = false }
                                 .onChange(of: searchText) { _, newValue in
                                     performSearch(newValue)
                                 }

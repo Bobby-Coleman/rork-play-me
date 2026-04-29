@@ -23,34 +23,38 @@ struct MixtapeCoverView: View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay {
-                let urls = mixtape.coverArtURLs
-                switch urls.count {
-                case 0:
-                    placeholder
-                case 1:
-                    image(urls[0])
-                case 2:
-                    HStack(spacing: 0) {
-                        image(urls[0]).clipped()
-                        image(urls[1]).clipped()
-                    }
-                case 3:
-                    HStack(spacing: 0) {
-                        image(urls[0]).clipped()
-                        VStack(spacing: 0) {
-                            image(urls[1]).clipped()
-                            image(urls[2]).clipped()
-                        }
-                    }
-                default:
-                    VStack(spacing: 0) {
+                if let u = mixtape.coverImageURL?.trimmingCharacters(in: .whitespacesAndNewlines), !u.isEmpty {
+                    image(u)
+                } else {
+                    let urls = mixtape.coverArtURLs
+                    switch urls.count {
+                    case 0:
+                        placeholder
+                    case 1:
+                        image(urls[0])
+                    case 2:
                         HStack(spacing: 0) {
                             image(urls[0]).clipped()
                             image(urls[1]).clipped()
                         }
+                    case 3:
                         HStack(spacing: 0) {
-                            image(urls[2]).clipped()
-                            image(urls[3]).clipped()
+                            image(urls[0]).clipped()
+                            VStack(spacing: 0) {
+                                image(urls[1]).clipped()
+                                image(urls[2]).clipped()
+                            }
+                        }
+                    default:
+                        VStack(spacing: 0) {
+                            HStack(spacing: 0) {
+                                image(urls[0]).clipped()
+                                image(urls[1]).clipped()
+                            }
+                            HStack(spacing: 0) {
+                                image(urls[2]).clipped()
+                                image(urls[3]).clipped()
+                            }
                         }
                     }
                 }

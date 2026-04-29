@@ -1,28 +1,17 @@
 import SwiftUI
 
-/// Root of the new Home tab. Hosts a Pinterest-style staggered grid of
-/// recommended songs that opens a TikTok-style fullscreen feed on tap.
-///
-/// Data flow:
-/// 1. On first paint, seed `items` from
-///    `PlaceholderDiscoverFeedProvider.cachedSongs()` so a returning user
-///    sees the grid instantly without waiting on a network round-trip.
-/// 2. Kick off `provider.loadInitial()` in `.task` to refresh the cache
-///    in the background; replace `items` only if the provider returns a
-///    non-empty list (so a transient failure never blanks the screen).
-/// 3. Pull-to-refresh re-runs `loadInitial`.
-///
-/// The `provider` field is typed as `any DiscoverFeedProvider` so a real
-/// recommendations service can later be wired in without touching this
-/// view (or any of the grid plumbing).
+/// Root of the Home tab (leftmost). Pinterest-style staggered grid of
+/// **curated mixtapes** from `DiscoverMixtapeFeedProvider`; tap opens
+/// `MixtapeDetailView` (same sheet as the Mixtapes tab). Song playback
+/// stays inside that detail surface (fullscreen feed).
 struct HomeDiscoverView: View {
     let appState: AppState
 
-    @State private var provider: any DiscoverFeedProvider = PlaceholderDiscoverFeedProvider()
-    @State private var items: [Song] = PlaceholderDiscoverFeedProvider.cachedSongs()
+    @State private var provider: any DiscoverMixtapeFeedProvider = MockDiscoverMixtapeFeedProvider()
+    @State private var items: [Mixtape] = []
     @State private var isLoading: Bool = false
     @State private var errorMessage: String?
-    @State private var fullscreenSeed: FullscreenSeed?
+    @State private var detailMixtape: Mixtape?
 
     private let horizontalPadding: CGFloat = 16
     private let spacing: CGFloat = 10
@@ -40,7 +29,7 @@ struct HomeDiscoverView: View {
 
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        Text("Curated songs")
+                        Text("Curated mixtapes")
                             .font(.system(size: 22, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -60,30 +49,12 @@ struct HomeDiscoverView: View {
                                 items: items,
                                 cellSize: cellSize,
                                 spacing: spacing
-                            ) { song, side in
-                                AlbumArtSquare(
-                                    url: song.albumArtURL,
-                                    cornerRadius: 14,
-                                    showsPlaceholderProgress: false,
-                                    showsShadow: false,
-                                    targetDecodeSide: side
-                                )
-                                // Explicit tap surface: `Button { } label:`
-                                // wrapping `AlbumArtSquare` (whose body is
-                                // `Color.clear` + an overlay marked
-                                // `.allowsHitTesting(false)`) was producing
-                                // a Button with no concrete hit shape — the
-                                // label resolved to a transparent square
-                                // that SwiftUI refused to register taps on
-                                // when nested under multiple `LazyVStack`s.
-                                // A `Rectangle` content shape + plain tap
-                                // gesture forces the entire 1:1 cell to be
-                                // hit-testable so every grid tile reliably
-                                // opens the fullscreen feed.
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    openFullscreen(at: song)
-                                }
+                            ) { mixtape, _ in
+                                MixtapeGridCell(mixtape: mixtape, cornerRadius: 14)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        detailMixtape = mixtape
+                                    }
                             }
                             .padding(.horizontal, horizontalPadding)
                             .padding(.top, 8)
@@ -96,23 +67,13 @@ struct HomeDiscoverView: View {
             }
         }
         .task {
-            // Always refresh on appear if we don't have anything yet, or
-            // if the cache is missing — `PlaceholderDiscoverFeedProvider`
-            // owns its own freshness window, so we let it decide whether
-            // to re-fetch.
-            if items.isEmpty {
-                await refresh(force: false)
-            } else {
-                Task { await refresh(force: false) }
-            }
+            await refresh(force: false)
         }
-        .fullScreenCover(item: $fullscreenSeed) { seed in
-            SongFullScreenFeedView(
-                songs: seed.songs,
-                startIndex: seed.startIndex,
-                appState: appState,
-                shareLookup: seed.shareLookup
-            )
+        .sheet(item: $detailMixtape) { mixtape in
+            MixtapeDetailView(mixtape: mixtape, appState: appState)
+                .presentationBackground(.black)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -121,7 +82,7 @@ struct HomeDiscoverView: View {
             Text("Discover")
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(.white)
-            Text(errorMessage ?? "Pull to refresh and we'll line up some songs.")
+            Text(errorMessage ?? "Pull to refresh. Add documents to `featured_mixtapes` in Firebase.")
                 .font(.system(size: 14))
                 .foregroundStyle(.white.opacity(0.55))
                 .multilineTextAlignment(.center)
@@ -129,36 +90,16 @@ struct HomeDiscoverView: View {
         }
     }
 
-    private func openFullscreen(at song: Song) {
-        guard let idx = items.firstIndex(where: { $0.id == song.id }) else { return }
-        // Pre-warm the AVPlayer the moment the user taps so the preview
-        // MP3 download overlaps the fullScreenCover's ~300ms present
-        // transition. By the time the page lands the audio session is
-        // hot and the first song plays without the perceptible "first
-        // tap is laggy" delay. `FullScreenFeedPlaybackCoordinator.startInitial`
-        // is now a no-op when this song is already playing, so the
-        // double-call is safe.
-        AudioPlayerService.shared.play(song: song)
-        fullscreenSeed = FullscreenSeed(songs: items, startIndex: idx)
-    }
-
     private func refresh(force: Bool) async {
         if isLoading { return }
         isLoading = true
         defer { isLoading = false }
-        do {
-            let fresh = try await provider.loadInitial()
-            if !fresh.isEmpty {
-                items = fresh
-                errorMessage = nil
-            } else if items.isEmpty && force {
-                errorMessage = "No songs available right now."
-            }
-        } catch {
-            if items.isEmpty {
-                errorMessage = "Couldn't load Discover. Pull to retry."
-            }
+        let fresh = await provider.loadInitial()
+        items = fresh
+        if fresh.isEmpty, force {
+            errorMessage = "No curated mixtapes yet."
+        } else if !fresh.isEmpty {
+            errorMessage = nil
         }
     }
 }
-

@@ -100,6 +100,30 @@ service cloud.firestore {
         (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid);
     }
 
+    // Mixtape shares — same security model as `shares` but stored in a
+    // dedicated collection so listeners can scope to their own type
+    // and the schema (full embedded mixtape with songs[]) doesn't have
+    // to overload the song-share document. Sender or recipient may
+    // delete; only the sender may create; both may read.
+    match /mixtapeShares/{shareId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.senderId == request.auth.uid
+        && !isBlockedBy(request.resource.data.recipientId, request.auth.uid);
+      allow update, delete: if request.auth != null &&
+        (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid);
+    }
+
+    // Album shares — same model as mixtape shares.
+    match /albumShares/{shareId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.senderId == request.auth.uid
+        && !isBlockedBy(request.resource.data.recipientId, request.auth.uid);
+      allow update, delete: if request.auth != null &&
+        (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid);
+    }
+
     match /conversations/{convId} {
       // resource is null when the document does not exist.
       // Allow get on missing docs so clients can do get-then-create.
@@ -180,6 +204,14 @@ service cloud.firestore {
         && request.resource.data.reporterUid == request.auth.uid
         && request.resource.data.keys().hasAll(['reporterUid', 'targetUid', 'targetType', 'createdAt']);
       allow read, update, delete: if false;
+    }
+
+    // Curated Discover (Home) mixtape feed. Public read so the Pinterest
+    // grid can load before sign-in; writes are console/admin only (client
+    // cannot mutate — Bobby edits documents in the Firebase console).
+    match /featured_mixtapes/{docId} {
+      allow read: if true;
+      allow create, update, delete: if false;
     }
 
     // Global Spotify resolution cache keyed by SHA-256 of the normalized

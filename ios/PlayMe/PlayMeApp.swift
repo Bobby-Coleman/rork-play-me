@@ -103,10 +103,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         )
         ChottuLink.initialize(config: config)
 
-        UNUserNotificationCenter.current().delegate = self
-        Messaging.messaging().delegate = self
-
-        NotificationPermission.registerForRemoteNotificationsIfAlreadyAuthorized()
+        // Defer push / notification-center wiring to the next main run-loop
+        // turn. Touching `UNUserNotificationCenter` and registering for
+        // remote notifications synchronously inside `didFinishLaunching`
+        // has been linked to rare dyld `RemoteNotificationResponder`
+        // crashes on device (especially under the debugger on newer iOS).
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            UNUserNotificationCenter.current().delegate = self
+            Messaging.messaging().delegate = self
+            NotificationPermission.registerForRemoteNotificationsIfAlreadyAuthorized()
+        }
 
         return true
     }
