@@ -225,11 +225,13 @@ struct FriendSelectorView: View {
     /// shifts when this field focuses — the keyboard simply slides up
     /// over the chip row and Send button below.
     private var notePill: some View {
-        TextField(
+        AppTextField(
             "",
             text: $note,
             prompt: Text("Add a message").foregroundColor(.white.opacity(0.78)),
-            axis: .vertical
+            axis: .vertical,
+            submitLabel: .done,
+            onSubmit: { isNoteFocused = false }
         )
         .lineLimit(1...3)
         .font(.system(size: 14, weight: .semibold))

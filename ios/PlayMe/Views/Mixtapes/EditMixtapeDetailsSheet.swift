@@ -33,7 +33,7 @@ struct EditMixtapeDetailsSheet: View {
             ZStack {
                 Color.black.ignoresSafeArea()
 
-                ScrollView {
+                AppScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         nameField
                         descriptionField
@@ -42,7 +42,6 @@ struct EditMixtapeDetailsSheet: View {
                     .padding(.top, 16)
                     .padding(.bottom, 32)
                 }
-                .scrollDismissesKeyboard(.interactively)
             }
             .navigationTitle("Edit details")
             .navigationBarTitleDisplayMode(.inline)
@@ -79,16 +78,16 @@ struct EditMixtapeDetailsSheet: View {
             Text("Name")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.5))
-            TextField(
+            AppTextField(
                 "",
                 text: $name,
-                prompt: Text("Mixtape name").foregroundColor(.white.opacity(0.35))
+                prompt: Text("Mixtape name").foregroundColor(.white.opacity(0.35)),
+                submitLabel: .done
             )
             .focused($nameFocused)
             .font(.system(size: 17, weight: .semibold))
             .foregroundStyle(.white)
             .tint(.white)
-            .submitLabel(.done)
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .background(Color.white.opacity(0.08))
@@ -107,11 +106,12 @@ struct EditMixtapeDetailsSheet: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(details.count >= descriptionLimit ? 0.7 : 0.3))
             }
-            TextField(
+            AppTextField(
                 "",
                 text: $details,
                 prompt: Text("What's this mixtape about?").foregroundColor(.white.opacity(0.35)),
-                axis: .vertical
+                axis: .vertical,
+                submitLabel: .done
             )
             .lineLimit(3...8)
             .font(.system(size: 15))

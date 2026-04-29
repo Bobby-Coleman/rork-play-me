@@ -81,6 +81,68 @@ struct PinterestSquareGrid<Item: Identifiable, Cell: View>: View {
     }
 }
 
+/// Two-column staggered layout like `PinterestSquareGrid`, but each cell
+/// only receives a **width** constraint; height comes from the cell’s
+/// intrinsic content. Use for mixtape **board + caption** rows where a
+/// fixed square would squash the title into the mosaic frame.
+///
+/// `rowHeight` must be the **uniform** height of one full card (mosaic +
+/// spacing + labels) so the right-column lead spacer stays half a card
+/// and preserves the Pinterest vertical offset.
+struct PinterestStaggeredGrid<Item: Identifiable, Cell: View>: View {
+    let items: [Item]
+    let columnWidth: CGFloat
+    let rowHeight: CGFloat
+    let spacing: CGFloat
+    let cell: (Item, CGFloat) -> Cell
+
+    init(
+        items: [Item],
+        columnWidth: CGFloat,
+        rowHeight: CGFloat,
+        spacing: CGFloat = 10,
+        @ViewBuilder cell: @escaping (Item, CGFloat) -> Cell
+    ) {
+        self.items = items
+        self.columnWidth = columnWidth
+        self.rowHeight = rowHeight
+        self.spacing = spacing
+        self.cell = cell
+    }
+
+    private var leftColumn: [(offset: Int, item: Item)] {
+        items.enumerated().compactMap { idx, item in
+            idx.isMultiple(of: 2) ? (idx, item) : nil
+        }
+    }
+
+    private var rightColumn: [(offset: Int, item: Item)] {
+        items.enumerated().compactMap { idx, item in
+            idx.isMultiple(of: 2) ? nil : (idx, item)
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: spacing) {
+            LazyVStack(spacing: spacing) {
+                ForEach(leftColumn, id: \.item.id) { _, item in
+                    cell(item, columnWidth)
+                        .frame(width: columnWidth, alignment: .top)
+                }
+            }
+
+            LazyVStack(spacing: spacing) {
+                Color.clear
+                    .frame(width: columnWidth, height: rowHeight / 2)
+                ForEach(rightColumn, id: \.item.id) { _, item in
+                    cell(item, columnWidth)
+                        .frame(width: columnWidth, alignment: .top)
+                }
+            }
+        }
+    }
+}
+
 /// Computes a per-cell side length for a 2-column Pinterest grid given a
 /// container width and the desired horizontal padding/spacing. Centralized
 /// so call sites always use the same formula.
@@ -94,5 +156,14 @@ enum PinterestGridLayout {
     ) -> CGFloat {
         let usable = max(0, containerWidth - horizontalPadding * 2 - spacing)
         return floor(usable / CGFloat(columns))
+    }
+
+    /// Same width as `cellSize` — each column in a two-up staggered grid.
+    static func columnWidth(
+        containerWidth: CGFloat,
+        horizontalPadding: CGFloat,
+        spacing: CGFloat
+    ) -> CGFloat {
+        cellSize(containerWidth: containerWidth, horizontalPadding: horizontalPadding, spacing: spacing)
     }
 }

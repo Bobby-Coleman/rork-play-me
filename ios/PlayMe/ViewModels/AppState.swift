@@ -5,6 +5,22 @@ import WidgetKit
 import FirebaseFirestore
 import MusicKit
 
+/// Draft for the create-mixtape sheet. Owned by `AppState` so accidental
+/// sheet dismissal (picker presentation, swipe-down, app background) does
+/// not discard the user's title, description, or cropped cover image.
+@MainActor
+struct CreateMixtapeDraft {
+    var name: String = ""
+    var details: String = ""
+    var coverImage: UIImage?
+
+    mutating func clear() {
+        name = ""
+        details = ""
+        coverImage = nil
+    }
+}
+
 @Observable
 @MainActor
 class AppState {
@@ -112,6 +128,7 @@ class AppState {
     /// Last-observed MusicKit authorization status. `noResultsView` gates
     /// the "Open Settings" prompt on this being `.denied`.
     var musicAuthStatus: MusicAuthorization.Status = MusicAuthorization.currentStatus
+    var createMixtapeDraft = CreateMixtapeDraft()
 
     /// Convenience for views that only need to know whether to surface
     /// the Settings deep-link (keeps `import MusicKit` out of the view

@@ -86,18 +86,13 @@ struct AddFriendsView: View {
                         HStack(spacing: 10) {
                             Image(systemName: "magnifyingglass")
                                 .foregroundStyle(.white.opacity(0.4))
-                            TextField("Search by username or name", text: $searchText)
+                            AppTextField("Search by username or name", text: $searchText, submitLabel: .search) {
+                                searchFocused = false
+                            }
                                 .foregroundStyle(.white)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
                                 .focused($searchFocused)
-                                .submitLabel(.search)
-                                // Return-key dismisses focus so the
-                                // user can scan results without the
-                                // keyboard occluding rows. The parent
-                                // `scrollDismissesKeyboard(.interactively)`
-                                // handles the swipe-down case.
-                                .onSubmit { searchFocused = false }
                                 .onChange(of: searchText) { _, newValue in
                                     performSearch(newValue)
                                 }
@@ -139,6 +134,7 @@ struct AddFriendsView: View {
                     .padding(.bottom, 40)
                 }
                 .scrollDismissesKeyboard(.interactively)
+                .appKeyboardDismiss()
             }
             .navigationTitle("Add Friends")
             .navigationBarTitleDisplayMode(.inline)

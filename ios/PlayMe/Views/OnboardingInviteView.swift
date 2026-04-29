@@ -161,7 +161,7 @@ struct OnboardingInviteView: View {
     // MARK: - Main content (contacts + invite flow)
 
     private var mainContent: some View {
-        ScrollView {
+        AppScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 Text("Invite friends to Play Me")
                     .font(.system(size: 26, weight: .bold))
@@ -192,7 +192,6 @@ struct OnboardingInviteView: View {
                 Color.clear.frame(height: 32)
             }
         }
-        .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomBar
         }
@@ -202,11 +201,12 @@ struct OnboardingInviteView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.white.opacity(0.4))
-            TextField("Search by username or name", text: $searchText)
+            AppTextField("Search by username or name", text: $searchText, submitLabel: .search) {
+                searchFocused = false
+            }
                 .foregroundStyle(.white)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
-                .submitLabel(.search)
                 .focused($searchFocused)
                 .onChange(of: searchText) { _, newValue in
                     performUserSearch(newValue)

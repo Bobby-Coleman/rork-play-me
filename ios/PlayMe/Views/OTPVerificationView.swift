@@ -3,6 +3,10 @@ import UIKit
 
 // MARK: - UIViewRepresentable OTP TextField
 
+// Intentional exception to the app-wide `AppTextField` rule: OTP entry
+// needs a UIKit `UITextField` for one-time-code autofill and precise digit
+// filtering without SwiftUI focus churn.
+
 struct OTPTextField: UIViewRepresentable {
     @Binding var text: String
     var onSixDigits: () -> Void

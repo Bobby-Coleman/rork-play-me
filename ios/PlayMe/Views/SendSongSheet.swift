@@ -133,17 +133,13 @@ struct SendSongSheet: View {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.white.opacity(0.4))
-                TextField("Search songs or artists...", text: $searchText)
+                AppTextField("Search songs or artists...", text: $searchText, submitLabel: .search) {
+                    isSearchFocused = false
+                }
                     .foregroundStyle(.white)
                     .tint(.white)
                     .autocorrectionDisabled()
                     .focused($isSearchFocused)
-                    .submitLabel(.search)
-                    // Return collapses focus so the user can browse
-                    // results without the keyboard occluding rows.
-                    // Swipe-to-dismiss is handled by the ScrollView's
-                    // `scrollDismissesKeyboard(.interactively)` below.
-                    .onSubmit { isSearchFocused = false }
                     .onChange(of: searchText) { _, newValue in
                         performSearch(newValue)
                     }
@@ -178,7 +174,7 @@ struct SendSongSheet: View {
                 .padding(.bottom, 4)
             }
 
-            ScrollView {
+            AppScrollView {
                 LazyVStack(spacing: 0) {
                     if appState.isSearchingSongs && appState.searchResults.isEmpty {
                         ProgressView()
@@ -194,7 +190,6 @@ struct SendSongSheet: View {
                 }
                 .padding(.horizontal, 20)
             }
-            .scrollDismissesKeyboard(.interactively)
         }
     }
 

@@ -170,21 +170,17 @@ struct MixtapesView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.45))
 
-            TextField(
+            AppTextField(
                 "",
                 text: $searchText,
-                prompt: Text("Search your songs").foregroundColor(.white.opacity(0.4))
+                prompt: Text("Search your songs").foregroundColor(.white.opacity(0.4)),
+                submitLabel: .search,
+                onSubmit: { isSearchFocused = false }
             )
             .font(.system(size: 14))
             .foregroundStyle(.white)
             .tint(.white)
-            .submitLabel(.search)
             .focused($isSearchFocused)
-            // Tapping Return on the keyboard collapses focus so users
-            // can scan results without the keyboard eating half the
-            // screen. `scrollDismissesKeyboard(.interactively)` on the
-            // parent VStack handles the swipe-down case.
-            .onSubmit { isSearchFocused = false }
 
             if !searchText.isEmpty {
                 Button { searchText = "" } label: {
@@ -1018,25 +1014,30 @@ private struct MixtapesGridView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let cellSize = PinterestGridLayout.cellSize(
+            let columnWidth = PinterestGridLayout.columnWidth(
                 containerWidth: geo.size.width,
                 horizontalPadding: horizontalPadding,
                 spacing: spacing
             )
+            let mosaicHeight = columnWidth / MixtapeBoardCardCover.mosaicAspect
+            let captionBlockHeight: CGFloat = 34
+            let cardSpacing: CGFloat = 6
+            let rowHeight = mosaicHeight + cardSpacing + captionBlockHeight
 
             ScrollView {
                 LazyVStack(spacing: 0) {
                     if filtered.isEmpty {
                         emptyState.padding(.top, 80)
                     } else {
-                        PinterestSquareGrid(
+                        PinterestStaggeredGrid(
                             items: filtered,
-                            cellSize: cellSize,
+                            columnWidth: columnWidth,
+                            rowHeight: rowHeight,
                             spacing: spacing
-                        ) { mixtape, _ in
-                            VStack(spacing: 6) {
+                        ) { mixtape, colW in
+                            VStack(alignment: .leading, spacing: cardSpacing) {
                                 MixtapeBoardCardCover(mixtape: mixtape, cornerRadius: 14)
-                                    .frame(width: cellSize, height: cellSize)
+                                    .frame(width: colW)
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(mixtape.name)
                                         .font(.system(size: 12, weight: .semibold))
@@ -1050,9 +1051,6 @@ private struct MixtapesGridView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 4)
                             }
-                            // Same Button → tap-gesture conversion as the
-                            // song grids above; the cover + name stack
-                            // had the same transparent-label issue.
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 onTap(mixtape)

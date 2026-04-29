@@ -34,7 +34,7 @@ struct PhoneEntryView: View {
                     .padding(.bottom, 24)
 
                 HStack(spacing: 12) {
-                    TextField("(555) 000-0000", text: $phoneNumber)
+                    AppTextField("(555) 000-0000", text: $phoneNumber)
                         .font(.system(size: 18))
                         .foregroundStyle(.white)
                         .keyboardType(.phonePad)
@@ -82,6 +82,7 @@ struct PhoneEntryView: View {
             }
             .padding(.horizontal, 24)
         }
+        .appKeyboardDismiss()
         .onAppear { isFocused = true }
     }
 

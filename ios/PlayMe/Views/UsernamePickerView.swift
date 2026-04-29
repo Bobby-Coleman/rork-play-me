@@ -39,15 +39,15 @@ struct UsernamePickerView: View {
                         Text("@")
                             .font(.system(size: 18))
                             .foregroundStyle(.white.opacity(0.4))
-                        TextField("username", text: $username)
+                        AppTextField("username", text: $username, submitLabel: .done) {
+                            completeIfAvailable()
+                        }
                             .font(.system(size: 18))
                             .foregroundStyle(.white)
                             .textContentType(.username)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .focused($isFocused)
-                            .submitLabel(.done)
-                            .onSubmit { completeIfAvailable() }
                             .onChange(of: username) { _, newValue in
                                 checkUsernameAvailability(newValue)
                             }
@@ -113,6 +113,7 @@ struct UsernamePickerView: View {
             }
             .padding(.horizontal, 24)
         }
+        .appKeyboardDismiss()
         .onAppear { isFocused = true }
     }
 

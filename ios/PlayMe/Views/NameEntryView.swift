@@ -59,29 +59,30 @@ struct NameEntryView: View {
 
                 HStack(spacing: 12) {
                     VStack(spacing: 12) {
-                        TextField("First name", text: $firstName)
+                        AppTextField("First name", text: $firstName, submitLabel: .next) {
+                            focusedField = .last
+                        }
                             .font(.system(size: 18))
                             .foregroundStyle(.white)
                             .textContentType(.givenName)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
                             .focused($focusedField, equals: .first)
-                            .submitLabel(.next)
-                            .onSubmit { focusedField = .last }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 14)
                             .background(Color.white.opacity(0.1))
                             .clipShape(.rect(cornerRadius: 12))
 
-                        TextField("Last name", text: $lastName)
+                        AppTextField("Last name", text: $lastName, submitLabel: .continue) {
+                            UIApplication.pm_dismissKeyboard()
+                            if canContinue { onComplete() }
+                        }
                             .font(.system(size: 18))
                             .foregroundStyle(.white)
                             .textContentType(.familyName)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
                             .focused($focusedField, equals: .last)
-                            .submitLabel(.continue)
-                            .onSubmit { if canContinue { onComplete() } }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 14)
                             .background(Color.white.opacity(0.1))
@@ -105,6 +106,7 @@ struct NameEntryView: View {
             }
             .padding(.horizontal, 24)
         }
+        .appKeyboardDismiss()
         .onAppear { focusedField = .first }
     }
 }

@@ -31,6 +31,8 @@
 	<string>PlayMe searches Apple Music so you can find songs to send to your friends.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>PlayMe uses your contacts to help you find and invite friends.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>PlayMe lets you choose a photo from your library to use as a mixtape cover.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

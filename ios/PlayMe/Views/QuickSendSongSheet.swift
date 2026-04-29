@@ -103,15 +103,12 @@ struct QuickSendSongSheet: View {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.white.opacity(0.4))
-                TextField("Search songs or artists...", text: $searchText)
+                AppTextField("Search songs or artists...", text: $searchText, submitLabel: .search) {
+                    isSearchFocused = false
+                }
                     .foregroundStyle(.white)
                     .autocorrectionDisabled()
                     .focused($isSearchFocused)
-                    .submitLabel(.search)
-                    // Return collapses focus; swipe-down on the
-                    // results scroll view also dismisses the keyboard
-                    // via `scrollDismissesKeyboard(.interactively)`.
-                    .onSubmit { isSearchFocused = false }
                     .onChange(of: searchText) { _, newValue in
                         performSearch(newValue)
                     }
@@ -143,7 +140,7 @@ struct QuickSendSongSheet: View {
                 .padding(.bottom, 4)
             }
 
-            ScrollView {
+            AppScrollView {
                 LazyVStack(spacing: 0) {
                     if appState.isSearchingSongs && appState.searchResults.isEmpty {
                         ProgressView()
@@ -159,7 +156,6 @@ struct QuickSendSongSheet: View {
                 }
                 .padding(.horizontal, 20)
             }
-            .scrollDismissesKeyboard(.interactively)
         }
     }
 
@@ -326,16 +322,16 @@ struct QuickSendSongSheet: View {
                 .foregroundStyle(.white.opacity(0.5))
                 .padding(.bottom, 16)
 
-            TextField(
+            AppTextField(
                 "",
                 text: $note,
-                prompt: Text("Add a note (optional)").foregroundColor(.white.opacity(0.78))
+                prompt: Text("Add a note (optional)").foregroundColor(.white.opacity(0.78)),
+                submitLabel: .done,
+                onSubmit: { isNoteFocused = false }
             )
                 .font(.system(size: 15))
                 .foregroundStyle(.white)
                 .focused($isNoteFocused)
-                .submitLabel(.done)
-                .onSubmit { isNoteFocused = false }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
                 .background(

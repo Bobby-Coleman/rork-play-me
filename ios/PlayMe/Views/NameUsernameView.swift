@@ -38,13 +38,13 @@ struct NameUsernameView: View {
                         .padding(.bottom, 24)
 
                     HStack(spacing: 12) {
-                        TextField("John", text: $firstName)
+                        AppTextField("John", text: $firstName, submitLabel: .next) {
+                            advanceToUsername()
+                        }
                             .font(.system(size: 18))
                             .foregroundStyle(.white)
                             .textContentType(.givenName)
                             .focused($isFocused)
-                            .submitLabel(.next)
-                            .onSubmit { advanceToUsername() }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 14)
                             .background(Color.white.opacity(0.1))
@@ -72,15 +72,15 @@ struct NameUsernameView: View {
                             Text("@")
                                 .font(.system(size: 18))
                                 .foregroundStyle(.white.opacity(0.4))
-                            TextField("username", text: $username)
+                            AppTextField("username", text: $username, submitLabel: .done) {
+                                completeIfAvailable()
+                            }
                                 .font(.system(size: 18))
                                 .foregroundStyle(.white)
                                 .textContentType(.username)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                                 .focused($isFocused)
-                                .submitLabel(.done)
-                                .onSubmit { completeIfAvailable() }
                                 .onChange(of: username) { _, newValue in
                                     checkUsernameAvailability(newValue)
                                 }
@@ -148,6 +148,7 @@ struct NameUsernameView: View {
             .padding(.horizontal, 24)
             .animation(.spring(duration: 0.4), value: step)
         }
+        .appKeyboardDismiss()
         .onAppear { isFocused = true }
     }
 

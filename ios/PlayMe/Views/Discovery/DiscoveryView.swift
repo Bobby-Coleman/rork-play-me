@@ -330,18 +330,18 @@ struct DiscoveryView: View {
                 .transition(.opacity)
             } else {
                 HStack(spacing: 10) {
-                    TextField(
+                    AppTextField(
                         "",
                         text: $replyText,
                         prompt: Text(replyPlaceholder).foregroundColor(.white.opacity(0.9)),
-                        axis: .vertical
+                        axis: .vertical,
+                        submitLabel: .send
                     )
                     .lineLimit(1...5)
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(.white)
                     .tint(.white)
                     .focused($isReplyFocused)
-                    .submitLabel(.send)
                     .onChange(of: replyText) { _, newValue in
                         guard newValue.contains("\n") else { return }
                         let stripped = newValue.replacingOccurrences(of: "\n", with: "")

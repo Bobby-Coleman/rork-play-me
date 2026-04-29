@@ -151,6 +151,7 @@ struct ChatView: View {
                     // following the user's finger so it can be brought
                     // back without a re-tap if they reverse direction.
                     .scrollDismissesKeyboard(.interactively)
+                    .appKeyboardDismiss()
                     .onChange(of: messages.last?.id) { _, newId in
                         // Only auto-scroll when the most recent message
                         // changes (new send/receive), not when older pages
@@ -601,7 +602,13 @@ struct ChatView: View {
 
     private var inputBar: some View {
         HStack(spacing: 8) {
-            TextField(pendingReplyTo != nil ? "Reply" : "Message...", text: $newMessageText)
+            AppTextField(pendingReplyTo != nil ? "Reply" : "Message...", text: $newMessageText, submitLabel: .send) {
+                if !newMessageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    sendMessage()
+                } else {
+                    isComposerFocused = false
+                }
+            }
                 .font(.system(size: 15))
                 .foregroundStyle(.white)
                 .tint(.white)

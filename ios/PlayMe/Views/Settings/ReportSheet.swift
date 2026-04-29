@@ -48,7 +48,7 @@ struct ReportSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            AppScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Text("Report \(target.targetName)")
                         .font(.system(size: 20, weight: .bold))
@@ -88,7 +88,7 @@ struct ReportSheet: View {
                         Text("Add details (optional)")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.5))
-                        TextField("", text: $note, axis: .vertical)
+                        AppTextField("", text: $note, axis: .vertical)
                             .lineLimit(3...6)
                             .font(.system(size: 14))
                             .foregroundStyle(.white)
