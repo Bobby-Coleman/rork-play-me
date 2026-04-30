@@ -56,6 +56,9 @@ struct FriendSelectorView: View {
     /// affordance entirely (saving a mixtape would mean duplicating
     /// every song into another mixtape, which we haven't designed).
     @State private var showSaveSheet: Bool = false
+    @State private var isCheckingDuplicateSends: Bool = false
+    @State private var duplicateSendFriends: [AppUser] = []
+    @State private var showDuplicateSendAlert: Bool = false
     /// Pre-resolved Spotify URL for the "Open in Spotify" button. Only
     /// resolved for `.song` payloads.
     @State private var resolvedSpotifyURL: String?
@@ -163,6 +166,14 @@ struct FriendSelectorView: View {
             case .mixtape:
                 EmptyView()
             }
+        }
+        .alert("Send again?", isPresented: $showDuplicateSendAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Send Again") {
+                commitSend()
+            }
+        } message: {
+            Text(duplicateSendMessage)
         }
     }
 
@@ -332,20 +343,25 @@ struct FriendSelectorView: View {
     private var sendButton: some View {
         ZStack {
             Button {
-                commitSend()
+                prepareSend()
             } label: {
                 ZStack {
                     Circle()
-                        .fill(canSend ? Color(red: 0.76, green: 0.38, blue: 0.35) : Color.white.opacity(0.1))
+                        .fill(canSend && !isCheckingDuplicateSends ? Color(red: 0.76, green: 0.38, blue: 0.35) : Color.white.opacity(0.1))
                         .frame(width: 72, height: 72)
 
-                    Image(systemName: "paperplane.fill")
-                        .font(.system(size: 26, weight: .semibold))
-                        .foregroundStyle(canSend ? .white : .white.opacity(0.3))
-                        .offset(x: -2)
+                    if isCheckingDuplicateSends {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 26, weight: .semibold))
+                            .foregroundStyle(canSend ? .white : .white.opacity(0.3))
+                            .offset(x: -2)
+                    }
                 }
             }
-            .disabled(!canSend)
+            .disabled(!canSend || isCheckingDuplicateSends)
             .sensoryFeedback(.success, trigger: showSentAnimation)
             .animation(.easeInOut(duration: 0.15), value: canSend)
 
@@ -389,6 +405,32 @@ struct FriendSelectorView: View {
     /// albums and mixtapes hit `appState` once with the whole
     /// recipient list, since those backends batch the fan-out
     /// server-side.
+    private func prepareSend() {
+        guard canSend, !isCheckingDuplicateSends else { return }
+        guard case .song(let song) = item else {
+            commitSend()
+            return
+        }
+
+        let friends = resolveSelectedFriends()
+        guard !friends.isEmpty else {
+            commitSend()
+            return
+        }
+
+        isCheckingDuplicateSends = true
+        Task {
+            let duplicates = await appState.duplicateSongSendRecipients(for: song, friends: friends)
+            isCheckingDuplicateSends = false
+            if duplicates.isEmpty {
+                commitSend()
+            } else {
+                duplicateSendFriends = duplicates
+                showDuplicateSendAlert = true
+            }
+        }
+    }
+
     private func commitSend() {
         guard canSend else { return }
         showSentAnimation = true
@@ -414,6 +456,22 @@ struct FriendSelectorView: View {
             try? await Task.sleep(for: .seconds(1.2))
             onSent()
         }
+    }
+
+    private var duplicateSendMessage: String {
+        let names = formattedNames(duplicateSendFriends.map(\.firstName))
+        let recipientText = names.isEmpty ? "this person" : names
+        return "You've already sent this song to \(recipientText). Would you like to send it again?"
+    }
+
+    private func formattedNames(_ names: [String]) -> String {
+        let cleaned = names
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard let first = cleaned.first else { return "" }
+        if cleaned.count == 1 { return first }
+        if cleaned.count == 2 { return "\(cleaned[0]) and \(cleaned[1])" }
+        return "\(first) and \(cleaned.count - 1) others"
     }
 
     // MARK: - Friend chip row

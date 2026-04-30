@@ -28,6 +28,11 @@ struct ProfileSongRow: View {
         audioPlayer.currentSongId == share.song.id && audioPlayer.isLoading
     }
 
+    private var trimmedNote: String? {
+        let note = (share.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return note.isEmpty ? nil : note
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
@@ -74,6 +79,19 @@ struct ProfileSongRow: View {
                 Text(personLabel)
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.4))
+                    .lineLimit(1)
+                if let trimmedNote {
+                    HStack(spacing: 5) {
+                        Image(systemName: "quote.opening")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.35))
+                        Text(trimmedNote)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.62))
+                            .lineLimit(2)
+                    }
+                    .padding(.top, 1)
+                }
             }
 
             Spacer()
@@ -93,7 +111,7 @@ struct ProfileSongRow: View {
                 .frame(width: 70, alignment: .trailing)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 10)
+        .padding(.vertical, trimmedNote == nil ? 10 : 12)
         .contentShape(Rectangle())
         .onTapGesture {
             onTap()

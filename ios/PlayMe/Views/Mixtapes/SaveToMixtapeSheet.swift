@@ -16,6 +16,7 @@ struct SaveToMixtapeSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var showCreate: Bool = false
+    @State private var mixtapePendingRemoval: Mixtape?
 
     private var store: MixtapeStore { appState.mixtapeStore }
     private var saveService: SaveService { appState.saveService }
@@ -83,6 +84,21 @@ struct SaveToMixtapeSheet: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .alert("Remove from mixtape?", isPresented: Binding(
+            get: { mixtapePendingRemoval != nil },
+            set: { if !$0 { mixtapePendingRemoval = nil } }
+        )) {
+            Button("Cancel", role: .cancel) {
+                mixtapePendingRemoval = nil
+            }
+            Button("Remove", role: .destructive) {
+                guard let mixtape = mixtapePendingRemoval else { return }
+                mixtapePendingRemoval = nil
+                Task { await store.removeSong(songId: song.id, from: mixtape.id) }
+            }
+        } message: {
+            Text("This song is already in \(mixtapePendingRemoval?.name ?? "this mixtape"). Remove it?")
+        }
     }
 
     // MARK: - Header
@@ -141,7 +157,11 @@ struct SaveToMixtapeSheet: View {
 
         return Button {
             guard !isReadOnly else { return }
-            Task { await store.toggleSong(song, in: mixtape.id) }
+            if isMember {
+                mixtapePendingRemoval = mixtape
+            } else {
+                Task { await store.addSong(song, to: mixtape.id) }
+            }
         } label: {
             HStack(spacing: 12) {
                 MixtapeCoverView(mixtape: mixtape, cornerRadius: 12, showsShadow: false)

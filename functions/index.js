@@ -688,7 +688,8 @@ async function claimPendingSharesForUser(uid, phoneE164) {
     const convId = conversationIdFor(uid, senderId);
     const convRef = db.collection("conversations").doc(convId);
     const participants = [uid, senderId].sort();
-    const messageText = note && note.length > 0 ? note : "Sent you a song";
+    const messageText = note && note.trim().length > 0 ? note : "";
+    const lastMessageText = messageText || song?.title || "";
 
     batch.set(
       convRef,
@@ -698,7 +699,7 @@ async function claimPendingSharesForUser(uid, phoneE164) {
           [uid]: myFirstName,
           [senderId]: senderFirstName,
         },
-        lastMessageText: messageText,
+        lastMessageText,
         lastMessageTimestamp: admin.firestore.FieldValue.serverTimestamp(),
         [`unreadCount_${uid}`]: admin.firestore.FieldValue.increment(1),
         [`unreadCount_${senderId}`]: 0,

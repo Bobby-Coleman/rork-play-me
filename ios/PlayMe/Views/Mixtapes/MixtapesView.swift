@@ -1306,6 +1306,7 @@ struct MixtapeDetailView: View {
     @State private var fullscreenSeed: FullscreenSeed?
     @State private var showEditDetails: Bool = false
     @State private var showShareSheet: Bool = false
+    @State private var showAddSongs: Bool = false
     /// Toggled by the "more"/"less" affordance under the description.
     /// Defaults to false so a long blurb collapses to 3 lines on first
     /// visit; the user can opt-in to the full text without losing grid
@@ -1371,6 +1372,11 @@ struct MixtapeDetailView: View {
                                 if let blurb = liveMixtape.description, !blurb.isEmpty {
                                     descriptionBlock(blurb)
                                         .padding(.top, 10)
+                                }
+
+                                if isOwner {
+                                    addSongsSearchBar
+                                        .padding(.top, 14)
                                 }
 
                                 if !liveMixtape.songs.isEmpty {
@@ -1508,6 +1514,11 @@ struct MixtapeDetailView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showAddSongs) {
+            AddSongsToMixtapeSheet(mixtape: liveMixtape, appState: appState)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     /// Full-width square hero: uploaded cover or mosaic fallback, title
@@ -1590,6 +1601,34 @@ struct MixtapeDetailView: View {
         .accessibilityLabel(target == .grid ? "Grid view" : "List view")
     }
 
+    private var addSongsSearchBar: some View {
+        Button {
+            showAddSongs = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.45))
+                Text("add more songs")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.58))
+                Spacer(minLength: 0)
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add more songs")
+    }
+
     /// Description text + optional more/less toggle. Collapsed by
     /// default at 3 lines; `descriptionExpanded` flips that to a full
     /// (still capped to 300 chars at write time) reveal.
@@ -1629,6 +1668,476 @@ struct MixtapeDetailView: View {
                 .foregroundStyle(.white.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Add songs to mixtape
+
+/// Search surface launched from `MixtapeDetailView`. It mirrors the main
+/// song-search UI but keeps the action scoped to one mixtape: song rows get
+/// an animated Add/Saved button instead of the send-to-friends step.
+private struct AddSongsToMixtapeSheet: View {
+    let mixtape: Mixtape
+    let appState: AppState
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText: String = ""
+    @State private var searchTask: Task<Void, Never>?
+    @State private var detailArtist: ArtistSummary?
+    @State private var detailAlbum: Album?
+    @State private var audioPlayer: AudioPlayerService = .shared
+    @State private var savingSongIds: Set<String> = []
+    @State private var addedSongIds: Set<String> = []
+    @State private var duplicateMixtapeSong: Song?
+    @FocusState private var isSearchFocused: Bool
+
+    private var liveMixtape: Mixtape {
+        appState.mixtapeStore.mixtape(withId: mixtape.id) ?? mixtape
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    header
+                    searchField
+
+                    if !searchText.isEmpty && !appState.searchResults.isEmpty {
+                        SearchFilterBar(selection: Binding(
+                            get: { appState.searchFilter },
+                            set: { appState.searchFilter = $0 }
+                        ))
+                        .padding(.bottom, 4)
+                    }
+
+                    AppScrollView {
+                        LazyVStack(spacing: 0) {
+                            if appState.isSearchingSongs && appState.searchResults.isEmpty {
+                                ProgressView()
+                                    .tint(.white)
+                                    .padding(.top, 40)
+                            } else if searchText.isEmpty {
+                                hintView
+                            } else if appState.searchResults.isEmpty {
+                                noResultsView
+                            } else {
+                                resultsContent
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(.white)
+                }
+            }
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .task {
+                try? await Task.sleep(for: .milliseconds(350))
+                isSearchFocused = true
+            }
+            .onDisappear {
+                searchTask?.cancel()
+            }
+        }
+        .presentationBackground(.black)
+        .preferredColorScheme(.dark)
+        .sheet(item: $detailArtist) { artist in
+            ArtistView(artistId: artist.id, initialArtistName: artist.name, appState: appState)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $detailAlbum) { album in
+            AlbumDetailView(album: album, appState: appState)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .alert("Already added", isPresented: Binding(
+            get: { duplicateMixtapeSong != nil },
+            set: { if !$0 { duplicateMixtapeSong = nil } }
+        )) {
+            Button("OK", role: .cancel) {
+                duplicateMixtapeSong = nil
+            }
+        } message: {
+            Text("This song is already in \(liveMixtape.name).")
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("add more songs")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(.white)
+            Text(liveMixtape.name)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.white.opacity(0.45))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 18)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.white.opacity(0.4))
+            AppTextField("Search songs or artists...", text: $searchText, submitLabel: .search) {
+                isSearchFocused = false
+            }
+                .foregroundStyle(.white)
+                .tint(.white)
+                .autocorrectionDisabled()
+                .focused($isSearchFocused)
+                .onChange(of: searchText) { _, newValue in
+                    performSearch(newValue)
+                }
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                    appState.searchResults = .empty
+                    appState.isSearchingSongs = false
+                    searchTask?.cancel()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color.white.opacity(0.08))
+        .clipShape(.rect(cornerRadius: 12))
+        .padding(.horizontal, 20)
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder
+    private var resultsContent: some View {
+        switch appState.searchFilter {
+        case .all:     allGroupedContent
+        case .artists: artistsFullList
+        case .songs:   songsFullList
+        case .albums:  albumsFullList
+        }
+    }
+
+    @ViewBuilder
+    private var allGroupedContent: some View {
+        let results = appState.searchResults
+
+        if let top = results.topHit {
+            ArtistResultHeader()
+            topHitRow(top)
+                .overlay(alignment: .bottom) {
+                    Color.white.opacity(0.05).frame(height: 0.5)
+                }
+        }
+
+        let artists = Array(results.artists.prefix(3).filter { artist in
+            if case .artist(let top) = results.topHit, top.id == artist.id { return false }
+            return true
+        })
+        if !artists.isEmpty {
+            SearchSectionHeader(title: "Artists", onSeeAll: results.artists.count > artists.count ? {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                appState.searchFilter = .artists
+            } : nil)
+            ForEach(artists) { artist in
+                ArtistResultRow(artist: artist) {
+                    detailArtist = artist
+                }
+                .id(artist.id)
+                .overlay(alignment: .bottom) {
+                    Color.white.opacity(0.05).frame(height: 0.5)
+                }
+            }
+        }
+
+        let songs = Array(results.songs.prefix(4).filter { song in
+            if case .song(let top) = results.topHit, top.id == song.id { return false }
+            return true
+        })
+        if !songs.isEmpty {
+            SearchSectionHeader(title: "Songs", onSeeAll: results.songs.count > songs.count ? {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                appState.searchFilter = .songs
+            } : nil)
+            ForEach(songs) { song in
+                songRow(song)
+            }
+        }
+
+        let albums = Array(results.albums.prefix(3).filter { album in
+            if case .album(let top) = results.topHit, top.id == album.id { return false }
+            return true
+        })
+        if !albums.isEmpty {
+            SearchSectionHeader(title: "Albums", onSeeAll: results.albums.count > albums.count ? {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                appState.searchFilter = .albums
+            } : nil)
+            ForEach(albums) { album in
+                AlbumResultRow(album: album, onTap: { detailAlbum = album })
+                    .id(album.id)
+                    .overlay(alignment: .bottom) {
+                        Color.white.opacity(0.05).frame(height: 0.5)
+                    }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var artistsFullList: some View {
+        ForEach(appState.searchResults.artists) { artist in
+            ArtistResultRow(artist: artist) {
+                detailArtist = artist
+            }
+            .id(artist.id)
+            .overlay(alignment: .bottom) {
+                Color.white.opacity(0.05).frame(height: 0.5)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var songsFullList: some View {
+        ForEach(appState.searchResults.songs) { song in
+            songRow(song)
+        }
+    }
+
+    @ViewBuilder
+    private var albumsFullList: some View {
+        ForEach(appState.searchResults.albums) { album in
+            AlbumResultRow(album: album, onTap: { detailAlbum = album })
+                .id(album.id)
+                .overlay(alignment: .bottom) {
+                    Color.white.opacity(0.05).frame(height: 0.5)
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func topHitRow(_ hit: SearchResults.TopHit) -> some View {
+        switch hit {
+        case .artist(let artist):
+            ArtistResultRow(artist: artist) {
+                detailArtist = artist
+            }
+            .id(artist.id)
+        case .song(let song):
+            songRow(song)
+        case .album(let album):
+            AlbumResultRow(album: album, onTap: { detailAlbum = album })
+                .id(album.id)
+        }
+    }
+
+    private var hintView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "music.magnifyingglass")
+                .font(.system(size: 36))
+                .foregroundStyle(.white.opacity(0.15))
+            Text("Search for songs to add")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.3))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 60)
+    }
+
+    private var noResultsView: some View {
+        VStack(spacing: 14) {
+            if appState.isMusicSearchDenied {
+                Image(systemName: "music.note.list")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.white.opacity(0.15))
+                Text("Allow Apple Music access to search songs")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Text("Open Settings")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(Capsule().fill(.white))
+                }
+            } else {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.white.opacity(0.15))
+                Text("No results for \"\(searchText)\"")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 60)
+    }
+
+    private func performSearch(_ query: String) {
+        searchTask?.cancel()
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            appState.searchResults = .empty
+            appState.isSearchingSongs = false
+            return
+        }
+        appState.isSearchingSongs = true
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            await appState.searchSongs(query: trimmed)
+        }
+    }
+
+    private func songRow(_ song: Song) -> some View {
+        let isPlaying = audioPlayer.currentSongId == song.id && audioPlayer.isPlaying
+        let isLoading = audioPlayer.currentSongId == song.id && audioPlayer.isLoading
+        let isSaved = isSongInLiveMixtape(song)
+        let isSaving = savingSongIds.contains(song.id)
+
+        return HStack(spacing: 14) {
+            ZStack {
+                Color(.systemGray5)
+                    .frame(width: 56, height: 56)
+                    .overlay {
+                        AsyncImage(url: URL(string: song.albumArtURL)) { phase in
+                            if let image = phase.image {
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            }
+                        }
+                        .allowsHitTesting(false)
+                    }
+                    .clipShape(.rect(cornerRadius: 6))
+
+                Button {
+                    audioPlayer.play(song: song)
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(.black.opacity(0.45))
+                            .frame(width: 32, height: 32)
+
+                        if isLoading {
+                            ProgressView()
+                                .tint(.white)
+                                .scaleEffect(0.6)
+                        } else {
+                            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .contentTransition(.symbolEffect(.replace))
+                        }
+                    }
+                }
+                .sensoryFeedback(.impact(weight: .light), trigger: isPlaying)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(song.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if let artistId = song.artistId {
+                    Button {
+                        detailArtist = ArtistSummary(
+                            id: artistId,
+                            name: song.artist,
+                            primaryGenre: nil
+                        )
+                    } label: {
+                        Text(song.artist.uppercased())
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.4))
+                            .tracking(0.5)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(song.artist.uppercased())
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .tracking(0.5)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            addButton(song: song, isSaved: isSaved, isSaving: isSaving)
+        }
+        .padding(.vertical, 12)
+        .overlay(alignment: .bottom) {
+            Color.white.opacity(0.05)
+                .frame(height: 0.5)
+        }
+    }
+
+    private func addButton(song: Song, isSaved: Bool, isSaving: Bool) -> some View {
+        Button {
+            guard !isSaving else { return }
+            guard !isSaved else {
+                duplicateMixtapeSong = song
+                return
+            }
+            savingSongIds.insert(song.id)
+            Task {
+                await appState.mixtapeStore.addSong(song, to: liveMixtape.id)
+                await MainActor.run {
+                    savingSongIds.remove(song.id)
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.65)) {
+                        _ = addedSongIds.insert(song.id)
+                    }
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                if isSaving {
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(0.65)
+                } else {
+                    Image(systemName: isSaved ? "checkmark" : "plus")
+                        .font(.system(size: 12, weight: .bold))
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                Text(isSaved ? "Added" : "Add")
+                    .font(.system(size: 12, weight: .bold))
+            }
+            .foregroundStyle(isSaved ? .black : .white)
+            .frame(minWidth: 66, minHeight: 34)
+            .background(isSaved ? Color.white : Color.white.opacity(0.1), in: Capsule())
+            .scaleEffect(isSaved ? 1.04 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .disabled(isSaving)
+        .animation(.spring(response: 0.28, dampingFraction: 0.65), value: isSaved)
+        .sensoryFeedback(.success, trigger: addedSongIds)
+        .accessibilityLabel(isSaved ? "Added to mixtape" : "Add to mixtape")
+    }
+
+    private func isSongInLiveMixtape(_ song: Song) -> Bool {
+        liveMixtape.songs.contains { $0.id == song.id }
+            || appState.saveService.mixtapeIds(forSongId: song.id).contains(liveMixtape.id)
+            || addedSongIds.contains(song.id)
     }
 }
 

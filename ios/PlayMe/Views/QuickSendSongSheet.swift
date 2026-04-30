@@ -18,6 +18,8 @@ struct QuickSendSongSheet: View {
     @State private var shareAlbum: Album?
     @State private var note: String = ""
     @State private var isSending: Bool = false
+    @State private var pendingDuplicateSong: Song?
+    @State private var showDuplicateSendAlert: Bool = false
     @FocusState private var isNoteFocused: Bool
     @FocusState private var isSearchFocused: Bool
     @State private var audioPlayer: AudioPlayerService = .shared
@@ -87,6 +89,19 @@ struct QuickSendSongSheet: View {
             .presentationBackground(.black)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
+        }
+        .alert("Send again?", isPresented: $showDuplicateSendAlert) {
+            Button("Cancel", role: .cancel) {
+                pendingDuplicateSong = nil
+            }
+            Button("Send Again") {
+                if let pendingDuplicateSong {
+                    sendSong(pendingDuplicateSong)
+                }
+                pendingDuplicateSong = nil
+            }
+        } message: {
+            Text("You've already sent this song to \(recipient.firstName). Would you like to send it again?")
         }
     }
 
@@ -347,12 +362,7 @@ struct QuickSendSongSheet: View {
                 .padding(.bottom, 20)
 
             Button {
-                Task {
-                    isSending = true
-                    await appState.sendSong(song, to: recipient, note: note.isEmpty ? nil : note)
-                    isSending = false
-                    dismiss()
-                }
+                prepareSend(song)
             } label: {
                 Text(isSending ? "Sending…" : "Send to \(recipient.firstName)")
                     .font(.system(size: 16, weight: .bold))
@@ -366,6 +376,31 @@ struct QuickSendSongSheet: View {
             .padding(.horizontal, 20)
 
             Spacer()
+        }
+    }
+
+    private func prepareSend(_ song: Song) {
+        guard !isSending else { return }
+        isSending = true
+        Task {
+            let duplicates = await appState.duplicateSongSendRecipients(for: song, friends: [recipient])
+            isSending = false
+            if duplicates.isEmpty {
+                sendSong(song)
+            } else {
+                pendingDuplicateSong = song
+                showDuplicateSendAlert = true
+            }
+        }
+    }
+
+    private func sendSong(_ song: Song) {
+        guard !isSending else { return }
+        Task {
+            isSending = true
+            await appState.sendSong(song, to: recipient, note: note.isEmpty ? nil : note)
+            isSending = false
+            dismiss()
         }
     }
 

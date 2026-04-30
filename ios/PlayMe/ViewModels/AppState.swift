@@ -445,12 +445,14 @@ class AppState {
         guard let user = currentUser else { return }
 
         let enrichedSong = await enrichSongWithSpotifyURI(song)
+        let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedNote = (trimmedNote?.isEmpty ?? true) ? nil : trimmedNote
 
         let share = SongShare(
             song: enrichedSong,
             sender: AppUser(id: user.id, firstName: user.firstName, lastName: user.lastName, username: user.username, phone: user.phone),
             recipient: friend,
-            note: note?.isEmpty == true ? nil : note
+            note: cleanedNote
         )
         sentShares.insert(share, at: 0)
 
@@ -464,7 +466,7 @@ class AppState {
 
         let firebase = FirebaseService.shared
         if let conv = await firebase.getOrCreateConversation(with: friend.id, friendName: friend.firstName) {
-            let messageText = note?.isEmpty == false ? note! : "Sent you a song"
+            let messageText = cleanedNote ?? ""
             await firebase.sendMessage(conversationId: conv.id, text: messageText, song: enrichedSong)
             await loadConversations()
         }
@@ -474,6 +476,29 @@ class AppState {
             try? await Task.sleep(for: .seconds(2))
             showSentToast = false
         }
+    }
+
+    func hasLocallySentSong(_ song: Song, to friend: AppUser) -> Bool {
+        sentShares.contains { share in
+            share.song.id == song.id && share.recipient.id == friend.id
+        }
+    }
+
+    func duplicateSongSendRecipients(for song: Song, friends: [AppUser]) async -> [AppUser] {
+        var duplicates: [AppUser] = []
+
+        for friend in friends {
+            if hasLocallySentSong(song, to: friend) {
+                duplicates.append(friend)
+                continue
+            }
+
+            if await FirebaseService.shared.hasSentSong(songId: song.id, to: friend.id) {
+                duplicates.append(friend)
+            }
+        }
+
+        return duplicates
     }
 
     /// Fan-out send of a whole mixtape to one or more friends. Mirrors

@@ -36,6 +36,17 @@ class FirebaseService {
         return Self.localDayFormatter.string(from: y)
     }
 
+    /// Snapchat-style active streak display: a stored streak remains active
+    /// on the day of the last song send and the following day. If an entire
+    /// local calendar day passes with no song from either participant, the
+    /// displayed streak drops to zero until the next song send starts it over.
+    private static func effectiveSongStreak(count: Int, lastDay: String?) -> Int {
+        guard count > 0, let lastDay, !lastDay.isEmpty else { return 0 }
+        let today = localDateString()
+        let yesterday = localYesterdayDateString()
+        return (lastDay == today || lastDay == yesterday) ? count : 0
+    }
+
     init() {
         if let user = Auth.auth().currentUser {
             firebaseUID = user.uid
@@ -425,6 +436,22 @@ class FirebaseService {
         } catch {
             print("FirebaseService: load sent shares failed: \(error.localizedDescription)")
             return []
+        }
+    }
+
+    func hasSentSong(songId: String, to recipientId: String) async -> Bool {
+        guard let uid = firebaseUID, !songId.isEmpty, !recipientId.isEmpty else { return false }
+        do {
+            let snapshot = try await db.collection("shares")
+                .whereField("senderId", isEqualTo: uid)
+                .whereField("recipientId", isEqualTo: recipientId)
+                .whereField("song.id", isEqualTo: songId)
+                .limit(to: 1)
+                .getDocuments()
+            return !snapshot.documents.isEmpty
+        } catch {
+            print("FirebaseService: duplicate sent song check failed: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -1487,8 +1514,9 @@ class FirebaseService {
                 }
 
                 let participants = data["participants"] as? [String] ?? []
+                let lastMessageText = text.isEmpty ? (song?.title ?? "") : text
                 var updates: [String: Any] = [
-                    "lastMessageText": text,
+                    "lastMessageText": lastMessageText,
                     "lastMessageTimestamp": FieldValue.serverTimestamp(),
                 ]
                 for p in participants where p != uid {
@@ -1732,7 +1760,11 @@ class FirebaseService {
 
         let uid = firebaseUID ?? ""
         let unread = data["unreadCount_\(uid)"] as? Int ?? 0
-        let streak = data["songStreakCount"] as? Int ?? 0
+        let storedStreak = data["songStreakCount"] as? Int ?? 0
+        let streak = Self.effectiveSongStreak(
+            count: storedStreak,
+            lastDay: data["songStreakLastDay"] as? String
+        )
 
         // Read receipt map: scan participants for `lastReadAt_<uid>` and
         // build a [uid: Date] dictionary. Missing entries mean that

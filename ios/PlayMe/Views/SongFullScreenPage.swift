@@ -43,6 +43,11 @@ struct SongFullScreenPage: View {
         return appState.isLiked(shareId: id)
     }
 
+    private var trimmedShareNote: String? {
+        let note = (share?.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return note.isEmpty ? nil : note
+    }
+
     var body: some View {
         let nonArt = topBlockHeight + bottomBlockHeight
         let artSize = FeedLayout.artSize(forPageSize: pageSize, nonArtHeight: nonArt)
@@ -117,7 +122,7 @@ struct SongFullScreenPage: View {
     // MARK: - Header (title / artist)
 
     private var header: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 10) {
             HStack(spacing: 0) {
                 Text(song.title)
                     .fontWeight(.bold)
@@ -131,7 +136,35 @@ struct SongFullScreenPage: View {
             .lineLimit(1)
             .truncationMode(.tail)
             .multilineTextAlignment(.center)
+
+            if let trimmedShareNote {
+                shareNoteBlock(trimmedShareNote)
+                    .padding(.top, 2)
+            }
         }
+    }
+
+    private func shareNoteBlock(_ note: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "quote.opening")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white.opacity(0.45))
+                .padding(.top, 3)
+
+            Text(note)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white.opacity(0.82))
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(maxWidth: 320, alignment: .leading)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+        )
     }
 
     // MARK: - Artwork
