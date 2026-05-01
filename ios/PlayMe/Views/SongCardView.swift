@@ -53,6 +53,9 @@ struct SongCardView: View {
 
     private var headerLabel: String {
         if let sentHistory {
+            if sentHistory.recipientCount == 1, let recipient = sentHistory.recipients.first {
+                return "YOU SENT THIS SONG TO \(recipient.firstName.uppercased())"
+            }
             let noun = sentHistory.recipientCount == 1 ? "PERSON" : "PEOPLE"
             return "YOU SENT THIS SONG TO \(sentHistory.recipientCount) \(noun)"
         }
@@ -396,19 +399,21 @@ struct SongCardView: View {
 
     private var listenerRow: some View {
         Button {
-            if !listeners.isEmpty {
+            if listeners.count > 1 {
                 showListenerList = true
             }
         } label: {
             HStack(spacing: 10) {
-                ListenerAvatarStack(listeners: listeners)
+                if listeners.count > 1 {
+                    ListenerAvatarStack(listeners: listeners)
+                }
 
                 Text(listenerSummary)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(listeners.isEmpty ? .white.opacity(0.42) : .white.opacity(0.82))
                     .lineLimit(1)
 
-                if !listeners.isEmpty {
+                if listeners.count > 1 {
                     Image(systemName: "chevron.up")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white.opacity(0.45))
@@ -420,7 +425,7 @@ struct SongCardView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .disabled(listeners.isEmpty)
+        .disabled(listenersAreInformational)
         .accessibilityLabel(listenerSummary)
     }
 
@@ -545,12 +550,19 @@ struct SongCardView: View {
 
     private var listenerSummary: String {
         guard !listeners.isEmpty else { return "No listens yet" }
+        if listeners.count == 1, let listener = listeners.first {
+            return "Listened by \(listener.user.firstName)"
+        }
         let names = listeners.prefix(2).map { $0.user.firstName }.joined(separator: ", ")
         let remaining = listeners.count - min(listeners.count, 2)
         if remaining > 0 {
             return "Listened by \(names) + \(remaining)"
         }
         return "Listened by \(names)"
+    }
+
+    private var listenersAreInformational: Bool {
+        listeners.count <= 1
     }
 
     private func sentRecipientSummary(_ recipients: [AppUser]) -> String {

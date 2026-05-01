@@ -1,5 +1,8 @@
 const { onRequest } = require("firebase-functions/v2/https");
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const {
+  onDocumentCreated,
+  onDocumentUpdated,
+} = require("firebase-functions/v2/firestore");
 const functionsV1 = require("firebase-functions/v1");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
@@ -261,6 +264,48 @@ exports.onNewLike = onDocumentCreated(
       },
       collapseId: `like-${shareId}`,
       threadId: "likes",
+    });
+  }
+);
+
+exports.onShareListened = onDocumentUpdated(
+  "shares/{shareId}",
+  async (event) => {
+    const before = event.data.before.data() || {};
+    const after = event.data.after.data() || {};
+    const shareId = event.params.shareId;
+
+    // Notify only on the first listen receipt. Later source updates
+    // (preview + external) should update history without stacking pushes.
+    if (before.recipientListenedAt || !after.recipientListenedAt) return;
+
+    const senderId = after.senderId;
+    const recipientId = after.recipientId;
+    if (!senderId || !recipientId || senderId === recipientId) return;
+
+    if (await isBlockedBy(senderId, recipientId)) {
+      console.log(
+        `onShareListened: skipping push — ${recipientId} is blocked by ${senderId}`
+      );
+      return;
+    }
+    if (!(await notificationsEnabledFor(senderId))) return;
+
+    const listenerName =
+      after.recipient?.firstName || (await getUserName(recipientId));
+    const songTitle = after.song?.title || "your song";
+
+    await sendPush(senderId, {
+      title: "PlayMe",
+      body: `${listenerName} listened to "${songTitle}"`,
+      data: {
+        type: "share_listened",
+        id: shareId,
+        shareId,
+        listenerId: recipientId,
+      },
+      collapseId: `listen-${shareId}`,
+      threadId: "listens",
     });
   }
 );
