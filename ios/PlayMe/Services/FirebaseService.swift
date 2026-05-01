@@ -13,6 +13,25 @@ class FirebaseService {
 
     private let db = Firestore.firestore()
     private var verificationID: String?
+    private let friendRequestReadLimit = 50
+
+    private func deterministicId(parts: [String]) -> String {
+        let joined = parts.joined(separator: "|")
+        let digest = SHA256.hash(data: Data(joined.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    func shareDocumentId(senderId: String, recipientId: String, songId: String) -> String {
+        deterministicId(parts: ["share", senderId, recipientId, songId])
+    }
+
+    func mixtapeShareDocumentId(senderId: String, recipientId: String, mixtapeId: String) -> String {
+        deterministicId(parts: ["mixtapeShare", senderId, recipientId, mixtapeId])
+    }
+
+    func albumShareDocumentId(senderId: String, recipientId: String, albumId: String) -> String {
+        deterministicId(parts: ["albumShare", senderId, recipientId, albumId])
+    }
 
     private static var localDayFormatter: DateFormatter {
         let f = DateFormatter()
@@ -109,7 +128,9 @@ class FirebaseService {
     func saveFCMToken(_ token: String) async {
         guard let uid = firebaseUID else { return }
         do {
-            try await db.collection("users").document(uid).setData(["fcmToken": token], merge: true)
+            try await db.collection("users").document(uid)
+                .collection("private").document("profile")
+                .setData(["fcmToken": token, "updatedAt": FieldValue.serverTimestamp()], merge: true)
         } catch {
             print("FirebaseService: saveFCMToken failed: \(error.localizedDescription)")
         }
@@ -118,7 +139,9 @@ class FirebaseService {
     func removeFCMToken() async {
         guard let uid = firebaseUID else { return }
         do {
-            try await db.collection("users").document(uid).updateData(["fcmToken": FieldValue.delete()])
+            try await db.collection("users").document(uid)
+                .collection("private").document("profile")
+                .updateData(["fcmToken": FieldValue.delete(), "updatedAt": FieldValue.serverTimestamp()])
         } catch {
             print("FirebaseService: removeFCMToken failed: \(error.localizedDescription)")
         }
@@ -134,6 +157,7 @@ class FirebaseService {
         let normalizedPhone = PhoneNormalizer.normalize(phone) ?? phone
         let usernameRef = db.collection("usernames").document(lowered)
         let userRef = db.collection("users").document(uid)
+        let privateRef = userRef.collection("private").document("profile")
 
         do {
             let result = try await db.runTransaction { transaction, errorPointer -> Any? in
@@ -161,10 +185,15 @@ class FirebaseService {
                     "username": lowered,
                     "firstName": firstName,
                     "lastName": lastName,
-                    "phone": normalizedPhone,
+                    "phone": FieldValue.delete(),
                     "createdAt": FieldValue.serverTimestamp(),
                     "updatedAt": FieldValue.serverTimestamp(),
                 ], forDocument: userRef, merge: true)
+
+                transaction.setData([
+                    "phone": normalizedPhone,
+                    "updatedAt": FieldValue.serverTimestamp(),
+                ], forDocument: privateRef, merge: true)
 
                 return NSNumber(value: true)
             }
@@ -184,8 +213,10 @@ class FirebaseService {
             "firstName": firstName ?? username,
             "lastName": lastName ?? "",
             "updatedAt": FieldValue.serverTimestamp(),
+            "phone": FieldValue.delete(),
         ]
-        if let phone { data["phone"] = phone }
+        var privateData: [String: Any] = ["updatedAt": FieldValue.serverTimestamp()]
+        if let phone { privateData["phone"] = PhoneNormalizer.normalize(phone) ?? phone }
 
         do {
             let doc = try await ref.getDocument()
@@ -193,7 +224,11 @@ class FirebaseService {
                 try await ref.updateData(data)
             } else {
                 data["createdAt"] = FieldValue.serverTimestamp()
+                data.removeValue(forKey: "phone")
                 try await ref.setData(data)
+            }
+            if privateData["phone"] != nil {
+                try await ref.collection("private").document("profile").setData(privateData, merge: true)
             }
         } catch {
             print("FirebaseService: profile write failed: \(error.localizedDescription)")
@@ -224,7 +259,10 @@ class FirebaseService {
             let username = data["username"] as? String ?? ""
             let firstName = data["firstName"] as? String ?? username
             let lastName = data["lastName"] as? String ?? ""
-            let phone = data["phone"] as? String ?? ""
+            let privateDoc = try? await db.collection("users").document(uid)
+                .collection("private").document("profile")
+                .getDocument()
+            let phone = privateDoc?.data()?["phone"] as? String ?? data["phone"] as? String ?? ""
             return (username: username, firstName: firstName, lastName: lastName, phone: phone)
         } catch {
             print("FirebaseService: profile load failed: \(error.localizedDescription)")
@@ -317,8 +355,21 @@ class FirebaseService {
         ]
 
         do {
-            let ref = try await db.collection("shares").addDocument(data: data)
-            return ref.documentID
+            let shareId = shareDocumentId(senderId: uid, recipientId: share.recipient.id, songId: share.song.id)
+            let ref = db.collection("shares").document(shareId)
+            _ = try await db.runTransaction { transaction, errorPointer -> Any? in
+                do {
+                    if try transaction.getDocument(ref).exists {
+                        return NSNumber(value: true)
+                    }
+                    transaction.setData(data, forDocument: ref)
+                    return NSNumber(value: true)
+                } catch let transactionError as NSError {
+                    errorPointer?.pointee = transactionError
+                    return nil
+                }
+            }
+            return shareId
         } catch {
             print("FirebaseService: save share failed: \(error.localizedDescription)")
             return nil
@@ -569,8 +620,21 @@ class FirebaseService {
             ],
         ]
         do {
-            let ref = try await db.collection("mixtapeShares").addDocument(data: payload)
-            return ref.documentID
+            let shareId = mixtapeShareDocumentId(senderId: uid, recipientId: share.recipient.id, mixtapeId: share.mixtape.id)
+            let ref = db.collection("mixtapeShares").document(shareId)
+            _ = try await db.runTransaction { transaction, errorPointer -> Any? in
+                do {
+                    if try transaction.getDocument(ref).exists {
+                        return NSNumber(value: true)
+                    }
+                    transaction.setData(payload, forDocument: ref)
+                    return NSNumber(value: true)
+                } catch let transactionError as NSError {
+                    errorPointer?.pointee = transactionError
+                    return nil
+                }
+            }
+            return shareId
         } catch {
             print("FirebaseService: saveMixtapeShare failed: \(error.localizedDescription)")
             return nil
@@ -661,8 +725,21 @@ class FirebaseService {
             ],
         ]
         do {
-            let ref = try await db.collection("albumShares").addDocument(data: payload)
-            return ref.documentID
+            let shareId = albumShareDocumentId(senderId: uid, recipientId: share.recipient.id, albumId: share.album.id)
+            let ref = db.collection("albumShares").document(shareId)
+            _ = try await db.runTransaction { transaction, errorPointer -> Any? in
+                do {
+                    if try transaction.getDocument(ref).exists {
+                        return NSNumber(value: true)
+                    }
+                    transaction.setData(payload, forDocument: ref)
+                    return NSNumber(value: true)
+                } catch let transactionError as NSError {
+                    errorPointer?.pointee = transactionError
+                    return nil
+                }
+            }
+            return shareId
         } catch {
             print("FirebaseService: saveAlbumShare failed: \(error.localizedDescription)")
             return nil
@@ -845,10 +922,10 @@ class FirebaseService {
     func removeFriend(friendUID: String) async {
         guard let uid = firebaseUID else { return }
         do {
-            try await db.collection("users").document(uid).collection("friends")
-                .document(friendUID).delete()
-            try await db.collection("users").document(friendUID).collection("friends")
-                .document(uid).delete()
+            let batch = db.batch()
+            batch.deleteDocument(db.collection("users").document(uid).collection("friends").document(friendUID))
+            batch.deleteDocument(db.collection("users").document(friendUID).collection("friends").document(uid))
+            try await batch.commit()
         } catch {
             print("FirebaseService: remove friend failed: \(error.localizedDescription)")
         }
@@ -857,20 +934,20 @@ class FirebaseService {
     func addFriend(friendUID: String, friendUsername: String, friendFirstName: String, friendLastName: String = "") async {
         guard let uid = firebaseUID else { return }
         do {
-            try await db.collection("users").document(uid).collection("friends")
-                .document(friendUID).setData([
-                    "username": friendUsername,
-                    "firstName": friendFirstName,
-                    "lastName": friendLastName,
-                    "addedAt": FieldValue.serverTimestamp(),
-                ])
-            try await db.collection("users").document(friendUID).collection("friends")
-                .document(uid).setData([
-                    "username": UserDefaults.standard.string(forKey: "currentUserUsername") ?? "",
-                    "firstName": UserDefaults.standard.string(forKey: "currentUserFirstName") ?? "",
-                    "lastName": UserDefaults.standard.string(forKey: "currentUserLastName") ?? "",
-                    "addedAt": FieldValue.serverTimestamp(),
-                ])
+            let batch = db.batch()
+            batch.setData([
+                "username": friendUsername,
+                "firstName": friendFirstName,
+                "lastName": friendLastName,
+                "addedAt": FieldValue.serverTimestamp(),
+            ], forDocument: db.collection("users").document(uid).collection("friends").document(friendUID))
+            batch.setData([
+                "username": UserDefaults.standard.string(forKey: "currentUserUsername") ?? "",
+                "firstName": UserDefaults.standard.string(forKey: "currentUserFirstName") ?? "",
+                "lastName": UserDefaults.standard.string(forKey: "currentUserLastName") ?? "",
+                "addedAt": FieldValue.serverTimestamp(),
+            ], forDocument: db.collection("users").document(friendUID).collection("friends").document(uid))
+            try await batch.commit()
         } catch {
             print("FirebaseService: add friend failed: \(error.localizedDescription)")
         }
@@ -963,14 +1040,22 @@ class FirebaseService {
     /// and deleting the request document.
     func acceptFriendRequest(from user: AppUser) async {
         guard let uid = firebaseUID else { return }
-        await addFriend(
-            friendUID: user.id,
-            friendUsername: user.username,
-            friendFirstName: user.firstName,
-            friendLastName: user.lastName
-        )
         do {
             let batch = db.batch()
+            batch.setData([
+                "username": user.username,
+                "firstName": user.firstName,
+                "lastName": user.lastName,
+                "acceptedBy": uid,
+                "addedAt": FieldValue.serverTimestamp(),
+            ], forDocument: db.collection("users").document(uid).collection("friends").document(user.id))
+            batch.setData([
+                "username": UserDefaults.standard.string(forKey: "currentUserUsername") ?? "",
+                "firstName": UserDefaults.standard.string(forKey: "currentUserFirstName") ?? "",
+                "lastName": UserDefaults.standard.string(forKey: "currentUserLastName") ?? "",
+                "acceptedBy": uid,
+                "addedAt": FieldValue.serverTimestamp(),
+            ], forDocument: db.collection("users").document(user.id).collection("friends").document(uid))
             batch.deleteDocument(
                 db.collection("users").document(uid)
                     .collection("friendRequests").document(user.id)
@@ -1009,7 +1094,10 @@ class FirebaseService {
         guard let uid = firebaseUID else { return [] }
         do {
             let snapshot = try await db.collection("users").document(uid)
-                .collection("friendRequests").getDocuments()
+                .collection("friendRequests")
+                .order(by: "createdAt", descending: true)
+                .limit(to: friendRequestReadLimit)
+                .getDocuments()
             return snapshot.documents.compactMap { doc -> AppUser? in
                 let data = doc.data()
                 let username = data["username"] as? String ?? ""
@@ -1030,6 +1118,7 @@ class FirebaseService {
             let snapshot = try await db.collection("users").document(uid)
                 .collection("outgoingFriendRequests")
                 .order(by: "createdAt", descending: true)
+                .limit(to: friendRequestReadLimit)
                 .getDocuments()
             return snapshot.documents.compactMap(parseRequestUser)
         } catch {
@@ -1061,6 +1150,8 @@ class FirebaseService {
         guard let uid = firebaseUID else { return nil }
         return db.collection("users").document(uid)
             .collection("friendRequests")
+            .order(by: "createdAt", descending: true)
+            .limit(to: friendRequestReadLimit)
             .addSnapshotListener { snapshot, _ in
                 guard let docs = snapshot?.documents else { return }
                 let requests = docs.map { doc -> AppUser in
@@ -1081,6 +1172,7 @@ class FirebaseService {
         return db.collection("users").document(uid)
             .collection("outgoingFriendRequests")
             .order(by: "createdAt", descending: true)
+            .limit(to: friendRequestReadLimit)
             .addSnapshotListener { [weak self] snapshot, error in
                 if let error {
                     print("FirebaseService: listen outgoing requests failed: \(error.localizedDescription)")
@@ -1490,13 +1582,19 @@ class FirebaseService {
     /// the request doc when done, and the claim itself is idempotent.
     func requestPendingSharesClaim() async {
         guard let uid = firebaseUID else { return }
-        let reqId = "\(uid)_\(Int(Date().timeIntervalSince1970))"
+        let throttleKey = "lastPendingSharesClaimRequestAt.\(uid)"
+        let now = Date().timeIntervalSince1970
+        let last = UserDefaults.standard.double(forKey: throttleKey)
+        guard last == 0 || now - last > 15 * 60 else { return }
+
+        let reqId = "\(uid)_\(Int(now / (15 * 60)))"
         let ref = db.collection("claimRequests").document(reqId)
         do {
             try await ref.setData([
                 "uid": uid,
                 "createdAt": FieldValue.serverTimestamp(),
             ])
+            UserDefaults.standard.set(now, forKey: throttleKey)
             print("FirebaseService: event=pending_share_claim_requested uid=\(uid) reqId=\(reqId)")
         } catch {
             print("FirebaseService: event=pending_share_claim_request_failed uid=\(uid) error=\(error.localizedDescription)")
@@ -1567,7 +1665,8 @@ class FirebaseService {
         conversationId: String,
         text: String,
         song: Song? = nil,
-        replyTo: ChatMessage? = nil
+        replyTo: ChatMessage? = nil,
+        mutationId: String = UUID().uuidString
     ) async {
         guard let uid = firebaseUID else {
             print("FirebaseService: sendMessage - not signed in")
@@ -1617,16 +1716,20 @@ class FirebaseService {
 
         do {
             let convRef = db.collection("conversations").document(conversationId)
-            try await convRef.collection("messages").addDocument(data: msgData)
-            print("FirebaseService: message added to \(conversationId)")
+            let msgRef = convRef.collection("messages").document(mutationId)
 
             let result = try await db.runTransaction { transaction, errorPointer -> Any? in
                 let snapshot: DocumentSnapshot
+                let existingMessage: DocumentSnapshot
                 do {
                     snapshot = try transaction.getDocument(convRef)
+                    existingMessage = try transaction.getDocument(msgRef)
                 } catch let e as NSError {
                     errorPointer?.pointee = e
                     return nil
+                }
+                if existingMessage.exists {
+                    return NSNumber(value: false)
                 }
                 guard let data = snapshot.data() else {
                     let err = NSError(domain: "PlayMe", code: -2, userInfo: [NSLocalizedDescriptionKey: "Missing conversation"])
@@ -1664,11 +1767,12 @@ class FirebaseService {
                     }
                 }
 
+                transaction.setData(msgData, forDocument: msgRef)
                 transaction.updateData(updates, forDocument: convRef)
                 return NSNumber(value: true)
             }
-            _ = result
-            print("FirebaseService: conversation \(conversationId) updated (transaction)")
+            let didWrite = (result as? NSNumber)?.boolValue ?? false
+            print("FirebaseService: conversation \(conversationId) updated (transaction, messageWritten=\(didWrite))")
         } catch {
             print("FirebaseService: sendMessage FAILED: \(error)")
         }
@@ -2164,6 +2268,33 @@ class FirebaseService {
             print("FirebaseService: createMixtape failed: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    // MARK: - Featured Discover songs
+
+    /// Ordered editorial song list for the left Discover/Home feed.
+    /// Documents live at `featured_songs/{songId}` and are ordered by
+    /// numeric `order` ascending so the feed can be curated from Firebase
+    /// without shipping a new app build.
+    func fetchFeaturedSongs(limit: Int = 100) async -> [Song] {
+        do {
+            let snapshot = try await db.collection("featured_songs")
+                .order(by: "order", descending: false)
+                .limit(to: limit)
+                .getDocuments()
+            return snapshot.documents.compactMap { Self.parseFeaturedSong(from: $0) }
+        } catch {
+            print("FirebaseService: fetchFeaturedSongs failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    private static func parseFeaturedSong(from doc: QueryDocumentSnapshot) -> Song? {
+        var data = doc.data()
+        if data["id"] == nil {
+            data["id"] = doc.documentID
+        }
+        return parseEmbeddedSong(from: data)
     }
 
     // MARK: - Featured Discover mixtapes

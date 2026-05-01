@@ -24,6 +24,8 @@ struct CreateMixtapeDraft {
 @Observable
 @MainActor
 class AppState {
+    private let shareFanOutBatchSize = 8
+
     var isOnboarded: Bool = UserDefaults.standard.bool(forKey: "isOnboarded") {
         didSet { UserDefaults.standard.set(isOnboarded, forKey: "isOnboarded") }
     }
@@ -432,9 +434,7 @@ class AppState {
         }
 
         let serverLikes = await firebase.loadLikedShareIds()
-        if !serverLikes.isEmpty {
-            likedShareIds = serverLikes
-        }
+        likedShareIds = serverLikes
 
         let serverFriends = await firebase.loadFriends()
         blockedUserIds = await firebase.loadBlockedUserIds()
@@ -457,9 +457,7 @@ class AppState {
         receivedShares = serverReceived
 
         let serverSent = await firebase.loadSentShares()
-        if !serverSent.isEmpty {
-            sentShares = serverSent
-        }
+        sentShares = serverSent
 
         // Initial paint of mixtape/album shares before the listener
         // delivers its first snapshot. Filter `blockedUserIds` so a
@@ -500,12 +498,15 @@ class AppState {
         let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanedNote = (trimmedNote?.isEmpty ?? true) ? nil : trimmedNote
 
+        let shareId = FirebaseService.shared.shareDocumentId(senderId: user.id, recipientId: friend.id, songId: enrichedSong.id)
         let share = SongShare(
+            id: shareId,
             song: enrichedSong,
             sender: AppUser(id: user.id, firstName: user.firstName, lastName: user.lastName, username: user.username, phone: user.phone),
             recipient: friend,
             note: cleanedNote
         )
+        sentShares.removeAll { $0.id == share.id }
         sentShares.insert(share, at: 0)
 
         Task { await FirebaseService.shared.saveShare(share) }
@@ -519,7 +520,7 @@ class AppState {
         let firebase = FirebaseService.shared
         if let conv = await firebase.getOrCreateConversation(with: friend.id, friendName: friend.firstName) {
             let messageText = cleanedNote ?? ""
-            await firebase.sendMessage(conversationId: conv.id, text: messageText, song: enrichedSong)
+            await firebase.sendMessage(conversationId: conv.id, text: messageText, song: enrichedSong, mutationId: "share-\(shareId)")
             await loadConversations()
         }
 
@@ -571,7 +572,9 @@ class AppState {
         )
         var locallyInserted: [MixtapeShare] = []
         for friend in friends {
+            let shareId = FirebaseService.shared.mixtapeShareDocumentId(senderId: user.id, recipientId: friend.id, mixtapeId: snapshot.id)
             let share = MixtapeShare(
+                id: shareId,
                 mixtape: snapshot,
                 sender: me,
                 recipient: friend,
@@ -579,22 +582,47 @@ class AppState {
             )
             locallyInserted.append(share)
         }
+        let localIds = Set(locallyInserted.map(\.id))
+        sentMixtapeShares.removeAll { localIds.contains($0.id) }
         sentMixtapeShares.insert(contentsOf: locallyInserted, at: 0)
         showSentToast = true
 
-        await withTaskGroup(of: Void.self) { group in
-            let firebase = FirebaseService.shared
-            for share in locallyInserted {
-                group.addTask { await firebase.saveMixtapeShare(share) }
-            }
-            // Bump per-friend send stats so the chip row reorders.
-            for friend in friends {
-                group.addTask { @MainActor [weak self] in
-                    guard let self else { return }
-                    let prev = self.sendStats[friend.id]?.count ?? 0
-                    self.sendStats[friend.id] = SendStat(count: prev + 1, lastSentAt: Date())
-                    await firebase.incrementSendStat(friendUid: friend.id)
+        var successfulRecipientIds = Set<String>()
+        for start in stride(from: 0, to: locallyInserted.count, by: shareFanOutBatchSize) {
+            let end = min(start + shareFanOutBatchSize, locallyInserted.count)
+            let batch = Array(locallyInserted[start..<end])
+            let batchResults = await withTaskGroup(of: (String, Bool).self, returning: [(String, Bool)].self) { group in
+                let firebase = FirebaseService.shared
+                for share in batch {
+                    group.addTask {
+                        let savedId = await firebase.saveMixtapeShare(share)
+                        return (share.recipient.id, savedId != nil)
+                    }
                 }
+
+                var results: [(String, Bool)] = []
+                for await result in group {
+                    results.append(result)
+                }
+                return results
+            }
+            for (recipientId, didSave) in batchResults where didSave {
+                successfulRecipientIds.insert(recipientId)
+            }
+        }
+
+        if successfulRecipientIds.count < locallyInserted.count {
+            let failedIds = Set(friends.map(\.id)).subtracting(successfulRecipientIds)
+            sentMixtapeShares.removeAll { failedIds.contains($0.recipient.id) && $0.mixtape.id == snapshot.id }
+            queuedContactError = "Some mixtape sends failed. Please try again."
+            clearQueuedContactFeedbackSoon()
+        }
+
+        for friend in friends where successfulRecipientIds.contains(friend.id) {
+            let prev = sendStats[friend.id]?.count ?? 0
+            sendStats[friend.id] = SendStat(count: prev + 1, lastSentAt: Date())
+            Task {
+                await FirebaseService.shared.incrementSendStat(friendUid: friend.id)
             }
         }
 
@@ -621,7 +649,9 @@ class AppState {
         )
         var locallyInserted: [AlbumShare] = []
         for friend in friends {
+            let shareId = FirebaseService.shared.albumShareDocumentId(senderId: user.id, recipientId: friend.id, albumId: album.id)
             let share = AlbumShare(
+                id: shareId,
                 album: album,
                 songs: tracks,
                 sender: me,
@@ -630,21 +660,47 @@ class AppState {
             )
             locallyInserted.append(share)
         }
+        let localIds = Set(locallyInserted.map(\.id))
+        sentAlbumShares.removeAll { localIds.contains($0.id) }
         sentAlbumShares.insert(contentsOf: locallyInserted, at: 0)
         showSentToast = true
 
-        await withTaskGroup(of: Void.self) { group in
-            let firebase = FirebaseService.shared
-            for share in locallyInserted {
-                group.addTask { await firebase.saveAlbumShare(share) }
-            }
-            for friend in friends {
-                group.addTask { @MainActor [weak self] in
-                    guard let self else { return }
-                    let prev = self.sendStats[friend.id]?.count ?? 0
-                    self.sendStats[friend.id] = SendStat(count: prev + 1, lastSentAt: Date())
-                    await firebase.incrementSendStat(friendUid: friend.id)
+        var successfulRecipientIds = Set<String>()
+        for start in stride(from: 0, to: locallyInserted.count, by: shareFanOutBatchSize) {
+            let end = min(start + shareFanOutBatchSize, locallyInserted.count)
+            let batch = Array(locallyInserted[start..<end])
+            let batchResults = await withTaskGroup(of: (String, Bool).self, returning: [(String, Bool)].self) { group in
+                let firebase = FirebaseService.shared
+                for share in batch {
+                    group.addTask {
+                        let savedId = await firebase.saveAlbumShare(share)
+                        return (share.recipient.id, savedId != nil)
+                    }
                 }
+
+                var results: [(String, Bool)] = []
+                for await result in group {
+                    results.append(result)
+                }
+                return results
+            }
+            for (recipientId, didSave) in batchResults where didSave {
+                successfulRecipientIds.insert(recipientId)
+            }
+        }
+
+        if successfulRecipientIds.count < locallyInserted.count {
+            let failedIds = Set(friends.map(\.id)).subtracting(successfulRecipientIds)
+            sentAlbumShares.removeAll { failedIds.contains($0.recipient.id) && $0.album.id == album.id }
+            queuedContactError = "Some album sends failed. Please try again."
+            clearQueuedContactFeedbackSoon()
+        }
+
+        for friend in friends where successfulRecipientIds.contains(friend.id) {
+            let prev = sendStats[friend.id]?.count ?? 0
+            sendStats[friend.id] = SendStat(count: prev + 1, lastSentAt: Date())
+            Task {
+                await FirebaseService.shared.incrementSendStat(friendUid: friend.id)
             }
         }
 

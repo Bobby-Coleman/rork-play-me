@@ -1,17 +1,16 @@
 import SwiftUI
 
-/// Root of the Home tab (leftmost). Pinterest-style staggered grid of
-/// **curated mixtapes** from `DiscoverMixtapeFeedProvider`; tap opens
-/// `MixtapeDetailView` (same sheet as the Mixtapes tab). Song playback
-/// stays inside that detail surface (fullscreen feed).
+/// Root of the Home tab (leftmost). Minimal offset grid of editorial songs
+/// from `DiscoverSongFeedProvider`; tap opens the shared TikTok-style song
+/// feed seeded with this curated order.
 struct HomeDiscoverView: View {
     let appState: AppState
 
-    @State private var provider: any DiscoverMixtapeFeedProvider = MockDiscoverMixtapeFeedProvider()
-    @State private var items: [Mixtape] = []
+    @State private var provider: any DiscoverSongFeedProvider = FirestoreDiscoverSongFeedProvider()
+    @State private var items: [Song] = []
     @State private var isLoading: Bool = false
     @State private var errorMessage: String?
-    @State private var detailMixtape: Mixtape?
+    @State private var fullscreenSeed: FullscreenSeed?
 
     private let horizontalPadding: CGFloat = 16
     private let spacing: CGFloat = 10
@@ -29,7 +28,7 @@ struct HomeDiscoverView: View {
 
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        Text("Curated mixtapes")
+                        Text("For You")
                             .font(.system(size: 22, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -49,11 +48,12 @@ struct HomeDiscoverView: View {
                                 items: items,
                                 cellSize: cellSize,
                                 spacing: spacing
-                            ) { mixtape, _ in
-                                MixtapeGridCell(mixtape: mixtape, cornerRadius: 14)
-                                    .contentShape(Rectangle())
+                            ) { song, side in
+                                SongDiscoverGridCell(song: song, side: side)
                                     .onTapGesture {
-                                        detailMixtape = mixtape
+                                        guard let idx = items.firstIndex(where: { $0.id == song.id }) else { return }
+                                        AudioPlayerService.shared.play(song: song)
+                                        fullscreenSeed = FullscreenSeed(songs: items, startIndex: idx)
                                     }
                             }
                             .padding(.horizontal, horizontalPadding)
@@ -69,11 +69,13 @@ struct HomeDiscoverView: View {
         .task {
             await refresh(force: false)
         }
-        .sheet(item: $detailMixtape) { mixtape in
-            MixtapeDetailView(mixtape: mixtape, appState: appState)
-                .presentationBackground(.black)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+        .fullScreenCover(item: $fullscreenSeed) { seed in
+            SongFullScreenFeedView(
+                songs: seed.songs,
+                startIndex: seed.startIndex,
+                appState: appState,
+                shareLookup: seed.shareLookup
+            )
         }
     }
 
@@ -82,7 +84,7 @@ struct HomeDiscoverView: View {
             Text("Discover")
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(.white)
-            Text(errorMessage ?? "Pull to refresh. Add documents to `featured_mixtapes` in Firebase.")
+            Text(errorMessage ?? "Pull to refresh. Add documents to `featured_songs` in Firebase.")
                 .font(.system(size: 14))
                 .foregroundStyle(.white.opacity(0.55))
                 .multilineTextAlignment(.center)
@@ -97,7 +99,7 @@ struct HomeDiscoverView: View {
         let fresh = await provider.loadInitial()
         items = fresh
         if fresh.isEmpty, force {
-            errorMessage = "No curated mixtapes yet."
+            errorMessage = "No curated songs yet."
         } else if !fresh.isEmpty {
             errorMessage = nil
         }

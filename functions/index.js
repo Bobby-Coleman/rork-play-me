@@ -29,9 +29,63 @@ function normalizeE164(raw) {
 
 // --------------- Helpers ---------------
 
+function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
+  return fetch(url, {
+    ...options,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
+
 async function getFCMToken(uid) {
-  const snap = await admin.firestore().collection("users").doc(uid).get();
+  const db = admin.firestore();
+  const privateSnap = await db
+    .collection("users")
+    .doc(uid)
+    .collection("private")
+    .doc("profile")
+    .get();
+  if (privateSnap.exists && privateSnap.data().fcmToken) {
+    return privateSnap.data().fcmToken;
+  }
+
+  // Legacy fallback while existing installs migrate tokens to the private doc.
+  const snap = await db.collection("users").doc(uid).get();
   return snap.exists ? snap.data().fcmToken || null : null;
+}
+
+async function clearFCMToken(uid) {
+  if (!uid) return;
+  const db = admin.firestore();
+  await db
+    .collection("users")
+    .doc(uid)
+    .collection("private")
+    .doc("profile")
+    .set(
+      {
+        fcmToken: admin.firestore.FieldValue.delete(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  await db.collection("users").doc(uid).update({ fcmToken: admin.firestore.FieldValue.delete() }).catch(() => {});
+}
+
+async function getPrivatePhone(uid) {
+  const db = admin.firestore();
+  const privateSnap = await db
+    .collection("users")
+    .doc(uid)
+    .collection("private")
+    .doc("profile")
+    .get();
+  if (privateSnap.exists && privateSnap.data().phone) {
+    return privateSnap.data().phone;
+  }
+
+  // Legacy fallback for profiles created before phone moved private.
+  const userSnap = await db.collection("users").doc(uid).get();
+  return userSnap.exists ? userSnap.data().phone || null : null;
 }
 
 async function getUserName(uid) {
@@ -124,10 +178,62 @@ async function sendPush(uid, opts = {}) {
       err.code === "messaging/registration-token-not-registered" ||
       err.code === "messaging/invalid-registration-token"
     ) {
-      console.log(`Stale FCM token, skipping: ${err.code}`);
+      console.log(`Stale FCM token, clearing: ${err.code}`);
+      await clearFCMToken(uid).catch((clearErr) => {
+        console.error("sendPush stale token cleanup failed:", clearErr.message);
+      });
     } else {
       console.error("sendPush error:", err);
     }
+  }
+}
+
+async function shouldSendPush(key, ttlHours = 24) {
+  if (!key) return true;
+  const safeKey = crypto.createHash("sha256").update(key).digest("hex");
+  const ref = admin.firestore().collection("pushDedupe").doc(safeKey);
+  try {
+    return await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (snap.exists) return false;
+      tx.set(ref, {
+        key,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        expiresAt: admin.firestore.Timestamp.fromMillis(
+          Date.now() + ttlHours * 60 * 60 * 1000
+        ),
+      });
+      return true;
+    });
+  } catch (err) {
+    console.error("push dedupe failed open:", err.message);
+    return true;
+  }
+}
+
+async function shouldRunClaimRequest(uid) {
+  const ref = admin.firestore().collection("claimRequestThrottle").doc(uid);
+  const now = Date.now();
+  try {
+    return await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const lastRunAtMillis = snap.exists ? snap.data().lastRunAtMillis || 0 : 0;
+      if (lastRunAtMillis && now - lastRunAtMillis < 5 * 60 * 1000) {
+        return false;
+      }
+      tx.set(
+        ref,
+        {
+          lastRunAtMillis: now,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      return true;
+    });
+  } catch (err) {
+    console.error("claim request throttle failed open:", err.message);
+    return true;
   }
 }
 
@@ -152,6 +258,7 @@ exports.onNewShare = onDocumentCreated("shares/{shareId}", async (event) => {
   const senderName = data.sender?.firstName || "Someone";
   const songTitle = data.song?.title || "a song";
 
+  if (!(await shouldSendPush(`new_share:${event.params.shareId}:${recipientId}`))) return;
   await sendPush(recipientId, {
     title: "New Song 🎵",
     body: `${senderName} sent you "${songTitle}"`,
@@ -209,6 +316,7 @@ exports.onNewMessage = onDocumentCreated(
         continue;
       }
       if (!(await notificationsEnabledFor(uid))) continue;
+      if (!(await shouldSendPush(`new_message:${convId}:${event.params.msgId}:${uid}`))) continue;
       await sendPush(uid, {
         title: senderName,
         body: text || "Sent a message",
@@ -254,6 +362,7 @@ exports.onNewLike = onDocumentCreated(
     const likerName = await getUserName(likerId);
     const songTitle = shareData.song?.title || "a song";
 
+    if (!(await shouldSendPush(`like:${shareId}:${likerId}:${senderId}`))) return;
     await sendPush(senderId, {
       title: "PlayMe",
       body: `${likerName} liked "${songTitle}"`,
@@ -295,6 +404,7 @@ exports.onShareListened = onDocumentUpdated(
       after.recipient?.firstName || (await getUserName(recipientId));
     const songTitle = after.song?.title || "your song";
 
+    if (!(await shouldSendPush(`share_listened:${shareId}:${recipientId}:${senderId}`))) return;
     await sendPush(senderId, {
       title: "PlayMe",
       body: `${listenerName} listened to "${songTitle}"`,
@@ -315,6 +425,12 @@ exports.onNewFriend = onDocumentCreated(
   async (event) => {
     const adderId = event.params.userId;
     const friendId = event.params.friendId;
+    const data = event.data?.data() || {};
+
+    // Accepting writes mirrored friendship rows. Only the row owned by the
+    // acceptor should notify the original requester.
+    if (data.acceptedBy && data.acceptedBy !== adderId) return;
+    if (!data.acceptedBy) return;
 
     if (await isBlockedBy(friendId, adderId)) {
       console.log(
@@ -325,11 +441,7 @@ exports.onNewFriend = onDocumentCreated(
     if (!(await notificationsEnabledFor(friendId))) return;
 
     const adderName = await getUserName(adderId);
-    // `onNewFriend` mirrors on both sides of the `users/{uid}/friends` write,
-    // so the person who RECEIVED the original friend request sees this fire
-    // when the acceptor writes the mirrored row on their side. Phrasing it
-    // as "X accepted your friend request" reads cleaner than the old generic
-    // "added you" copy.
+    if (!(await shouldSendPush(`friend_accepted:${adderId}:${friendId}`))) return;
     await sendPush(friendId, {
       title: "PlayMe",
       body: `${adderName} accepted your friend request`,
@@ -368,6 +480,7 @@ exports.onNewFriendRequest = onDocumentCreated(
       (data.username ? `@${data.username}` : "") ||
       "Someone";
 
+    if (!(await shouldSendPush(`friend_request:${fromUID}:${uid}`))) return;
     await sendPush(uid, {
       title: "PlayMe",
       body: `${displayName} sent you a friend request`,
@@ -534,9 +647,9 @@ async function cascadeDeleteUser(uid) {
     );
   }
 
-  // 8) Finally, delete the user profile doc itself (drops fcmToken, phone,
-  //    notificationsEnabled flag, etc).
+  // 8) Delete private profile metadata and then the public user profile doc.
   try {
+    await userRef.collection("private").doc("profile").delete().catch(() => {});
     await userRef.delete();
   } catch (err) {
     console.error("cascadeDeleteUser: user doc delete failed:", err.message);
@@ -596,7 +709,7 @@ exports.deleteAccount = onRequest(async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error("deleteAccount: failed:", err);
-    res.status(500).json({ error: "Delete failed", details: err.message });
+    res.status(500).json({ error: "Delete failed" });
   }
 });
 
@@ -772,24 +885,27 @@ async function claimPendingSharesForUser(uid, phoneE164) {
       // Includes the widget payload so the home-screen widget populates
       // instantly the first time they receive a song post-signup.
       pushPromises.push(
-        sendPush(uid, {
-          title: "PlayMe",
-          body: `${senderFirstName || "A friend"} sent you "${song.title || "a song"}"`,
-          mutableContent: true,
-          data: {
-            type: "new_share",
-            id: doc.id,
-            shareId: doc.id,
-            claimedFromPending: "true",
-            widgetSongTitle: song.title || "",
-            widgetSongArtist: song.artist || "",
-            widgetSenderFirstName: senderFirstName || "",
-            widgetNote: note || "",
-            widgetAlbumArtURL: song.albumArtURL || "",
-          },
-          collapseId: `share-${doc.id}`,
-          threadId: "shares",
-        })
+        (async () => {
+          if (!(await shouldSendPush(`pending_share:${doc.id}:${uid}`))) return;
+          await sendPush(uid, {
+            title: "PlayMe",
+            body: `${senderFirstName || "A friend"} sent you "${song.title || "a song"}"`,
+            mutableContent: true,
+            data: {
+              type: "new_share",
+              id: doc.id,
+              shareId: doc.id,
+              claimedFromPending: "true",
+              widgetSongTitle: song.title || "",
+              widgetSongArtist: song.artist || "",
+              widgetSenderFirstName: senderFirstName || "",
+              widgetNote: note || "",
+              widgetAlbumArtURL: song.albumArtURL || "",
+            },
+            collapseId: `share-${doc.id}`,
+            threadId: "shares",
+          });
+        })()
       );
 
       console.log(
@@ -823,6 +939,7 @@ async function claimPendingSharesForUser(uid, phoneE164) {
     if (!inviterUid || inviterUid === uid) return;
     if (await isBlockedBy(inviterUid, uid)) return;
     if (!(await notificationsEnabledFor(inviterUid))) return;
+    if (!(await shouldSendPush(`invite_joined:${uid}:${inviterUid}`))) return;
     await sendPush(inviterUid, {
       title: "PlayMe",
       body: `${joinedFirstName} joined from your invite`,
@@ -847,7 +964,7 @@ exports.onUserProfileCreated = onDocumentCreated(
     const data = event.data?.data();
     if (!data) return;
     const uid = event.params.uid;
-    const phoneE164 = normalizeE164(data.phone);
+    const phoneE164 = normalizeE164(data.phone || (await getPrivatePhone(uid)));
     if (!phoneE164) {
       console.log("onUserProfileCreated: no phone to normalize for", uid);
       return;
@@ -874,6 +991,11 @@ exports.onClaimRequest = onDocumentCreated(
     if (!uid) return;
 
     const db = admin.firestore();
+    if (!(await shouldRunClaimRequest(uid))) {
+      await event.data.ref.delete().catch(() => {});
+      return;
+    }
+
     const userSnap = await db.collection("users").doc(uid).get();
     if (!userSnap.exists) {
       console.log("onClaimRequest: no user profile for", uid);
@@ -881,7 +1003,7 @@ exports.onClaimRequest = onDocumentCreated(
       return;
     }
 
-    const phoneE164 = normalizeE164(userSnap.data().phone);
+    const phoneE164 = normalizeE164(await getPrivatePhone(uid));
     if (!phoneE164) {
       await event.data.ref.delete().catch(() => {});
       return;
@@ -927,7 +1049,7 @@ exports.swap = onRequest({ secrets: [spotifyClientSecret] }, async (req, res) =>
       client_secret: spotifyClientSecret.value(),
     });
 
-    const response = await fetch(SPOTIFY_TOKEN_URL, {
+    const response = await fetchWithTimeout(SPOTIFY_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
@@ -936,7 +1058,8 @@ exports.swap = onRequest({ secrets: [spotifyClientSecret] }, async (req, res) =>
     const data = await response.json();
 
     if (!response.ok) {
-      res.status(response.status).json(data);
+      console.error("swap: Spotify token exchange failed", response.status, data?.error);
+      res.status(response.status).json({ error: "Token swap failed" });
       return;
     }
 
@@ -950,7 +1073,8 @@ exports.swap = onRequest({ secrets: [spotifyClientSecret] }, async (req, res) =>
 
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: "Token swap failed", details: err.message });
+    console.error("swap: failed:", err.message);
+    res.status(500).json({ error: "Token swap failed" });
   }
 });
 
@@ -974,7 +1098,7 @@ exports.refresh = onRequest({ secrets: [spotifyClientSecret] }, async (req, res)
       client_secret: spotifyClientSecret.value(),
     });
 
-    const response = await fetch(SPOTIFY_TOKEN_URL, {
+    const response = await fetchWithTimeout(SPOTIFY_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
@@ -983,13 +1107,15 @@ exports.refresh = onRequest({ secrets: [spotifyClientSecret] }, async (req, res)
     const data = await response.json();
 
     if (!response.ok) {
-      res.status(response.status).json(data);
+      console.error("refresh: Spotify token refresh failed", response.status, data?.error);
+      res.status(response.status).json({ error: "Token refresh failed" });
       return;
     }
 
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: "Token refresh failed", details: err.message });
+    console.error("refresh: failed:", err.message);
+    res.status(500).json({ error: "Token refresh failed" });
   }
 });
 
@@ -1035,7 +1161,7 @@ exports.auth = onRequest({ secrets: [spotifyClientSecret] }, async (req, res) =>
   }
 
   try {
-    const profileRes = await fetch("https://api.spotify.com/v1/me", {
+    const profileRes = await fetchWithTimeout("https://api.spotify.com/v1/me", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
