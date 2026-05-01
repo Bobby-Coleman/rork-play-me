@@ -78,14 +78,7 @@ struct FriendSelectorView: View {
     }
 
     private var renderablePendingUsers: [AppUser] {
-        let friendIds = Set(rankedFriends.map(\.id))
-        let candidates = appState.outgoingRequests + onboardingRequestedUsers
-        var seen = Set<String>()
-        return candidates.filter { user in
-            !friendIds.contains(user.id)
-                && !appState.blockedUserIds.contains(user.id)
-                && seen.insert(user.id).inserted
-        }
+        appState.pendingSendRecipients(including: onboardingRequestedUsers)
     }
 
     private var allSelected: Bool {
@@ -502,7 +495,7 @@ struct FriendSelectorView: View {
                     friendChip(friend)
                 }
                 ForEach(renderablePendingUsers) { friend in
-                    friendChip(friend, badge: "PENDING")
+                    friendChip(friend, status: "Pending")
                 }
                 ForEach(renderableInvitedContacts) { contact in
                     contactChip(contact)
@@ -548,7 +541,7 @@ struct FriendSelectorView: View {
         .disabled(rankedFriends.isEmpty && renderablePendingUsers.isEmpty && renderableInvitedContacts.isEmpty)
     }
 
-    private func friendChip(_ friend: AppUser, badge: String? = nil) -> some View {
+    private func friendChip(_ friend: AppUser, status: String? = nil) -> some View {
         let isSelected = selectedFriends.contains(friend.id)
         return Button {
             if isSelected {
@@ -557,23 +550,10 @@ struct FriendSelectorView: View {
                 selectedFriends.insert(friend.id)
             }
         } label: {
-            chipLayout(label: friend.firstName, selected: isSelected) {
-                ZStack(alignment: .topTrailing) {
-                    Text(friend.initials)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
-
-                    if let badge {
-                        Text(badge)
-                            .font(.system(size: 7, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 2)
-                            .background(Color.white.opacity(0.25))
-                            .clipShape(.capsule)
-                            .offset(x: 16, y: -18)
-                    }
-                }
+            chipLayout(label: friend.firstName, status: status, selected: isSelected) {
+                Text(friend.initials)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
             }
         }
         .buttonStyle(.plain)
@@ -593,21 +573,10 @@ struct FriendSelectorView: View {
                 selectedContacts.insert(contact.id)
             }
         } label: {
-            chipLayout(label: label, selected: isSelected) {
-                ZStack(alignment: .topTrailing) {
-                    Text(contact.initials.isEmpty ? "?" : contact.initials)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
-
-                    Text("INVITED")
-                        .font(.system(size: 7, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
-                        .background(Color.white.opacity(0.25))
-                        .clipShape(.capsule)
-                        .offset(x: 14, y: -18)
-                }
+            chipLayout(label: label, status: "Invited", selected: isSelected) {
+                Text(contact.initials.isEmpty ? "?" : contact.initials)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
             }
         }
         .buttonStyle(.plain)
@@ -661,15 +630,16 @@ struct FriendSelectorView: View {
         }
     }
 
-    /// Shared chip layout: 56 pt circular body + first-name caption,
+    /// Shared chip layout: 56 pt circular body + centered caption/status,
     /// with a selection ring that mirrors the Send button's accent.
     @ViewBuilder
     private func chipLayout<Content: View>(
         label: String,
+        status: String? = nil,
         selected: Bool,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             ZStack {
                 Circle()
                     .fill(Color.white.opacity(0.14))
@@ -694,8 +664,15 @@ struct FriendSelectorView: View {
                 .foregroundStyle(selected ? .white : .white.opacity(0.65))
                 .lineLimit(1)
                 .truncationMode(.tail)
+
+            if let status {
+                Text(status)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(selected ? .white.opacity(0.82) : .white.opacity(0.5))
+                    .lineLimit(1)
+            }
         }
-        .frame(width: 64)
+        .frame(width: 72)
         .animation(.easeInOut(duration: 0.15), value: selected)
     }
 

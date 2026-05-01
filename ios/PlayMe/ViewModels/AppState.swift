@@ -233,6 +233,21 @@ class AppState {
             return lhs.firstName.localizedCaseInsensitiveCompare(rhs.firstName) == .orderedAscending
         }
     }
+
+    /// Real PlayMe accounts with pending outgoing requests, suitable for every
+    /// send selector. This intentionally lives in AppState so artist pages,
+    /// search sheets, feed cards, and onboarding all share the same recipient
+    /// source and dedupe rules.
+    func pendingSendRecipients(including extraUsers: [AppUser] = []) -> [AppUser] {
+        let friendIds = Set(friends.map(\.id))
+        var seen = Set<String>()
+        return (outgoingRequests + onboardingRequestedUsers + extraUsers).filter { user in
+            !friendIds.contains(user.id)
+                && !blockedUserIds.contains(user.id)
+                && seen.insert(user.id).inserted
+        }
+    }
+
     var phoneNumber: String = ""
     var showSentToast = false
     var isLoading = false
