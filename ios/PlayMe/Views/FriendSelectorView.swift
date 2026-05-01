@@ -21,6 +21,9 @@ struct FriendSelectorView: View {
     /// Pending-signup contacts to render alongside real friends. Only
     /// rendered when `item == .song`. See type doc for rationale.
     var invitedContacts: [SimpleContact] = []
+    /// Existing PlayMe users requested during onboarding. Kept as a transition
+    /// fallback; normal pending requests now come from `appState.outgoingRequests`.
+    var onboardingRequestedUsers: [AppUser] = []
     /// Share context when this view is acting as a song action
     /// destination (feed tap / history tap via `SongActionSheet`)
     /// rather than a pre-send surface. Threaded down to
@@ -74,13 +77,26 @@ struct FriendSelectorView: View {
         item.kind == .song ? invitedContacts : []
     }
 
+    private var renderablePendingUsers: [AppUser] {
+        let friendIds = Set(rankedFriends.map(\.id))
+        let candidates = appState.outgoingRequests + onboardingRequestedUsers
+        var seen = Set<String>()
+        return candidates.filter { user in
+            !friendIds.contains(user.id)
+                && !appState.blockedUserIds.contains(user.id)
+                && seen.insert(user.id).inserted
+        }
+    }
+
     private var allSelected: Bool {
         let friendsAllOn = rankedFriends.isEmpty
             || rankedFriends.allSatisfy { selectedFriends.contains($0.id) }
+        let pendingAllOn = renderablePendingUsers.isEmpty
+            || renderablePendingUsers.allSatisfy { selectedFriends.contains($0.id) }
         let contactsAllOn = renderableInvitedContacts.isEmpty
             || renderableInvitedContacts.allSatisfy { selectedContacts.contains($0.id) }
-        let anyRecipients = !rankedFriends.isEmpty || !renderableInvitedContacts.isEmpty
-        return anyRecipients && friendsAllOn && contactsAllOn
+        let anyRecipients = !rankedFriends.isEmpty || !renderablePendingUsers.isEmpty || !renderableInvitedContacts.isEmpty
+        return anyRecipients && friendsAllOn && pendingAllOn && contactsAllOn
     }
 
     private var canSend: Bool {
@@ -127,6 +143,8 @@ struct FriendSelectorView: View {
                     }
                     .transition(.opacity)
             }
+
+            queuedContactFeedbackBanner
         }
         .animation(.spring(duration: 0.3), value: showSentAnimation)
         .ignoresSafeArea(.keyboard, edges: .bottom)
@@ -483,6 +501,9 @@ struct FriendSelectorView: View {
                 ForEach(rankedFriends) { friend in
                     friendChip(friend)
                 }
+                ForEach(renderablePendingUsers) { friend in
+                    friendChip(friend, badge: "PENDING")
+                }
                 ForEach(renderableInvitedContacts) { contact in
                     contactChip(contact)
                 }
@@ -499,11 +520,17 @@ struct FriendSelectorView: View {
                 for user in rankedFriends {
                     selectedFriends.remove(user.id)
                 }
+                for user in renderablePendingUsers {
+                    selectedFriends.remove(user.id)
+                }
                 for contact in renderableInvitedContacts {
                     selectedContacts.remove(contact.id)
                 }
             } else {
                 for user in rankedFriends {
+                    selectedFriends.insert(user.id)
+                }
+                for user in renderablePendingUsers {
                     selectedFriends.insert(user.id)
                 }
                 for contact in renderableInvitedContacts {
@@ -518,10 +545,10 @@ struct FriendSelectorView: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(rankedFriends.isEmpty && renderableInvitedContacts.isEmpty)
+        .disabled(rankedFriends.isEmpty && renderablePendingUsers.isEmpty && renderableInvitedContacts.isEmpty)
     }
 
-    private func friendChip(_ friend: AppUser) -> some View {
+    private func friendChip(_ friend: AppUser, badge: String? = nil) -> some View {
         let isSelected = selectedFriends.contains(friend.id)
         return Button {
             if isSelected {
@@ -531,9 +558,22 @@ struct FriendSelectorView: View {
             }
         } label: {
             chipLayout(label: friend.firstName, selected: isSelected) {
-                Text(friend.initials)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white)
+                ZStack(alignment: .topTrailing) {
+                    Text(friend.initials)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+
+                    if let badge {
+                        Text(badge)
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(Color.white.opacity(0.25))
+                            .clipShape(.capsule)
+                            .offset(x: 16, y: -18)
+                    }
+                }
             }
         }
         .buttonStyle(.plain)
@@ -598,6 +638,29 @@ struct FriendSelectorView: View {
         .buttonStyle(.plain)
     }
 
+    @ViewBuilder
+    private var queuedContactFeedbackBanner: some View {
+        if let message = appState.queuedContactError ?? appState.queuedContactToast {
+            VStack {
+                Spacer()
+                Text(message)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(
+                        (appState.queuedContactError == nil ? Color.green : Color(red: 0.78, green: 0.22, blue: 0.22))
+                            .opacity(0.95),
+                        in: Capsule()
+                    )
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 24)
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
     /// Shared chip layout: 56 pt circular body + first-name caption,
     /// with a selection ring that mirrors the Send button's accent.
     @ViewBuilder
@@ -642,6 +705,10 @@ struct FriendSelectorView: View {
         var seen = Set<String>()
         var result: [AppUser] = []
         for user in rankedFriends where selectedFriends.contains(user.id) && !seen.contains(user.id) {
+            seen.insert(user.id)
+            result.append(user)
+        }
+        for user in renderablePendingUsers where selectedFriends.contains(user.id) && !seen.contains(user.id) {
             seen.insert(user.id)
             result.append(user)
         }

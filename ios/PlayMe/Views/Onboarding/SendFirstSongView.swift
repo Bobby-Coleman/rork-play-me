@@ -53,6 +53,7 @@ struct SendFirstSongView: View {
             SendSongSheet(
                 appState: appState,
                 invitedContacts: appState.invitedContacts,
+                onboardingRequestedUsers: appState.onboardingRequestedUsers,
                 onSent: onContinue
             )
             .presentationDetents([.large])

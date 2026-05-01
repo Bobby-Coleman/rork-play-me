@@ -11,7 +11,7 @@ import UIKit
 /// 3. The add-friends pill and reply pill, which render only when a card page
 ///    is visible — the hero stays visually clean.
 struct DiscoveryView: View {
-    let shares: [SongShare]
+    let feedItems: [DiscoveryFeedItem]
     let appState: AppState
     let onSearchTap: () -> Void
     let onAddFriends: () -> Void
@@ -40,7 +40,11 @@ struct DiscoveryView: View {
 
     private var activeShare: SongShare? {
         guard let id = visiblePageId, id != Self.heroId else { return nil }
-        return shares.first { $0.id == id }
+        guard let item = feedItems.first(where: { $0.id == id }) else { return nil }
+        if case .received(let share) = item {
+            return share
+        }
+        return nil
     }
 
     private var viewerIsSender: Bool {
@@ -88,16 +92,33 @@ struct DiscoveryView: View {
                                     .frame(width: pageSize.width, height: pageSize.height)
                                     .id(Self.heroId)
 
-                                ForEach(shares) { share in
-                                    SongCardView(
-                                        share: share,
-                                        isLiked: appState.isLiked(shareId: share.id),
-                                        appState: appState,
-                                        onToggleLike: { appState.toggleLike(shareId: share.id) }
-                                    )
-                                    .frame(width: pageSize.width, height: pageSize.height)
-                                    .clipped()
-                                    .id(share.id)
+                                ForEach(feedItems) { item in
+                                    switch item {
+                                    case .received(let share):
+                                        SongCardView(
+                                            share: share,
+                                            isLiked: appState.isLiked(shareId: share.id),
+                                            appState: appState,
+                                            onToggleLike: { appState.toggleLike(shareId: share.id) }
+                                        )
+                                        .frame(width: pageSize.width, height: pageSize.height)
+                                        .clipped()
+                                        .id(item.id)
+
+                                    case .sent(let sentItem):
+                                        if let share = sentItem.latestShare {
+                                            SongCardView(
+                                                share: share,
+                                                sentHistory: sentItem,
+                                                isLiked: appState.isLiked(shareId: share.id),
+                                                appState: appState,
+                                                onToggleLike: { appState.toggleLike(shareId: share.id) }
+                                            )
+                                            .frame(width: pageSize.width, height: pageSize.height)
+                                            .clipped()
+                                            .id(item.id)
+                                        }
+                                    }
                                 }
                             }
                             .scrollTargetLayout()
@@ -142,7 +163,7 @@ struct DiscoveryView: View {
                         .onChange(of: appState.pendingDiscoveryShareId) { _, newValue in
                             attemptPendingDiscoveryScroll(proxy: proxy, pendingId: newValue)
                         }
-                        .onChange(of: shares.map(\.id)) { _, _ in
+                        .onChange(of: feedItems.map(\.id)) { _, _ in
                             attemptPendingDiscoveryScroll(
                                 proxy: proxy,
                                 pendingId: appState.pendingDiscoveryShareId
@@ -220,7 +241,7 @@ struct DiscoveryView: View {
     /// Firestore listener hydrates.
     private func attemptPendingDiscoveryScroll(proxy: ScrollViewProxy, pendingId: String?) {
         guard let pendingId, !pendingId.isEmpty else { return }
-        guard shares.contains(where: { $0.id == pendingId }) else { return }
+        guard feedItems.contains(where: { $0.id == pendingId }) else { return }
         isReplyFocused = false
         replyText = ""
         withAnimation(.easeInOut(duration: 0.4)) {
@@ -271,7 +292,7 @@ struct DiscoveryView: View {
 
             Spacer(minLength: ctaToHistoryMin)
 
-            if !shares.isEmpty {
+            if !feedItems.isEmpty {
                 historyRow(scrollProxy: scrollProxy)
                     .padding(.bottom, historyBottom)
                     // Fade out within the first ~25% of a hero → card
@@ -295,7 +316,7 @@ struct DiscoveryView: View {
     /// there's at least one share to show.
     private func historyRow(scrollProxy: ScrollViewProxy) -> some View {
         Button {
-            guard let firstId = shares.first?.id else { return }
+            guard let firstId = feedItems.first?.id else { return }
             scrollHaptic.prepare()
             scrollHaptic.impactOccurred(intensity: 0.7)
             withAnimation(.easeInOut(duration: 0.45)) {
@@ -306,7 +327,7 @@ struct DiscoveryView: View {
                 DiscoveryHistoryHint()
 
                 HistoryAlbumPreview(
-                    shares: Array(shares.prefix(6)),
+                    shares: Array(feedItems.compactMap(\.albumPreviewShare).prefix(6)),
                     side: 34
                 )
             }

@@ -9,6 +9,10 @@ struct SendSongSheet: View {
     /// `appState.invitedContacts` so a freshly registered user can still send
     /// their first song to someone who hasn't joined yet.
     var invitedContacts: [SimpleContact] = []
+    /// Existing users the new account requested by username during onboarding.
+    /// They are real PlayMe accounts, but they may not be accepted friends yet,
+    /// so the first-song flow threads them separately into the recipient row.
+    var onboardingRequestedUsers: [AppUser] = []
     /// Fired once the underlying `FriendSelectorView` reports a successful
     /// send (right before the sheet dismisses). Lets onboarding advance to
     /// the next step without needing to observe dismissal externally.
@@ -42,6 +46,7 @@ struct SendSongSheet: View {
                         item: .song(selectedSong!),
                         appState: appState,
                         invitedContacts: invitedContacts,
+                        onboardingRequestedUsers: onboardingRequestedUsers,
                         onBack: { withAnimation(.spring(duration: 0.3)) { step = 0 } },
                         onSent: {
                             onSent?()

@@ -343,6 +343,26 @@ class FirebaseService {
         }
     }
 
+    func markShareListened(shareId: String, source: String) async {
+        guard let uid = firebaseUID, !shareId.isEmpty, !source.isEmpty else { return }
+        let ref = db.collection("shares").document(shareId)
+
+        do {
+            let doc = try await ref.getDocument()
+            guard let data = doc.data(),
+                  data["recipientId"] as? String == uid else {
+                return
+            }
+
+            try await ref.updateData([
+                "recipientListenedAt": FieldValue.serverTimestamp(),
+                "recipientListenSources": FieldValue.arrayUnion([source])
+            ])
+        } catch {
+            print("FirebaseService: mark share listened failed: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Global Spotify Resolution Cache
     //
     // `spotifyResolutions/{sha256(normalizedAmURL)}` is a global,
@@ -437,6 +457,23 @@ class FirebaseService {
             print("FirebaseService: load sent shares failed: \(error.localizedDescription)")
             return []
         }
+    }
+
+    func listenSentShares(onChange: @escaping @Sendable ([SongShare]) -> Void) -> ListenerRegistration? {
+        guard let uid = firebaseUID else { return nil }
+        return db.collection("shares")
+            .whereField("senderId", isEqualTo: uid)
+            .order(by: "timestamp", descending: true)
+            .limit(to: 50)
+            .addSnapshotListener { [weak self] snapshot, error in
+                if let error {
+                    print("FirebaseService: listen sent shares failed: \(error.localizedDescription)")
+                    return
+                }
+                guard let self, let docs = snapshot?.documents else { return }
+                let shares = docs.compactMap { self.parseShare(from: $0) }
+                onChange(shares)
+            }
     }
 
     func hasSentSong(songId: String, to recipientId: String) async -> Bool {
@@ -865,21 +902,37 @@ class FirebaseService {
         toUID: String,
         username: String,
         firstName: String,
-        lastName: String = ""
+        lastName: String = "",
+        targetUsername: String,
+        targetFirstName: String,
+        targetLastName: String = ""
     ) async -> Bool {
         guard let uid = firebaseUID, uid != toUID else { return false }
         let myUsername = username.isEmpty ? (UserDefaults.standard.string(forKey: "currentUserUsername") ?? "") : username
         let myFirst = firstName.isEmpty ? (UserDefaults.standard.string(forKey: "currentUserFirstName") ?? "") : firstName
         let myLast = lastName.isEmpty ? (UserDefaults.standard.string(forKey: "currentUserLastName") ?? "") : lastName
         do {
-            try await db.collection("users").document(toUID)
+            let batch = db.batch()
+            let incomingRef = db.collection("users").document(toUID)
                 .collection("friendRequests").document(uid)
-                .setData([
-                    "username": myUsername,
-                    "firstName": myFirst,
-                    "lastName": myLast,
-                    "createdAt": FieldValue.serverTimestamp(),
-                ])
+            let outgoingRef = db.collection("users").document(uid)
+                .collection("outgoingFriendRequests").document(toUID)
+
+            batch.setData([
+                "username": myUsername,
+                "firstName": myFirst,
+                "lastName": myLast,
+                "createdAt": FieldValue.serverTimestamp(),
+            ], forDocument: incomingRef)
+
+            batch.setData([
+                "username": targetUsername,
+                "firstName": targetFirstName,
+                "lastName": targetLastName,
+                "createdAt": FieldValue.serverTimestamp(),
+            ], forDocument: outgoingRef)
+
+            try await batch.commit()
             return true
         } catch {
             print("FirebaseService: send friend request failed: \(error.localizedDescription)")
@@ -891,8 +944,16 @@ class FirebaseService {
     func cancelOutgoingRequest(toUID: String) async {
         guard let uid = firebaseUID else { return }
         do {
-            try await db.collection("users").document(toUID)
-                .collection("friendRequests").document(uid).delete()
+            let batch = db.batch()
+            batch.deleteDocument(
+                db.collection("users").document(toUID)
+                    .collection("friendRequests").document(uid)
+            )
+            batch.deleteDocument(
+                db.collection("users").document(uid)
+                    .collection("outgoingFriendRequests").document(toUID)
+            )
+            try await batch.commit()
         } catch {
             print("FirebaseService: cancel outgoing request failed: \(error.localizedDescription)")
         }
@@ -909,8 +970,16 @@ class FirebaseService {
             friendLastName: user.lastName
         )
         do {
-            try await db.collection("users").document(uid)
-                .collection("friendRequests").document(user.id).delete()
+            let batch = db.batch()
+            batch.deleteDocument(
+                db.collection("users").document(uid)
+                    .collection("friendRequests").document(user.id)
+            )
+            batch.deleteDocument(
+                db.collection("users").document(user.id)
+                    .collection("outgoingFriendRequests").document(uid)
+            )
+            try await batch.commit()
         } catch {
             print("FirebaseService: delete accepted request failed: \(error.localizedDescription)")
         }
@@ -920,8 +989,16 @@ class FirebaseService {
     func declineFriendRequest(fromUID: String) async {
         guard let uid = firebaseUID else { return }
         do {
-            try await db.collection("users").document(uid)
-                .collection("friendRequests").document(fromUID).delete()
+            let batch = db.batch()
+            batch.deleteDocument(
+                db.collection("users").document(uid)
+                    .collection("friendRequests").document(fromUID)
+            )
+            batch.deleteDocument(
+                db.collection("users").document(fromUID)
+                    .collection("outgoingFriendRequests").document(uid)
+            )
+            try await batch.commit()
         } catch {
             print("FirebaseService: decline friend request failed: \(error.localizedDescription)")
         }
@@ -946,11 +1023,30 @@ class FirebaseService {
         }
     }
 
+    /// One-shot load of the current user's pending outgoing friend requests.
+    func loadOutgoingRequests() async -> [AppUser] {
+        guard let uid = firebaseUID else { return [] }
+        do {
+            let snapshot = try await db.collection("users").document(uid)
+                .collection("outgoingFriendRequests")
+                .order(by: "createdAt", descending: true)
+                .getDocuments()
+            return snapshot.documents.compactMap(parseRequestUser)
+        } catch {
+            print("FirebaseService: load outgoing requests failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
     /// Returns true if the caller already has a pending outgoing request to
     /// `toUID`. Used to hydrate search result chip state on view open.
     func hasOutgoingRequest(toUID: String) async -> Bool {
         guard let uid = firebaseUID else { return false }
         do {
+            let mirror = try await db.collection("users").document(uid)
+                .collection("outgoingFriendRequests").document(toUID).getDocument()
+            if mirror.exists { return true }
+
             let doc = try await db.collection("users").document(toUID)
                 .collection("friendRequests").document(uid).getDocument()
             return doc.exists
@@ -976,6 +1072,31 @@ class FirebaseService {
                 }
                 onChange(requests)
             }
+    }
+
+    /// Live listener for pending outgoing requests so the send sheet can offer
+    /// pending real accounts as recipients everywhere, not just during onboarding.
+    func listenOutgoingRequests(onChange: @escaping @Sendable ([AppUser]) -> Void) -> ListenerRegistration? {
+        guard let uid = firebaseUID else { return nil }
+        return db.collection("users").document(uid)
+            .collection("outgoingFriendRequests")
+            .order(by: "createdAt", descending: true)
+            .addSnapshotListener { [weak self] snapshot, error in
+                if let error {
+                    print("FirebaseService: listen outgoing requests failed: \(error.localizedDescription)")
+                    return
+                }
+                guard let self, let docs = snapshot?.documents else { return }
+                onChange(docs.compactMap(self.parseRequestUser))
+            }
+    }
+
+    private func parseRequestUser(from doc: QueryDocumentSnapshot) -> AppUser? {
+        let data = doc.data()
+        let username = data["username"] as? String ?? ""
+        let firstName = data["firstName"] as? String ?? username
+        let lastName = data["lastName"] as? String ?? ""
+        return AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: "")
     }
 
     func searchUsers(query: String) async -> [AppUser] {
@@ -1899,13 +2020,18 @@ class FirebaseService {
             timestamp = Date()
         }
 
+        let recipientListenedAt = (data["recipientListenedAt"] as? Timestamp)?.dateValue()
+        let recipientListenSources = data["recipientListenSources"] as? [String] ?? []
+
         return SongShare(
             id: doc.documentID,
             song: song,
             sender: sender,
             recipient: recipient,
             note: data["note"] as? String,
-            timestamp: timestamp
+            timestamp: timestamp,
+            recipientListenedAt: recipientListenedAt,
+            recipientListenSources: recipientListenSources
         )
     }
 

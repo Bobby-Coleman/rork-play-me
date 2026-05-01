@@ -60,6 +60,14 @@ service cloud.firestore {
         allow update: if false;
       }
 
+      // Sender-owned mirror of pending outgoing requests. This lets the sender
+      // reload pending recipients and send songs before the request is accepted.
+      match /outgoingFriendRequests/{targetId} {
+        allow read, create, update: if request.auth != null && request.auth.uid == userId;
+        allow delete: if request.auth != null
+          && (request.auth.uid == userId || request.auth.uid == targetId);
+      }
+
       // User-owned mixtapes (Pinterest-style boards of saved songs). Each
       // mixtape doc owns an embedded `songs` subcollection that mirrors
       // the same Song shape used by shares and chat messages, so cover

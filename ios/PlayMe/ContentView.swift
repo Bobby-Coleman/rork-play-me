@@ -223,7 +223,7 @@ struct ContentView: View {
 
             Tab(value: MainTab.discovery.rawValue) {
                 DiscoveryView(
-                    shares: appState.receivedShares,
+                    feedItems: appState.discoveryFeedItems,
                     appState: appState,
                     onSearchTap: openSearch,
                     onAddFriends: { showAddFriends = true },

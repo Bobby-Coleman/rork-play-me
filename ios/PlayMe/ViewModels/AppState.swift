@@ -63,6 +63,9 @@ class AppState {
     /// Hydrated lazily per visible search result so AddFriendsView can show
     /// "Requested" instead of "Add" on re-entry.
     var outgoingRequestUIDs: Set<String> = []
+    /// Pending outgoing friend requests with enough profile data to show as
+    /// send recipients before the request is accepted.
+    var outgoingRequests: [AppUser] = []
     /// Transient success toast for friend-request actions (e.g. "Request sent
     /// to @ari"). Cleared automatically after a short delay.
     var friendRequestToast: String? = nil
@@ -87,9 +90,14 @@ class AppState {
     /// Firestore listener for incoming friend requests. Retained so we can
     /// detach on logout and reattach on sign-in.
     private var incomingRequestsListener: ListenerRegistration?
+    /// Firestore listener for pending outgoing friend requests.
+    private var outgoingRequestsListener: ListenerRegistration?
     /// Firestore listener for the current user's received shares. Drives
     /// real-time home-feed updates; detached on logout.
     private var receivedSharesListener: ListenerRegistration?
+    /// Firestore listener for sent shares. Keeps sender-side listener rows
+    /// fresh when recipients play or open a song.
+    private var sentSharesListener: ListenerRegistration?
     /// Listener for received mixtape shares (parallel collection so it
     /// doesn't compete with the song-share listener's index).
     private var receivedMixtapeSharesListener: ListenerRegistration?
@@ -136,6 +144,27 @@ class AppState {
     var isMusicSearchDenied: Bool { musicAuthStatus == .denied }
     var receivedShares: [SongShare] = []
     var sentShares: [SongShare] = []
+    var discoveryFeedItems: [DiscoveryFeedItem] {
+        let receivedItems = receivedShares.map(DiscoveryFeedItem.received)
+        let sentItems = Dictionary(grouping: sentShares, by: { $0.song.id })
+            .compactMap { _, shares -> DiscoveryFeedItem? in
+                guard let latest = shares.max(by: { $0.timestamp < $1.timestamp }) else { return nil }
+                let sortedShares = shares.sorted {
+                    if $0.timestamp == $1.timestamp {
+                        return $0.id < $1.id
+                    }
+                    return $0.timestamp > $1.timestamp
+                }
+                return .sent(SentSongHistoryItem(song: latest.song, shares: sortedShares))
+            }
+
+        return (receivedItems + sentItems).sorted {
+            if $0.timestamp == $1.timestamp {
+                return $0.id < $1.id
+            }
+            return $0.timestamp > $1.timestamp
+        }
+    }
     /// Mixtapes shared with the current user. Ordered newest-first to
     /// match `receivedShares`. Listener-driven once `loadData` runs.
     var receivedMixtapeShares: [MixtapeShare] = []
@@ -221,6 +250,12 @@ class AppState {
     /// Surfaced in the SendFirstSongView friend carousel so first songs can be
     /// queued for them via `sendSongToPendingContact`.
     var invitedContacts: [SimpleContact] = []
+    /// Existing PlayMe users the new user added by username during
+    /// onboarding. A sent friend request is not an accepted friendship yet,
+    /// so these users will not necessarily appear in `friends` before the
+    /// first-song step. Keep the full profiles here so they remain selectable
+    /// as first-song recipients.
+    var onboardingRequestedUsers: [AppUser] = []
 
     var likedShares: [SongShare] {
         (receivedShares + sentShares).filter { likedShareIds.contains($0.id) }
@@ -393,7 +428,9 @@ class AppState {
 
         await refreshFriendRequests()
         startIncomingRequestsListener()
+        startOutgoingRequestsListener()
         startReceivedSharesListener()
+        startSentSharesListener()
         startReceivedMixtapeSharesListener()
         startReceivedAlbumSharesListener()
         startConversationsListener()
@@ -796,14 +833,19 @@ class AppState {
 
     // MARK: - Friend Requests
 
-    /// One-shot refresh of incoming friend requests. Outgoing state is
-    /// hydrated lazily per visible search result via `hasOutgoingRequest` to
-    /// avoid a full-collection scan the security rules don't allow anyway.
+    /// One-shot refresh of friend-request state. Incoming requests drive the
+    /// Add Friends badge; outgoing requests drive "Requested" buttons and
+    /// pending send-recipient chips.
     func refreshFriendRequests() async {
         let firebase = FirebaseService.shared
         guard firebase.isSignedIn else { return }
-        let incoming = await firebase.loadIncomingRequests()
+        async let incomingLoad = firebase.loadIncomingRequests()
+        async let outgoingLoad = firebase.loadOutgoingRequests()
+        let incoming = await incomingLoad
+        let outgoing = await outgoingLoad
         incomingRequests = incoming.filter { !blockedUserIds.contains($0.id) }
+        outgoingRequests = outgoing.filter { !blockedUserIds.contains($0.id) }
+        outgoingRequestUIDs = Set(outgoingRequests.map(\.id))
     }
 
     /// Attach (or reattach) the snapshot listener that keeps
@@ -819,6 +861,17 @@ class AppState {
         }
     }
 
+    private func startOutgoingRequestsListener() {
+        outgoingRequestsListener?.remove()
+        outgoingRequestsListener = FirebaseService.shared.listenOutgoingRequests { [weak self] requests in
+            Task { @MainActor in
+                guard let self else { return }
+                self.outgoingRequests = requests.filter { !self.blockedUserIds.contains($0.id) }
+                self.outgoingRequestUIDs = Set(self.outgoingRequests.map(\.id))
+            }
+        }
+    }
+
     /// Attach (or reattach) the snapshot listener that keeps
     /// `receivedShares` in sync with Firestore so the home feed updates in
     /// real time when a friend sends a new song. Idempotent.
@@ -829,6 +882,16 @@ class AppState {
                 guard let self else { return }
                 self.receivedShares = shares.filter { !self.blockedUserIds.contains($0.sender.id) }
                 self.syncWidgetWithLatestReceivedShare()
+            }
+        }
+    }
+
+    private func startSentSharesListener() {
+        sentSharesListener?.remove()
+        sentSharesListener = FirebaseService.shared.listenSentShares { [weak self] shares in
+            Task { @MainActor in
+                guard let self else { return }
+                self.sentShares = shares
             }
         }
     }
@@ -880,17 +943,25 @@ class AppState {
     func sendFriendRequest(to user: AppUser) async -> Bool {
         guard let me = currentUser else { return false }
         outgoingRequestUIDs.insert(user.id)
+        rememberOutgoingRequestUser(user)
         let ok = await FirebaseService.shared.sendFriendRequest(
             toUID: user.id,
             username: me.username,
             firstName: me.firstName,
-            lastName: me.lastName
+            lastName: me.lastName,
+            targetUsername: user.username,
+            targetFirstName: user.firstName,
+            targetLastName: user.lastName
         )
         if ok {
+            if !isOnboarded {
+                rememberOnboardingRequestedUser(user)
+            }
             let handle = user.username.isEmpty ? user.firstName : "@\(user.username)"
             friendRequestToast = "Request sent to \(handle)"
         } else {
             outgoingRequestUIDs.remove(user.id)
+            outgoingRequests.removeAll { $0.id == user.id }
             friendRequestError = "Couldn't send request. Check your connection and try again."
         }
         clearFriendRequestFeedbackSoon()
@@ -910,6 +981,19 @@ class AppState {
     func cancelOutgoingRequest(to user: AppUser) async {
         await FirebaseService.shared.cancelOutgoingRequest(toUID: user.id)
         outgoingRequestUIDs.remove(user.id)
+        outgoingRequests.removeAll { $0.id == user.id }
+        onboardingRequestedUsers.removeAll { $0.id == user.id }
+    }
+
+    private func rememberOutgoingRequestUser(_ user: AppUser) {
+        outgoingRequests.removeAll { $0.id == user.id }
+        outgoingRequests.append(user)
+    }
+
+    func rememberOnboardingRequestedUser(_ user: AppUser) {
+        guard !isOnboarded else { return }
+        onboardingRequestedUsers.removeAll { $0.id == user.id }
+        onboardingRequestedUsers.append(user)
     }
 
     /// Accept an incoming friend request; refreshes `friends` so the
@@ -1095,8 +1179,12 @@ class AppState {
     func logout() {
         incomingRequestsListener?.remove()
         incomingRequestsListener = nil
+        outgoingRequestsListener?.remove()
+        outgoingRequestsListener = nil
         receivedSharesListener?.remove()
         receivedSharesListener = nil
+        sentSharesListener?.remove()
+        sentSharesListener = nil
         receivedMixtapeSharesListener?.remove()
         receivedMixtapeSharesListener = nil
         receivedAlbumSharesListener?.remove()
@@ -1109,6 +1197,9 @@ class AppState {
         friends = []
         incomingRequests = []
         outgoingRequestUIDs = []
+        outgoingRequests = []
+        invitedContacts = []
+        onboardingRequestedUsers = []
         blockedUserIds = []
         sendStats = [:]
         receivedShares = []

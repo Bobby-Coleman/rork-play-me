@@ -13,10 +13,19 @@ import UIKit
 /// 429), we patch `shares/{id}.song.spotifyURI`. Every other device
 /// that later views the same share skips song.link entirely.
 @MainActor
-func openInServiceButton(song: Song, service: MusicService, resolvedSpotifyURL: String? = nil, shareId: String? = nil) -> some View {
+func openInServiceButton(
+    song: Song,
+    service: MusicService,
+    resolvedSpotifyURL: String? = nil,
+    shareId: String? = nil,
+    onOpened: (() -> Void)? = nil
+) -> some View {
     Button {
         Task {
-            await openInService(song: song, service: service, resolvedSpotifyURL: resolvedSpotifyURL, shareId: shareId)
+            let opened = await openInService(song: song, service: service, resolvedSpotifyURL: resolvedSpotifyURL, shareId: shareId)
+            if opened {
+                onOpened?()
+            }
         }
     } label: {
         HStack(spacing: 6) {
@@ -34,12 +43,13 @@ func openInServiceButton(song: Song, service: MusicService, resolvedSpotifyURL: 
 }
 
 @MainActor
-private func openInService(song: Song, service: MusicService, resolvedSpotifyURL: String?, shareId: String? = nil) async {
+private func openInService(song: Song, service: MusicService, resolvedSpotifyURL: String?, shareId: String? = nil) async -> Bool {
     switch service {
     case .appleMusic:
         if let url = appleMusicURL(for: song) {
-            _ = await openURL(url)
+            return await openURL(url)
         }
+        return false
 
     case .spotify:
         let hasURI = song.spotifyURI != nil
@@ -74,20 +84,26 @@ private func openInService(song: Song, service: MusicService, resolvedSpotifyURL
         if let trackURL = SpotifyDeepLinkResolver.trackURL(for: song, resolvedSpotifyURL: candidateResolvedURL) {
             let openedInApp = await openURL(trackURL, universalLinksOnly: true)
             print("event=open_in_spotify handoff kind=universal opened=\(openedInApp) url=\"\(trackURL.absoluteString)\"")
-            if !openedInApp,
-               let uri = SpotifyDeepLinkResolver.trackURI(for: song, resolvedSpotifyURL: candidateResolvedURL) {
+            if openedInApp {
+                return true
+            }
+            if let uri = SpotifyDeepLinkResolver.trackURI(for: song, resolvedSpotifyURL: candidateResolvedURL) {
                 let openedViaURI = await openURL(uri)
                 print("event=open_in_spotify handoff kind=uri opened=\(openedViaURI) url=\"\(uri.absoluteString)\"")
-                if !openedViaURI {
-                    let openedInSafari = await openURL(trackURL)
-                    print("event=open_in_spotify handoff kind=safari opened=\(openedInSafari) url=\"\(trackURL.absoluteString)\"")
+                if openedViaURI {
+                    return true
                 }
             }
+            let openedInSafari = await openURL(trackURL)
+            print("event=open_in_spotify handoff kind=safari opened=\(openedInSafari) url=\"\(trackURL.absoluteString)\"")
+            return openedInSafari
         } else if let searchURL = SpotifyDeepLinkResolver.spotifySearchURL(for: song) {
             let openedSearch = await openURL(searchURL)
             print("event=open_in_spotify handoff kind=search opened=\(openedSearch) url=\"\(searchURL.absoluteString)\" reason=no_track_id")
+            return openedSearch
         } else {
             print("event=open_in_spotify handoff kind=none reason=no_track_id_no_search_url title=\"\(song.title)\"")
+            return false
         }
     }
 }
