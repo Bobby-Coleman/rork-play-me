@@ -25,6 +25,10 @@ class FirebaseService {
         deterministicId(parts: ["share", senderId, recipientId, songId])
     }
 
+    func newShareDocumentId() -> String {
+        db.collection("shares").document().documentID
+    }
+
     func mixtapeShareDocumentId(senderId: String, recipientId: String, mixtapeId: String) -> String {
         deterministicId(parts: ["mixtapeShare", senderId, recipientId, mixtapeId])
     }
@@ -355,20 +359,10 @@ class FirebaseService {
         ]
 
         do {
-            let shareId = shareDocumentId(senderId: uid, recipientId: share.recipient.id, songId: share.song.id)
+            let shareId = share.id
+            guard !shareId.isEmpty else { return nil }
             let ref = db.collection("shares").document(shareId)
-            _ = try await db.runTransaction { transaction, errorPointer -> Any? in
-                do {
-                    if try transaction.getDocument(ref).exists {
-                        return NSNumber(value: true)
-                    }
-                    transaction.setData(data, forDocument: ref)
-                    return NSNumber(value: true)
-                } catch let transactionError as NSError {
-                    errorPointer?.pointee = transactionError
-                    return nil
-                }
-            }
+            try await ref.setData(data)
             return shareId
         } catch {
             print("FirebaseService: save share failed: \(error.localizedDescription)")
@@ -1582,19 +1576,14 @@ class FirebaseService {
     /// the request doc when done, and the claim itself is idempotent.
     func requestPendingSharesClaim() async {
         guard let uid = firebaseUID else { return }
-        let throttleKey = "lastPendingSharesClaimRequestAt.\(uid)"
-        let now = Date().timeIntervalSince1970
-        let last = UserDefaults.standard.double(forKey: throttleKey)
-        guard last == 0 || now - last > 15 * 60 else { return }
 
-        let reqId = "\(uid)_\(Int(now / (15 * 60)))"
+        let reqId = "\(uid)_\(UUID().uuidString)"
         let ref = db.collection("claimRequests").document(reqId)
         do {
             try await ref.setData([
                 "uid": uid,
                 "createdAt": FieldValue.serverTimestamp(),
             ])
-            UserDefaults.standard.set(now, forKey: throttleKey)
             print("FirebaseService: event=pending_share_claim_requested uid=\(uid) reqId=\(reqId)")
         } catch {
             print("FirebaseService: event=pending_share_claim_request_failed uid=\(uid) error=\(error.localizedDescription)")

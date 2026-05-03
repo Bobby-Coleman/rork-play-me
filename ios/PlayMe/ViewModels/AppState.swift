@@ -261,6 +261,8 @@ class AppState {
     /// Transient error banner if a queued-share write failed (permission
     /// denied, bad phone, network). Surfaced in SendFirstSongView.
     var queuedContactError: String? = nil
+    private var inFlightDirectSendKeys = Set<String>()
+    private var pendingDirectShares: [String: SongShare] = [:]
 
     // MARK: - Onboarding-only state (cleared after onboarding completes)
     /// Contacts the user texted invites to during OnboardingInviteView.
@@ -494,11 +496,17 @@ class AppState {
     func sendSong(_ song: Song, to friend: AppUser, note: String?) async {
         guard let user = currentUser else { return }
 
+        let sendKey = "\(user.id)|\(friend.id)|\(song.id)"
+        guard !inFlightDirectSendKeys.contains(sendKey) else { return }
+        inFlightDirectSendKeys.insert(sendKey)
+        defer { inFlightDirectSendKeys.remove(sendKey) }
+
         let enrichedSong = await enrichSongWithSpotifyURI(song)
         let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanedNote = (trimmedNote?.isEmpty ?? true) ? nil : trimmedNote
 
-        let shareId = FirebaseService.shared.shareDocumentId(senderId: user.id, recipientId: friend.id, songId: enrichedSong.id)
+        let firebase = FirebaseService.shared
+        let shareId = firebase.newShareDocumentId()
         let share = SongShare(
             id: shareId,
             song: enrichedSong,
@@ -506,10 +514,17 @@ class AppState {
             recipient: friend,
             note: cleanedNote
         )
+        pendingDirectShares[share.id] = share
         sentShares.removeAll { $0.id == share.id }
         sentShares.insert(share, at: 0)
 
-        Task { await FirebaseService.shared.saveShare(share) }
+        guard await firebase.saveShare(share) != nil else {
+            pendingDirectShares.removeValue(forKey: share.id)
+            sentShares.removeAll { $0.id == share.id }
+            queuedContactError = "We couldn't send that song. Try again."
+            clearQueuedContactFeedbackSoon()
+            return
+        }
 
         // Bump the per-friend send counter: optimistically locally (so the
         // chip row reorders immediately) and durably in Firestore.
@@ -517,7 +532,6 @@ class AppState {
         sendStats[friend.id] = SendStat(count: previousCount + 1, lastSentAt: Date())
         Task { await FirebaseService.shared.incrementSendStat(friendUid: friend.id) }
 
-        let firebase = FirebaseService.shared
         if let conv = await firebase.getOrCreateConversation(with: friend.id, friendName: friend.firstName) {
             let messageText = cleanedNote ?? ""
             await firebase.sendMessage(conversationId: conv.id, text: messageText, song: enrichedSong, mutationId: "share-\(shareId)")
@@ -962,9 +976,22 @@ class AppState {
         sentSharesListener = FirebaseService.shared.listenSentShares { [weak self] shares in
             Task { @MainActor in
                 guard let self else { return }
-                self.sentShares = shares
+                self.applySentSharesSnapshot(shares)
             }
         }
+    }
+
+    private func applySentSharesSnapshot(_ shares: [SongShare]) {
+        let persistedIds = Set(shares.map(\.id))
+        for id in Array(pendingDirectShares.keys) where persistedIds.contains(id) {
+            pendingDirectShares.removeValue(forKey: id)
+        }
+
+        var byId = Dictionary(uniqueKeysWithValues: shares.map { ($0.id, $0) })
+        for (id, share) in pendingDirectShares where byId[id] == nil {
+            byId[id] = share
+        }
+        sentShares = byId.values.sorted { $0.timestamp > $1.timestamp }
     }
 
     /// Listener for inbound mixtape shares. Mirrors `startReceivedSharesListener`
@@ -1273,6 +1300,8 @@ class AppState {
         onboardingRequestedUsers = []
         blockedUserIds = []
         sendStats = [:]
+        inFlightDirectSendKeys = []
+        pendingDirectShares = [:]
         receivedShares = []
         sentShares = []
         receivedMixtapeShares = []

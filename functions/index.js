@@ -211,32 +211,6 @@ async function shouldSendPush(key, ttlHours = 24) {
   }
 }
 
-async function shouldRunClaimRequest(uid) {
-  const ref = admin.firestore().collection("claimRequestThrottle").doc(uid);
-  const now = Date.now();
-  try {
-    return await admin.firestore().runTransaction(async (tx) => {
-      const snap = await tx.get(ref);
-      const lastRunAtMillis = snap.exists ? snap.data().lastRunAtMillis || 0 : 0;
-      if (lastRunAtMillis && now - lastRunAtMillis < 5 * 60 * 1000) {
-        return false;
-      }
-      tx.set(
-        ref,
-        {
-          lastRunAtMillis: now,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-      return true;
-    });
-  } catch (err) {
-    console.error("claim request throttle failed open:", err.message);
-    return true;
-  }
-}
-
 // --------------- Notification Triggers ---------------
 
 exports.onNewShare = onDocumentCreated("shares/{shareId}", async (event) => {
@@ -991,11 +965,6 @@ exports.onClaimRequest = onDocumentCreated(
     if (!uid) return;
 
     const db = admin.firestore();
-    if (!(await shouldRunClaimRequest(uid))) {
-      await event.data.ref.delete().catch(() => {});
-      return;
-    }
-
     const userSnap = await db.collection("users").doc(uid).get();
     if (!userSnap.exists) {
       console.log("onClaimRequest: no user profile for", uid);
