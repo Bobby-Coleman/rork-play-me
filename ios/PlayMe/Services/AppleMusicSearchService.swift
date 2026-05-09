@@ -1,26 +1,33 @@
 import Foundation
 import MusicKit
 
-/// Apple Music (MusicKit) catalog search. Returns songs/artists/albums
-/// pre-ranked by Apple's own relevance model — the same ordering you'd
-/// get in the Apple Music app. Used for in-app typeahead regardless of
-/// the user's preferred streaming service; for playback we still route
-/// through `AudioPlayerService` (30s previews) and deep-link into the
-/// user's preferred service via `resolveSpotifyURL`.
+/// Apple Music catalog search and artist-details, served from the
+/// `api.music.apple.com` HTTP API with a developer-only JWT (minted by
+/// `AppleMusicTokenService` via the `getMusicKitDeveloperToken` Cloud
+/// Function). Returns songs/artists/albums pre-ranked by Apple's own
+/// relevance model — the same data the Apple Music app uses.
 ///
-/// Two things are required for this to work on-device:
-/// 1. The App ID at developer.apple.com must have the **MusicKit** App
-///    Service enabled.
-/// 2. Info.plist must declare `NSAppleMusicUsageDescription`.
+/// Why HTTP instead of the iOS MusicKit framework?
+/// MusicKit's `MusicCatalogSearchRequest` / `MusicCatalogSearchSuggestionsRequest`
+/// require `MusicAuthorization` to be `.authorized` even though the
+/// underlying catalog is public. The HTTP API only needs a developer
+/// token, so search and artist pages work for every user (Spotify-flow
+/// included) without ever prompting for MusicKit access. The MusicKit
+/// user prompt is reserved exclusively for the Apple Music personalization
+/// step in `MusicServiceView`.
 ///
-/// An active Apple Music subscription is *not* required. Catalog search is
-/// intentionally non-prompting; user MusicKit authorization is reserved for
-/// Apple Music personalization.
+/// Used for in-app typeahead regardless of the user's preferred streaming
+/// service; for playback we still route through `AudioPlayerService`
+/// (30 s previews) and deep-link into the user's preferred service via
+/// `resolveSpotifyURL`.
 actor AppleMusicSearchService {
     static let shared = AppleMusicSearchService()
 
-    /// Cached authorization status. Reads never prompt; only
-    /// `requestUserAuthorizationForPersonalization()` can show Apple's sheet.
+    /// Cached MusicKit user authorization status. Populated only by
+    /// `requestUserAuthorizationForPersonalization()` /
+    /// `refreshCachedAuthorizationStatus()` — never by search, which is
+    /// authorization-free. Consumed by personalization surfaces that
+    /// need to know whether the user has granted Apple Music access.
     private var cachedAuthStatus: MusicAuthorization.Status?
 
     /// Per-query LRU result cache. Stores the typeahead and expanded
@@ -42,31 +49,28 @@ actor AppleMusicSearchService {
     private let cacheTTL: TimeInterval = 60
     private let cacheCap: Int = 50
 
-    /// Returns the current MusicKit authorization status without prompting.
-    /// Safe for launch/search hot paths.
-    func authorizationStatus() async -> MusicAuthorization.Status {
-        if let cached = cachedAuthStatus { return cached }
-        let current = MusicAuthorization.currentStatus
-        cachedAuthStatus = current
-        return current
-    }
+    // MARK: - User authorization (personalization only, never search)
 
     /// The only code path allowed to show Apple's Music permission sheet.
     /// Call this after the user explicitly chooses Apple Music
-    /// personalization, never for search.
+    /// personalization in onboarding — never for search, which uses the
+    /// developer-only HTTP API and needs no user consent.
     func requestUserAuthorizationForPersonalization() async -> MusicAuthorization.Status {
         let requested = await MusicAuthorization.request()
         cachedAuthStatus = requested
         return requested
     }
 
-    /// Populates `cachedAuthStatus` without prompting so search views can
-    /// cheaply inspect known denied/authorized state later.
+    /// Populates `cachedAuthStatus` without prompting so personalization
+    /// surfaces can cheaply inspect known denied/authorized state later.
+    /// Fire-and-forget at app launch from `AppState.init()`.
     func refreshCachedAuthorizationStatus() async -> MusicAuthorization.Status {
         let current = MusicAuthorization.currentStatus
         cachedAuthStatus = current
         return current
     }
+
+    // MARK: - Public search API
 
     /// Phase 1 of the two-phase search pipeline: Apple's typeahead
     /// endpoint only. Returns prefix-aware top results — the same data
@@ -86,18 +90,17 @@ actor AppleMusicSearchService {
             return hit
         }
 
-        let status = await authorizationStatus()
-
-        let suggestionsResp = await Self.fetchSuggestions(term: trimmed, limit: 10)
+        let topResults = await Self.fetchSuggestions(term: trimmed, limit: 10)
         if Task.isCancelled { return .empty }
 
+        // First pass: build a name → artistId map from the suggestion
+        // batch. Used to back-populate `Song.artistId` so the byline on
+        // a top-hit song row is tappable in the same response.
         var artistIdByName: [String: String] = [:]
-        if let s = suggestionsResp {
-            for top in s.topResults {
-                if case .artist(let a) = top {
-                    let key = Self.normalize(a.name)
-                    if artistIdByName[key] == nil { artistIdByName[key] = a.id.rawValue }
-                }
+        for top in topResults {
+            if case .artist(let a) = top {
+                let key = Self.normalize(a.attributes.name)
+                if artistIdByName[key] == nil { artistIdByName[key] = a.id }
             }
         }
 
@@ -106,24 +109,22 @@ actor AppleMusicSearchService {
         var suggAlbums: [Album] = []
         var suggTopHit: SearchResults.TopHit?
 
-        if let s = suggestionsResp {
-            for top in s.topResults {
-                switch top {
-                case .song(let mkSong):
-                    let mapped = Self.mapSong(mkSong, artistIdByName: artistIdByName)
-                    suggSongs.append(mapped)
-                    if suggTopHit == nil { suggTopHit = .song(mapped) }
-                case .artist(let mkArtist):
-                    let mapped = Self.mapArtist(mkArtist)
-                    suggArtists.append(mapped)
-                    if suggTopHit == nil { suggTopHit = .artist(mapped) }
-                case .album(let mkAlbum):
-                    let mapped = Self.mapAlbum(mkAlbum)
-                    suggAlbums.append(mapped)
-                    if suggTopHit == nil { suggTopHit = .album(mapped) }
-                @unknown default:
-                    continue
-                }
+        for top in topResults {
+            switch top {
+            case .song(let resource):
+                let mapped = Self.mapSong(resource, artistIdByName: artistIdByName)
+                suggSongs.append(mapped)
+                if suggTopHit == nil { suggTopHit = .song(mapped) }
+            case .artist(let resource):
+                let mapped = Self.mapArtist(resource)
+                suggArtists.append(mapped)
+                if suggTopHit == nil { suggTopHit = .artist(mapped) }
+            case .album(let resource):
+                let mapped = Self.mapAlbum(resource)
+                suggAlbums.append(mapped)
+                if suggTopHit == nil { suggTopHit = .album(mapped) }
+            case .unknown:
+                continue
             }
         }
 
@@ -144,7 +145,7 @@ actor AppleMusicSearchService {
             artists: suggArtists,
             albums: suggAlbums,
             topHit: topHit,
-            authStatus: status
+            authStatus: .authorized
         )
         cacheWrite(key: key, typeahead: result)
         return result
@@ -168,22 +169,23 @@ actor AppleMusicSearchService {
             return hit
         }
 
-        let status = await authorizationStatus()
-
-        let fullResp = await Self.fetchFullSearch(term: trimmed, limit: min(max(limit, 1), 25))
+        let buckets = await Self.fetchFullSearch(term: trimmed, limit: min(max(limit, 1), 25))
         if Task.isCancelled { return .empty }
 
         var artistIdByName: [String: String] = [:]
-        if let f = fullResp {
-            for artist in f.artists {
-                let key = Self.normalize(artist.name)
-                if artistIdByName[key] == nil { artistIdByName[key] = artist.id.rawValue }
+        if let artists = buckets?.artists?.data {
+            for artist in artists {
+                let key = Self.normalize(artist.attributes.name)
+                if artistIdByName[key] == nil { artistIdByName[key] = artist.id }
             }
         }
 
-        let fullSongs: [Song] = fullResp?.songs.map { Self.mapSong($0, artistIdByName: artistIdByName) } ?? []
-        let fullArtists: [ArtistSummary] = fullResp?.artists.map(Self.mapArtist(_:)) ?? []
-        let fullAlbums: [Album] = fullResp?.albums.map(Self.mapAlbum(_:)) ?? []
+        let fullSongs: [Song] = buckets?.songs?.data
+            .map { Self.mapSong($0, artistIdByName: artistIdByName) } ?? []
+        let fullArtists: [ArtistSummary] = buckets?.artists?.data
+            .map(Self.mapArtist(_:)) ?? []
+        let fullAlbums: [Album] = buckets?.albums?.data
+            .map(Self.mapAlbum(_:)) ?? []
 
         // Phase 2 is rarely used as the only payload (typeahead almost
         // always returns first), so a permissive heuristic is fine for
@@ -204,7 +206,7 @@ actor AppleMusicSearchService {
             artists: fullArtists,
             albums: fullAlbums,
             topHit: topHit,
-            authStatus: status
+            authStatus: .authorized
         )
         cacheWrite(key: key, expanded: result)
         return result
@@ -253,47 +255,54 @@ actor AppleMusicSearchService {
         }
     }
 
-    // MARK: - Request fan-out
+    // MARK: - HTTP request fan-out
 
-    /// Apple's typeahead endpoint. Returns prefix-aware top results
-    /// (Sufjan Stevens for "suf", Olivia Rodrigo/Dean for "olivia") —
-    /// the exact same data the Apple Music app uses while typing.
-    /// Failures and cancellations collapse to `nil` so the caller can
-    /// still present the full-search tail.
-    private static func fetchSuggestions(term: String, limit: Int) async -> MusicCatalogSearchSuggestionsResponse? {
-        var request = MusicCatalogSearchSuggestionsRequest(
-            term: term,
-            includingTopResultsOfTypes: [MusicKit.Song.self, MusicKit.Artist.self, MusicKit.Album.self]
-        )
-        request.limit = limit
+    /// Apple's typeahead endpoint
+    /// (`/v1/catalog/{sf}/search/suggestions?kinds=topResults&types=...`).
+    /// Returns prefix-aware top results — the exact same data the Apple
+    /// Music app uses while typing. Failures and cancellations collapse
+    /// to an empty array so the caller can still present the full-search
+    /// tail.
+    private static func fetchSuggestions(term: String, limit: Int) async -> [AMTopResultContent] {
+        guard let url = buildURL(
+            path: "search/suggestions",
+            query: [
+                "term": term,
+                "kinds": "topResults",
+                "types": "songs,artists,albums",
+                "limit": String(limit),
+            ]
+        ) else { return [] }
+
+        guard let data = await authedGet(url) else { return [] }
         do {
-            return try await request.response()
-        } catch is CancellationError {
-            return nil
+            let decoded = try JSONDecoder().decode(AMSearchSuggestionsResponse.self, from: data)
+            return decoded.results.suggestions?.compactMap { $0.content } ?? []
         } catch {
-            if (error as NSError).code == NSURLErrorCancelled { return nil }
-            print("[AppleMusicSearch] suggestions error for '\(term)': \(error)")
-            return nil
+            print("[AppleMusicSearch] suggestions decode error for '\(term)': \(error)")
+            return []
         }
     }
 
-    /// The deeper, literal-match catalog search — same endpoint we've
-    /// been using. Used here only to pad the per-tab lists below the
-    /// typeahead results. Same failure/cancellation contract as
-    /// `fetchSuggestions`.
-    private static func fetchFullSearch(term: String, limit: Int) async -> MusicCatalogSearchResponse? {
-        var request = MusicCatalogSearchRequest(
-            term: term,
-            types: [MusicKit.Song.self, MusicKit.Artist.self, MusicKit.Album.self]
-        )
-        request.limit = limit
+    /// The deeper, literal-match catalog search
+    /// (`/v1/catalog/{sf}/search?term=...&types=...`). Used here only to
+    /// pad the per-tab lists below the typeahead results. Same failure /
+    /// cancellation contract as `fetchSuggestions`.
+    private static func fetchFullSearch(term: String, limit: Int) async -> AMSearchResponse.Results? {
+        guard let url = buildURL(
+            path: "search",
+            query: [
+                "term": term,
+                "types": "songs,artists,albums",
+                "limit": String(limit),
+            ]
+        ) else { return nil }
+
+        guard let data = await authedGet(url) else { return nil }
         do {
-            return try await request.response()
-        } catch is CancellationError {
-            return nil
+            return try JSONDecoder().decode(AMSearchResponse.self, from: data).results
         } catch {
-            if (error as NSError).code == NSURLErrorCancelled { return nil }
-            print("[AppleMusicSearch] full search error for '\(term)': \(error)")
+            print("[AppleMusicSearch] full search decode error for '\(term)': \(error)")
             return nil
         }
     }
@@ -325,7 +334,7 @@ actor AppleMusicSearchService {
     /// when a song was ingested before we started storing `artistId`
     /// alongside shares — tapping the artist byline on that legacy
     /// card should still route to the artist page, so we fall back to
-    /// a MusicKit search at tap time.
+    /// a catalog search at tap time.
     ///
     /// Prefers an exact case/diacritic-insensitive name match. Returns
     /// the first search hit when nothing matches exactly; returns nil
@@ -355,48 +364,167 @@ actor AppleMusicSearchService {
 
     // MARK: - Artist details
 
-    /// MusicKit-backed artist page data: canonical `artistName` (pulled
+    /// Catalog-backed artist page data: canonical `artistName` (pulled
     /// straight off the Artist resource — no deriving from a track row),
     /// `topSongs` as ranked by Apple Music itself, and the full album
     /// discography. This is the same data the Apple Music app shows
     /// when you open an artist page.
     ///
-    /// Returns `nil` when the resource request fails, so the caller can fall
-    /// back to iTunes `/lookup`.
+    /// Returns `nil` when the catalog request fails, so the caller can
+    /// fall back to iTunes `/lookup`.
     ///
-    /// - Parameter artistId: MusicKit `Artist.id.rawValue` (identical to
-    ///   the iTunes `artistId` numeric string for the vast majority of
-    ///   catalog artists; MusicKit search already hands us this value).
+    /// - Parameter artistId: Apple Music catalog artist id (identical
+    ///   to the iTunes `artistId` numeric string for the vast majority
+    ///   of catalog artists; search already hands us this value).
     func fetchArtistDetails(artistId: String) async -> ArtistDetails? {
-        do {
-            let request = MusicCatalogResourceRequest<MusicKit.Artist>(
-                matching: \.id,
-                equalTo: MusicItemID(artistId)
-            )
-            let response = try await request.response()
-            guard let baseArtist = response.items.first else { return nil }
-            // `.with([.topSongs, .albums])` triggers the relationship
-            // fetch so `baseArtist.topSongs` / `baseArtist.albums` are
-            // populated. Without this both come back nil.
-            let detailed = try await baseArtist.with([.topSongs, .albums])
-
-            let topSongs: [Song] = (detailed.topSongs ?? []).map { Self.mapArtistTopSong($0, fallbackArtistId: artistId) }
-            let albumsRaw: [Album] = (detailed.albums ?? []).map(Self.mapAlbum(_:))
-            let albums = Self.dedupeAlbums(albumsRaw)
-
-            return ArtistDetails(
-                artistId: artistId,
-                artistName: detailed.name,
-                topTracks: topSongs,
-                albums: albums
-            )
-        } catch is CancellationError {
-            return nil
-        } catch {
-            if (error as NSError).code == NSURLErrorCancelled { return nil }
-            print("[AppleMusicSearch] artist details error for '\(artistId)': \(error)")
+        let trimmed = artistId.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        guard let artist = await Self.fetchArtistDetailsRemote(artistId: trimmed) else {
             return nil
         }
+
+        let topSongs: [Song] = (artist.views?.topSongs?.data ?? [])
+            .map { Self.mapArtistTopSong($0, fallbackArtistId: trimmed) }
+        let albumsRaw: [Album] = {
+            let primary = artist.views?.fullAlbums?.data ?? []
+            if !primary.isEmpty { return primary.map(Self.mapAlbum(_:)) }
+            return (artist.views?.featuredAlbums?.data ?? []).map(Self.mapAlbum(_:))
+        }()
+        let albums = Self.dedupeAlbums(albumsRaw)
+
+        return ArtistDetails(
+            artistId: trimmed,
+            artistName: artist.attributes.name,
+            topTracks: topSongs,
+            albums: albums
+        )
+    }
+
+    /// Per-artist `?views=top-songs,full-albums` endpoint. Returns the
+    /// full artist resource with `top-songs` and `full-albums` view data
+    /// inline so consumers don't have to fan out to per-view endpoints.
+    private static func fetchArtistDetailsRemote(artistId: String) async -> AMArtistDetailsResponse.Artist? {
+        guard let url = buildURL(
+            path: "artists/\(artistId)",
+            query: [
+                "views": "top-songs,full-albums,featured-albums",
+                "extend": "artistBio",
+                "limit[artists:top-songs]": "20",
+                "limit[artists:full-albums]": "50",
+            ]
+        ) else { return nil }
+
+        guard let data = await authedGet(url) else { return nil }
+        do {
+            let decoded = try JSONDecoder().decode(AMArtistDetailsResponse.self, from: data)
+            return decoded.data.first
+        } catch {
+            print("[AppleMusicSearch] artist details decode error for '\(artistId)': \(error)")
+            return nil
+        }
+    }
+
+    // MARK: - Authenticated HTTP helper
+
+    /// Authenticated GET against `api.music.apple.com`. Mints/refreshes
+    /// the JWT transparently via `AppleMusicTokenService` and retries
+    /// once on 401 (after force-refresh) so a stale or rotated token
+    /// recovers without surfacing an empty result. Returns `nil` on
+    /// network failure, cancellation, or final non-2xx response.
+    private static func authedGet(_ url: URL) async -> Data? {
+        if Task.isCancelled { return nil }
+
+        let firstAttempt: Data?
+        do {
+            let token = try await AppleMusicTokenService.shared.token()
+            firstAttempt = try await rawGet(url: url, bearer: token)
+        } catch is CancellationError {
+            return nil
+        } catch RetryableHTTPError.unauthorized {
+            firstAttempt = nil
+        } catch {
+            print("[AppleMusicSearch] HTTP error for \(url.path): \(error)")
+            return nil
+        }
+        if let data = firstAttempt { return data }
+
+        if Task.isCancelled { return nil }
+
+        // First attempt was 401. Force a fresh token and retry once.
+        do {
+            let token = try await AppleMusicTokenService.shared.forceRefresh()
+            return try await rawGet(url: url, bearer: token)
+        } catch is CancellationError {
+            return nil
+        } catch RetryableHTTPError.unauthorized {
+            print("[AppleMusicSearch] 401 after force-refresh for \(url.path); giving up")
+            return nil
+        } catch {
+            print("[AppleMusicSearch] retry error for \(url.path): \(error)")
+            return nil
+        }
+    }
+
+    /// Retryable HTTP outcomes lifted to typed errors so `authedGet`
+    /// can branch cleanly on 401 (force-refresh-and-retry) without
+    /// inspecting status codes from inside the do/catch.
+    private enum RetryableHTTPError: Error { case unauthorized }
+
+    /// Single round-trip: GET with `Authorization: Bearer …`. Returns
+    /// `Data` on 2xx, throws `RetryableHTTPError.unauthorized` on 401,
+    /// returns `nil`-equivalent (throws a generic error) on every other
+    /// non-2xx so the caller can decide.
+    private static func rawGet(url: URL, bearer: String) async throws -> Data? {
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.timeoutInterval = 15
+        req.cachePolicy = .useProtocolCachePolicy
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard let http = response as? HTTPURLResponse else { return nil }
+            switch http.statusCode {
+            case 200..<300:
+                return data
+            case 401:
+                throw RetryableHTTPError.unauthorized
+            default:
+                let body = String(data: data, encoding: .utf8).map { String($0.prefix(200)) } ?? ""
+                print("[AppleMusicSearch] HTTP \(http.statusCode) for \(url.path) body=\(body)")
+                return nil
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            if (error as NSError).code == NSURLErrorCancelled { throw CancellationError() }
+            throw error
+        }
+    }
+
+    /// Builds a fully-qualified URL against
+    /// `https://api.music.apple.com/v1/catalog/{storefront}/{path}` with
+    /// percent-encoded query params. Centralized here so every endpoint
+    /// gets identical storefront resolution.
+    private static func buildURL(path: String, query: [String: String]) -> URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "api.music.apple.com"
+        components.path = "/v1/catalog/\(storefront())/\(path)"
+        components.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
+        return components.url
+    }
+
+    /// Storefront slug (`us`, `gb`, `jp`, ...) used in every catalog
+    /// URL. Apple Music requires it; MusicKit framework was hiding this
+    /// behind `MusicAuthorization`. We derive it from the device locale
+    /// — the catalog you read from doesn't have to match the user's
+    /// Apple Music subscription region, just be a valid storefront.
+    private static func storefront() -> String {
+        let region = Locale.current.region?.identifier ?? "US"
+        let normalized = region.lowercased()
+        return normalized.isEmpty ? "us" : normalized
     }
 
     // MARK: - Mapping
@@ -406,22 +534,17 @@ actor AppleMusicSearchService {
     /// `artistIdByName` table to consult, so we pin the song to the
     /// page's artistId — good enough for the only tap target inside
     /// the Popular list (the row itself opens `SongActionSheet`).
-    private static func mapArtistTopSong(_ song: MusicKit.Song, fallbackArtistId: String) -> Song {
-        let artwork600 = song.artwork?.url(width: 600, height: 600)?.absoluteString ?? ""
-        let durationString: String = {
-            guard let seconds = song.duration, seconds.isFinite, seconds > 0 else { return "" }
-            let total = Int(seconds.rounded())
-            let m = total / 60
-            let s = total % 60
-            return "\(m):\(String(format: "%02d", s))"
-        }()
-        let preview = song.previewAssets?.first?.url?.absoluteString
-        let appleURL = song.url?.absoluteString
+    private static func mapArtistTopSong(_ resource: AMSongResource, fallbackArtistId: String) -> Song {
+        let attrs = resource.attributes
+        let artwork600 = attrs.artwork?.resolvedURL(width: 600, height: 600) ?? ""
+        let durationString = formatDuration(millis: attrs.durationInMillis)
+        let preview = attrs.previews?.first?.url
+        let appleURL = attrs.url
 
         return Song(
-            id: song.id.rawValue,
-            title: song.title,
-            artist: song.artistName,
+            id: resource.id,
+            title: attrs.name,
+            artist: attrs.artistName,
             albumArtURL: artwork600,
             duration: durationString,
             previewURL: preview,
@@ -431,13 +554,13 @@ actor AppleMusicSearchService {
         )
     }
 
-    /// Conservative near-dup collapse for MusicKit album relationships:
-    /// MusicKit can return multiple editions of the same record (deluxe
-    /// / explicit / storefront variants) that all share a name+year.
-    /// Groups by normalized (name, year) and keeps the one with the
-    /// highest trackCount; tiebreaks on earliest release year. Matches
-    /// the behavior we had on the iTunes path so the grid doesn't
-    /// double up.
+    /// Conservative near-dup collapse for catalog album relationships:
+    /// Apple Music can return multiple editions of the same record
+    /// (deluxe / explicit / storefront variants) that all share a
+    /// name+year. Groups by normalized (name, year) and keeps the one
+    /// with the highest trackCount; tiebreaks on earliest release year.
+    /// Matches the behavior we had on the iTunes path so the grid
+    /// doesn't double up.
     private static func dedupeAlbums(_ albums: [Album]) -> [Album] {
         var groups: [String: Album] = [:]
         for album in albums {
@@ -462,23 +585,18 @@ actor AppleMusicSearchService {
         }
     }
 
-    private static func mapSong(_ song: MusicKit.Song, artistIdByName: [String: String]) -> Song {
-        let artwork600 = song.artwork?.url(width: 600, height: 600)?.absoluteString ?? ""
-        let durationString: String = {
-            guard let seconds = song.duration, seconds.isFinite, seconds > 0 else { return "" }
-            let total = Int(seconds.rounded())
-            let m = total / 60
-            let s = total % 60
-            return "\(m):\(String(format: "%02d", s))"
-        }()
-        let preview = song.previewAssets?.first?.url?.absoluteString
-        let appleURL = song.url?.absoluteString
-        let resolvedArtistId = artistIdByName[normalize(song.artistName)]
+    private static func mapSong(_ resource: AMSongResource, artistIdByName: [String: String]) -> Song {
+        let attrs = resource.attributes
+        let artwork600 = attrs.artwork?.resolvedURL(width: 600, height: 600) ?? ""
+        let durationString = formatDuration(millis: attrs.durationInMillis)
+        let preview = attrs.previews?.first?.url
+        let appleURL = attrs.url
+        let resolvedArtistId = artistIdByName[normalize(attrs.artistName)]
 
         return Song(
-            id: song.id.rawValue,
-            title: song.title,
-            artist: song.artistName,
+            id: resource.id,
+            title: attrs.name,
+            artist: attrs.artistName,
             albumArtURL: artwork600,
             duration: durationString,
             previewURL: preview,
@@ -488,32 +606,42 @@ actor AppleMusicSearchService {
         )
     }
 
-    private static func mapArtist(_ artist: MusicKit.Artist) -> ArtistSummary {
-        let imageURL = artist.artwork?.url(width: 600, height: 600)?.absoluteString
+    private static func mapArtist(_ resource: AMArtistResource) -> ArtistSummary {
+        let attrs = resource.attributes
+        let imageURL = attrs.artwork?.resolvedURL(width: 600, height: 600)
         return ArtistSummary(
-            id: artist.id.rawValue,
-            name: artist.name,
-            primaryGenre: artist.genreNames?.first,
+            id: resource.id,
+            name: attrs.name,
+            primaryGenre: attrs.genreNames?.first,
             imageURL: imageURL
         )
     }
 
-    private static func mapAlbum(_ album: MusicKit.Album) -> Album {
-        let artwork = album.artwork?.url(width: 600, height: 600)?.absoluteString ?? ""
-        let year: String? = {
-            guard let date = album.releaseDate else { return nil }
-            let cal = Calendar(identifier: .gregorian)
-            return String(cal.component(.year, from: date))
-        }()
+    private static func mapAlbum(_ resource: AMAlbumResource) -> Album {
+        let attrs = resource.attributes
+        let artwork = attrs.artwork?.resolvedURL(width: 600, height: 600) ?? ""
+        let year = attrs.releaseDate.flatMap { String($0.prefix(4)) }
         return Album(
-            id: album.id.rawValue,
-            name: album.title,
+            id: resource.id,
+            name: attrs.name,
             artworkURL: artwork,
             releaseYear: year,
-            trackCount: album.trackCount,
-            primaryGenre: album.genreNames.first,
-            artistName: album.artistName
+            trackCount: attrs.trackCount,
+            primaryGenre: attrs.genreNames?.first,
+            artistName: attrs.artistName
         )
+    }
+
+    /// Formats an Apple Music `durationInMillis` payload as `m:ss`.
+    /// Returns an empty string when duration is missing or zero — same
+    /// contract as the old MusicKit path so empty-string callers keep
+    /// the same UI.
+    private static func formatDuration(millis: Int?) -> String {
+        guard let ms = millis, ms > 0 else { return "" }
+        let total = ms / 1000
+        let m = total / 60
+        let s = total % 60
+        return "\(m):\(String(format: "%02d", s))"
     }
 
     /// True when the first artist looks like a direct match for the
@@ -543,8 +671,11 @@ actor AppleMusicSearchService {
 }
 
 /// Transport-layer bundle returned by `AppleMusicSearchService.search`.
-/// `authStatus` lets personalization surfaces react to a prior denial without
-/// querying `MusicAuthorization.currentStatus` separately.
+/// `authStatus` is preserved as a compile-compat shim — search no longer
+/// gates on `MusicAuthorization`, so this is always `.authorized`. The
+/// real personalization status lives on `AppState.musicAuthStatus` and
+/// is populated by `MusicServiceView` / `refreshCachedAuthorizationStatus`,
+/// not by search responses.
 struct AppleMusicSearchResults: Sendable {
     let songs: [Song]
     let artists: [ArtistSummary]
@@ -555,6 +686,6 @@ struct AppleMusicSearchResults: Sendable {
     static let empty = AppleMusicSearchResults(
         songs: [], artists: [], albums: [],
         topHit: nil,
-        authStatus: .notDetermined
+        authStatus: .authorized
     )
 }

@@ -1572,6 +1572,83 @@ class FirebaseService {
         }
     }
 
+    // MARK: - Apple Music developer token
+
+    /// Outcome of a `getMusicKitDeveloperToken` call. The Cloud Function
+    /// returns `{ token, expiresAt }` on success; everything else maps to
+    /// a typed failure so `AppleMusicTokenService` can decide whether to
+    /// retry, surface "search unavailable" copy, or fall back to iTunes.
+    enum AppleMusicTokenError: Error, Sendable {
+        case notSignedIn
+        case tokenUnavailable
+        case unconfigured
+        case unauthorized
+        case serverError(Int)
+        case malformedResponse
+        case network(String)
+    }
+
+    /// Fetch a fresh Apple Music developer JWT signed by the
+    /// `getMusicKitDeveloperToken` Cloud Function. The token is bound to
+    /// our Apple Developer team's MusicKit `.p8` (server-side secret) and
+    /// is valid for `expiresAt - now()` seconds — typically ~1 hour. The
+    /// caller is expected to cache and refresh on near-expiry / 401 so
+    /// every search keystroke does not pay this round-trip.
+    func fetchAppleMusicDeveloperToken() async -> Result<(token: String, expiresAt: Date), AppleMusicTokenError> {
+        guard let user = Auth.auth().currentUser else {
+            return .failure(.notSignedIn)
+        }
+        guard let url = functionEndpoint(name: "getMusicKitDeveloperToken") else {
+            return .failure(.network("Missing Firebase project ID"))
+        }
+
+        let idToken: String
+        do {
+            idToken = try await user.getIDToken()
+        } catch {
+            return .failure(.tokenUnavailable)
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = "{}".data(using: .utf8)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard let http = response as? HTTPURLResponse else {
+                return .failure(.network("Invalid response"))
+            }
+            switch http.statusCode {
+            case 200:
+                guard
+                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                    let token = json["token"] as? String,
+                    !token.isEmpty
+                else {
+                    return .failure(.malformedResponse)
+                }
+                let expiresAtSeconds: TimeInterval = {
+                    if let n = json["expiresAt"] as? Double { return n }
+                    if let n = json["expiresAt"] as? Int { return TimeInterval(n) }
+                    return Date().addingTimeInterval(60 * 50).timeIntervalSince1970
+                }()
+                return .success((token: token, expiresAt: Date(timeIntervalSince1970: expiresAtSeconds)))
+            case 401:
+                return .failure(.unauthorized)
+            case 503:
+                return .failure(.unconfigured)
+            default:
+                let body = String(data: data, encoding: .utf8).map { String($0.prefix(200)) } ?? ""
+                print("FirebaseService: getMusicKitDeveloperToken HTTP \(http.statusCode) body=\(body)")
+                return .failure(.serverError(http.statusCode))
+            }
+        } catch {
+            return .failure(.network(error.localizedDescription))
+        }
+    }
+
     /// Calls the server-side `deleteAccount` HTTPS function with the current
     /// user's Firebase ID token. The function runs the Firestore cascade and
     /// then deletes the Auth user, which invalidates this client's session.

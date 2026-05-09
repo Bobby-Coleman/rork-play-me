@@ -935,7 +935,11 @@ class AppState {
             isSearchingSongs = false
             return
         }
-        musicAuthStatus = phase1.authStatus
+        // Search no longer dictates `musicAuthStatus` — we hit the
+        // developer-only Apple Music HTTP API, so search succeeds
+        // regardless of user MusicKit authorization. The personalization
+        // status is mirrored from `MusicServiceView` and the launch-time
+        // `refreshCachedAuthorizationStatus` call instead.
         searchResults = SearchResults(
             artists: phase1.artists,
             songs: phase1.songs,

@@ -7,6 +7,7 @@ const functionsV1 = require("firebase-functions/v1");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
+const jwt = require("jsonwebtoken");
 
 admin.initializeApp();
 
@@ -1396,6 +1397,88 @@ exports.resolveSpotifyTrack = onRequest({ secrets: [spotifyClientSecret] }, asyn
   console.log(`resolveSpotifyTrack: ok title="${title}" artist="${artist}" → trackId=${trackId} matched="${matchedTitle}" by "${matchedArtist}"`);
   res.json({ trackId, spotifyURL, matchedTitle, matchedArtist });
 });
+
+// --------------- Apple Music developer token ---------------
+//
+// Mints short-lived (~1 h) JWTs for the Apple Music HTTP API
+// (`api.music.apple.com/v1/catalog/...`) so the iOS client can perform
+// catalog search and artist-details reads without ever prompting the
+// user for MusicKit authorization. The .p8 private key lives only here
+// in Functions secrets — it never ships in the iOS binary.
+//
+// Auth: requires a valid Firebase ID token in the `Authorization` header
+// so anonymous callers can't drain rate limits. Same pattern as
+// `redeemInviteCode` and `resolveSpotifyTrack`.
+//
+// Token lifetime is intentionally short (1 h) even though Apple permits
+// up to 180 days — the client refreshes silently on near-expiry / 401 /
+// cache miss, so a leaked token is bounded to roughly an hour of damage.
+
+const appleMusicKeyId = defineSecret("APPLE_MUSIC_KEY_ID");
+const appleMusicTeamId = defineSecret("APPLE_MUSIC_TEAM_ID");
+const appleMusicPrivateKey = defineSecret("APPLE_MUSIC_PRIVATE_KEY");
+
+const APPLE_MUSIC_TOKEN_LIFETIME_SECONDS = 60 * 60;
+
+exports.getMusicKitDeveloperToken = onRequest(
+  {
+    secrets: [appleMusicKeyId, appleMusicTeamId, appleMusicPrivateKey],
+  },
+  async (req, res) => {
+    res.set("Cache-Control", "no-store");
+
+    if (req.method !== "POST" && req.method !== "GET") {
+      res.status(405).json({ error: "method_not_allowed" });
+      return;
+    }
+
+    const uid = await verifyAuthHeader(req);
+    if (!uid) {
+      res.status(401).json({ error: "unauthenticated" });
+      return;
+    }
+
+    let keyId, teamId, privateKey;
+    try {
+      keyId = appleMusicKeyId.value();
+      teamId = appleMusicTeamId.value();
+      privateKey = appleMusicPrivateKey.value();
+    } catch (err) {
+      console.error(
+        "getMusicKitDeveloperToken: secret read failed:",
+        err && err.message ? err.message : err
+      );
+      res.status(503).json({ error: "unconfigured" });
+      return;
+    }
+
+    if (!keyId || !teamId || !privateKey) {
+      res.status(503).json({ error: "unconfigured" });
+      return;
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const exp = now + APPLE_MUSIC_TOKEN_LIFETIME_SECONDS;
+
+    try {
+      const token = jwt.sign(
+        { iss: teamId, iat: now, exp },
+        privateKey,
+        {
+          algorithm: "ES256",
+          header: { alg: "ES256", kid: keyId },
+        }
+      );
+      res.json({ token, expiresAt: exp });
+    } catch (err) {
+      console.error(
+        "getMusicKitDeveloperToken: sign failed:",
+        err && err.message ? err.message : err
+      );
+      res.status(500).json({ error: "sign_failed" });
+    }
+  }
+);
 
 // --------------- Invite code gate ---------------
 
