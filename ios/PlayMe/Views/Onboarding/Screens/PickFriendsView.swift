@@ -5,10 +5,9 @@ import FirebaseAuth
 
 /// Screen 12 — Pick friends to invite via SMS.
 ///
-/// 8-slot meter + counter + search. Tapping a contact opens an
-/// `MFMessageComposeViewController` (via `MessageComposeView`). On a
-/// successful send we append to `appState.invitedContacts` so the
-/// final "Send first song" screen can target them.
+/// 8-slot meter + counter + search + paginated list. Each row has **+ Add**
+/// (opens `MFMessageComposeViewController`); after a successful send the row
+/// shows **Invited**. Continue stays disabled until at least one invite is sent.
 struct PickFriendsView: View {
     let appState: AppState
     let stepIdx: Int
@@ -22,9 +21,12 @@ struct PickFriendsView: View {
     @State private var search: String = ""
     @State private var inviteRecipient: OutgoingInvite?
     @State private var inviteLink: String = ""
+    @State private var visibleContactCount: Int = 20
     @FocusState private var searchFocused: Bool
 
     @Environment(\.riffTheme) private var theme
+
+    private let contactPageSize = 20
 
     private var inviteBody: String {
         let link = inviteLink.isEmpty
@@ -42,6 +44,14 @@ struct PickFriendsView: View {
             $0.lastName.lowercased().contains(q) ||
             $0.phoneNumber.contains(q)
         }
+    }
+
+    private var displayedContacts: [SimpleContact] {
+        Array(filteredContacts.prefix(visibleContactCount))
+    }
+
+    private var hasMoreContacts: Bool {
+        visibleContactCount < filteredContacts.count
     }
 
     private var selectedCount: Int {
@@ -85,9 +95,24 @@ struct PickFriendsView: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(filteredContacts) { contact in
+                            ForEach(displayedContacts) { contact in
                                 row(for: contact)
                                 Divider().background(theme.border)
+                            }
+                            if hasMoreContacts {
+                                Button {
+                                    visibleContactCount = min(
+                                        visibleContactCount + contactPageSize,
+                                        filteredContacts.count
+                                    )
+                                } label: {
+                                    Text("See more")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundStyle(theme.sub)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 16)
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                         .padding(.horizontal, 24)
@@ -100,7 +125,7 @@ struct PickFriendsView: View {
         } footer: {
             VStack(spacing: 0) {
                 RiffPrimaryButton(
-                    title: "Send invites",
+                    title: "Continue",
                     disabled: !canContinue,
                     action: onContinue
                 )
@@ -124,6 +149,9 @@ struct PickFriendsView: View {
                 }
                 .ignoresSafeArea()
             }
+        }
+        .onChange(of: search) { _, _ in
+            visibleContactCount = contactPageSize
         }
     }
 
@@ -150,47 +178,64 @@ struct PickFriendsView: View {
         let invited = appState.invitedContacts.contains(where: { $0.id == contact.id })
         let limitReached = !invited && selectedCount >= 8
 
-        return Button {
-            if invited {
-                appState.invitedContacts.removeAll { $0.id == contact.id }
-            } else if !limitReached {
-                inviteRecipient = OutgoingInvite(contact: contact)
-            }
-        } label: {
-            HStack(spacing: 12) {
-                Text(contact.initials)
-                    .font(.system(size: 13, weight: .bold))
+        return HStack(spacing: 12) {
+            Text(contact.initials)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(theme.fg)
+                .frame(width: 38, height: 38)
+                .background(Circle().fill(theme.softBg))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(contact.fullName)
+                    .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(theme.fg)
-                    .frame(width: 38, height: 38)
-                    .background(Circle().fill(theme.softBg))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(contact.fullName)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(theme.fg)
-                    Text(contact.phoneNumber)
-                        .font(.system(size: 12))
-                        .foregroundStyle(theme.faint)
-                }
-
-                Spacer()
-
-                ZStack {
-                    Circle()
-                        .stroke(invited ? theme.fg : theme.border, lineWidth: 1.5)
-                        .background(Circle().fill(invited ? theme.fg : Color.clear))
-                        .frame(width: 22, height: 22)
-                    if invited {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(theme.bg)
-                    }
-                }
+                Text(contact.phoneNumber)
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.faint)
             }
-            .padding(.vertical, 12)
-            .opacity(limitReached ? 0.4 : 1)
+
+            Spacer(minLength: 8)
+
+            if invited {
+                Button {
+                    appState.invitedContacts.removeAll { $0.id == contact.id }
+                } label: {
+                    Text("Invited")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(theme.sub)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule()
+                                .fill(theme.fg.opacity(theme.isLight ? 0.08 : 0.12))
+                        )
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button {
+                    guard !limitReached else { return }
+                    inviteRecipient = OutgoingInvite(contact: contact)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("Add")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundStyle(limitReached ? theme.faint : theme.fg)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(
+                        Capsule()
+                            .stroke(theme.border, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(limitReached)
+            }
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 12)
+        .opacity(limitReached && !invited ? 0.45 : 1)
     }
 
     private func handleComposeResult(_ result: MessageComposeResult, for contact: SimpleContact) {
