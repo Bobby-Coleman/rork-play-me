@@ -13,14 +13,14 @@ import MusicKit
 ///    Service enabled.
 /// 2. Info.plist must declare `NSAppleMusicUsageDescription`.
 ///
-/// An active Apple Music subscription is *not* required — catalog search
-/// and 30-second previews work for every user who grants authorization.
+/// An active Apple Music subscription is *not* required. Catalog search is
+/// intentionally non-prompting; user MusicKit authorization is reserved for
+/// Apple Music personalization.
 actor AppleMusicSearchService {
     static let shared = AppleMusicSearchService()
 
-    /// Cached authorization status. Read via `currentAuthorizationStatus()`
-    /// so the UI can gate noResultsView on `.denied` without every
-    /// keystroke hitting MusicKit.
+    /// Cached authorization status. Reads never prompt; only
+    /// `requestUserAuthorizationForPersonalization()` can show Apple's sheet.
     private var cachedAuthStatus: MusicAuthorization.Status?
 
     /// Per-query LRU result cache. Stores the typeahead and expanded
@@ -42,28 +42,30 @@ actor AppleMusicSearchService {
     private let cacheTTL: TimeInterval = 60
     private let cacheCap: Int = 50
 
-    /// Returns the current authorization status, requesting permission if
-    /// the user hasn't been prompted yet. Safe to call on every search —
-    /// MusicKit itself deduplicates the prompt.
-    func currentAuthorizationStatus() async -> MusicAuthorization.Status {
-        if let cached = cachedAuthStatus, cached != .notDetermined {
-            return cached
-        }
+    /// Returns the current MusicKit authorization status without prompting.
+    /// Safe for launch/search hot paths.
+    func authorizationStatus() async -> MusicAuthorization.Status {
+        if let cached = cachedAuthStatus { return cached }
         let current = MusicAuthorization.currentStatus
-        if current == .notDetermined {
-            let requested = await MusicAuthorization.request()
-            cachedAuthStatus = requested
-            return requested
-        }
         cachedAuthStatus = current
         return current
     }
 
-    /// Populates `cachedAuthStatus` so the first real keystroke doesn't
-    /// pay the `MusicAuthorization.currentStatus` round-trip. Called
-    /// once at app launch from `AppState.init()` — fire-and-forget.
-    func prewarmAuthorization() async {
-        _ = await currentAuthorizationStatus()
+    /// The only code path allowed to show Apple's Music permission sheet.
+    /// Call this after the user explicitly chooses Apple Music
+    /// personalization, never for search.
+    func requestUserAuthorizationForPersonalization() async -> MusicAuthorization.Status {
+        let requested = await MusicAuthorization.request()
+        cachedAuthStatus = requested
+        return requested
+    }
+
+    /// Populates `cachedAuthStatus` without prompting so search views can
+    /// cheaply inspect known denied/authorized state later.
+    func refreshCachedAuthorizationStatus() async -> MusicAuthorization.Status {
+        let current = MusicAuthorization.currentStatus
+        cachedAuthStatus = current
+        return current
     }
 
     /// Phase 1 of the two-phase search pipeline: Apple's typeahead
@@ -84,13 +86,7 @@ actor AppleMusicSearchService {
             return hit
         }
 
-        let status = await currentAuthorizationStatus()
-        guard status == .authorized else {
-            return AppleMusicSearchResults(
-                songs: [], artists: [], albums: [],
-                topHit: nil, authStatus: status
-            )
-        }
+        let status = await authorizationStatus()
 
         let suggestionsResp = await Self.fetchSuggestions(term: trimmed, limit: 10)
         if Task.isCancelled { return .empty }
@@ -148,7 +144,7 @@ actor AppleMusicSearchService {
             artists: suggArtists,
             albums: suggAlbums,
             topHit: topHit,
-            authStatus: .authorized
+            authStatus: status
         )
         cacheWrite(key: key, typeahead: result)
         return result
@@ -172,13 +168,7 @@ actor AppleMusicSearchService {
             return hit
         }
 
-        let status = await currentAuthorizationStatus()
-        guard status == .authorized else {
-            return AppleMusicSearchResults(
-                songs: [], artists: [], albums: [],
-                topHit: nil, authStatus: status
-            )
-        }
+        let status = await authorizationStatus()
 
         let fullResp = await Self.fetchFullSearch(term: trimmed, limit: min(max(limit, 1), 25))
         if Task.isCancelled { return .empty }
@@ -214,7 +204,7 @@ actor AppleMusicSearchService {
             artists: fullArtists,
             albums: fullAlbums,
             topHit: topHit,
-            authStatus: .authorized
+            authStatus: status
         )
         cacheWrite(key: key, expanded: result)
         return result
@@ -339,13 +329,10 @@ actor AppleMusicSearchService {
     ///
     /// Prefers an exact case/diacritic-insensitive name match. Returns
     /// the first search hit when nothing matches exactly; returns nil
-    /// on empty input, unauthorized MusicKit, or a search failure.
+    /// on empty input or search failure.
     func resolveArtistId(name: String) async -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
-
-        let status = await currentAuthorizationStatus()
-        guard status == .authorized else { return nil }
 
         async let typeaheadTask = searchTypeahead(term: trimmed)
         async let expandedTask = searchExpanded(term: trimmed, limit: 8)
@@ -374,16 +361,13 @@ actor AppleMusicSearchService {
     /// discography. This is the same data the Apple Music app shows
     /// when you open an artist page.
     ///
-    /// Returns `nil` when MusicKit isn't authorized or the resource
-    /// request fails, so the caller can fall back to iTunes `/lookup`.
+    /// Returns `nil` when the resource request fails, so the caller can fall
+    /// back to iTunes `/lookup`.
     ///
     /// - Parameter artistId: MusicKit `Artist.id.rawValue` (identical to
     ///   the iTunes `artistId` numeric string for the vast majority of
     ///   catalog artists; MusicKit search already hands us this value).
     func fetchArtistDetails(artistId: String) async -> ArtistDetails? {
-        let status = await currentAuthorizationStatus()
-        guard status == .authorized else { return nil }
-
         do {
             let request = MusicCatalogResourceRequest<MusicKit.Artist>(
                 matching: \.id,
@@ -559,9 +543,8 @@ actor AppleMusicSearchService {
 }
 
 /// Transport-layer bundle returned by `AppleMusicSearchService.search`.
-/// `authStatus` lets views surface a Settings deep link when MusicKit is
-/// denied without having to query `MusicAuthorization.currentStatus`
-/// separately.
+/// `authStatus` lets personalization surfaces react to a prior denial without
+/// querying `MusicAuthorization.currentStatus` separately.
 struct AppleMusicSearchResults: Sendable {
     let songs: [Song]
     let artists: [ArtistSummary]

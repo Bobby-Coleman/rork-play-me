@@ -1396,3 +1396,170 @@ exports.resolveSpotifyTrack = onRequest({ secrets: [spotifyClientSecret] }, asyn
   console.log(`resolveSpotifyTrack: ok title="${title}" artist="${artist}" → trackId=${trackId} matched="${matchedTitle}" by "${matchedArtist}"`);
   res.json({ trackId, spotifyURL, matchedTitle, matchedArtist });
 });
+
+// --------------- Invite code gate ---------------
+
+// Gen2 HTTP handlers sometimes deliver `req.body` as a Buffer or string instead
+// of a parsed object. Normalize so `{ code: "…" }` is always readable.
+function inviteRequestBody(req) {
+  const b = req.body;
+  if (b && typeof b === "object" && !Buffer.isBuffer(b)) {
+    return b;
+  }
+  if (Buffer.isBuffer(b)) {
+    try {
+      return JSON.parse(b.toString("utf8"));
+    } catch (_) {
+      return {};
+    }
+  }
+  if (typeof b === "string" && b.trim()) {
+    try {
+      return JSON.parse(b);
+    } catch (_) {
+      return {};
+    }
+  }
+  if (req.rawBody && Buffer.isBuffer(req.rawBody)) {
+    try {
+      return JSON.parse(req.rawBody.toString("utf8"));
+    } catch (_) {
+      return {};
+    }
+  }
+  return {};
+}
+
+// Helper: verify Firebase ID token from the standard `Authorization: Bearer …`
+// header used by the deleteAccount endpoint. Returns the uid or null.
+async function verifyAuthHeader(req) {
+  const header = req.get("Authorization") || "";
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) return null;
+  try {
+    const decoded = await admin.auth().verifyIdToken(match[1]);
+    return decoded && decoded.uid ? decoded.uid : null;
+  } catch (err) {
+    console.log("verifyAuthHeader: token rejected:", err && err.message ? err.message : err);
+    return null;
+  }
+}
+
+// `validateInviteCode` (POST { code }) — non-destructive read used by the
+// onboarding invite gate to fail fast before we burn an SMS verification.
+// Does NOT mark the code redeemed; that happens inside `redeemInviteCode`
+// once the user actually completes signup. Codes live at
+// `inviteCodes/{CODE_UPPER}` with shape:
+//   { disabled?: bool, redeemed?: bool, redeemedBy?: string,
+//     redeemedAt?: ts,  expiresAt?: ts, maxUses?: int (default 1),
+//     useCount?: int }
+exports.validateInviteCode = onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).json({ valid: false, reason: "method_not_allowed" });
+    return;
+  }
+  const body = inviteRequestBody(req);
+  const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
+  if (!code) {
+    res.status(400).json({ valid: false, reason: "missing_code" });
+    return;
+  }
+  try {
+    const db = admin.firestore();
+    const snap = await db.collection("inviteCodes").doc(code).get();
+    if (!snap.exists) {
+      res.json({ valid: false, reason: "not_found" });
+      return;
+    }
+    const data = snap.data() || {};
+    if (data.disabled === true) {
+      res.json({ valid: false, reason: "disabled" });
+      return;
+    }
+    if (data.expiresAt && data.expiresAt.toMillis && data.expiresAt.toMillis() < Date.now()) {
+      res.json({ valid: false, reason: "expired" });
+      return;
+    }
+    const maxUses = typeof data.maxUses === "number" ? data.maxUses : 1;
+    const useCount = typeof data.useCount === "number" ? data.useCount : 0;
+    if (useCount >= maxUses) {
+      res.json({ valid: false, reason: "exhausted" });
+      return;
+    }
+    res.json({ valid: true });
+  } catch (err) {
+    console.log("validateInviteCode error:", err && err.message ? err.message : err);
+    res.status(500).json({ valid: false, reason: "server_error" });
+  }
+});
+
+// `redeemInviteCode` (POST { code }) — atomic redeem called from the
+// client immediately after profile creation. Bumps `useCount` and stamps
+// `redeemedBy/redeemedAt`. Writes `users/{uid}.invitedBy` so analytics
+// can attribute the new account.
+exports.redeemInviteCode = onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).json({ redeemed: false, reason: "method_not_allowed" });
+    return;
+  }
+  const uid = await verifyAuthHeader(req);
+  if (!uid) {
+    res.status(401).json({ redeemed: false, reason: "unauthenticated" });
+    return;
+  }
+  const body = inviteRequestBody(req);
+  const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
+  if (!code) {
+    res.status(400).json({ redeemed: false, reason: "missing_code" });
+    return;
+  }
+
+  const db = admin.firestore();
+  const codeRef = db.collection("inviteCodes").doc(code);
+  const userRef = db.collection("users").doc(uid);
+
+  try {
+    await db.runTransaction(async (txn) => {
+      const codeSnap = await txn.get(codeRef);
+      if (!codeSnap.exists) {
+        const err = new Error("not_found");
+        err.code = 404;
+        throw err;
+      }
+      const data = codeSnap.data() || {};
+      if (data.disabled === true) {
+        const err = new Error("disabled");
+        err.code = 409;
+        throw err;
+      }
+      if (data.expiresAt && data.expiresAt.toMillis && data.expiresAt.toMillis() < Date.now()) {
+        const err = new Error("expired");
+        err.code = 409;
+        throw err;
+      }
+      const maxUses = typeof data.maxUses === "number" ? data.maxUses : 1;
+      const useCount = typeof data.useCount === "number" ? data.useCount : 0;
+      if (useCount >= maxUses) {
+        const err = new Error("exhausted");
+        err.code = 409;
+        throw err;
+      }
+      txn.update(codeRef, {
+        useCount: useCount + 1,
+        redeemedBy: uid,
+        redeemedAt: admin.firestore.FieldValue.serverTimestamp(),
+        redeemed: useCount + 1 >= maxUses,
+      });
+      txn.set(userRef, {
+        invitedBy: code,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    });
+    res.json({ redeemed: true });
+  } catch (err) {
+    const status = err && typeof err.code === "number" ? err.code : 500;
+    const reason = err && err.message ? err.message : "server_error";
+    console.log("redeemInviteCode failed:", reason);
+    res.status(status).json({ redeemed: false, reason });
+  }
+});

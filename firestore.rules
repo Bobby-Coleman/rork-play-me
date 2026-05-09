@@ -255,6 +255,15 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // Invite codes gate the new-user signup flow. The client never
+    // touches these directly — validation + redemption go through the
+    // `validateInviteCode` / `redeemInviteCode` callables, which run
+    // with admin privileges. Locking everything down here prevents
+    // enumeration even from authenticated clients.
+    match /inviteCodes/{code} {
+      allow read, write: if false;
+    }
+
     // Global Spotify resolution cache keyed by SHA-256 of the normalized
     // Apple Music song URL. One document per unique song, shared across
     // the whole user base. Any authenticated user may read (cache check

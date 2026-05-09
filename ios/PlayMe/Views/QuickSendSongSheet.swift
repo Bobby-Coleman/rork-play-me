@@ -20,6 +20,7 @@ struct QuickSendSongSheet: View {
     @State private var isSending: Bool = false
     @State private var pendingDuplicateSong: Song?
     @State private var showDuplicateSendAlert: Bool = false
+    @AppStorage("songSearch.recentQueries") private var recentSearchesRaw: String = "[]"
     @FocusState private var isNoteFocused: Bool
     @FocusState private var isSearchFocused: Bool
     @State private var audioPlayer: AudioPlayerService = .shared
@@ -119,6 +120,7 @@ struct QuickSendSongSheet: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.white.opacity(0.4))
                 AppTextField("Search songs or artists...", text: $searchText, submitLabel: .search) {
+                    commitCurrentSearch()
                     isSearchFocused = false
                 }
                     .foregroundStyle(.white)
@@ -146,6 +148,16 @@ struct QuickSendSongSheet: View {
             .clipShape(.rect(cornerRadius: 12))
             .padding(.horizontal, 20)
             .padding(.bottom, 8)
+
+            if searchText.isEmpty {
+                RecentSongSearchList(
+                    searches: RecentSongSearchStore.decode(recentSearchesRaw),
+                    onSelect: applyRecentSearch(_:),
+                    onRemove: removeRecentSearch(_:)
+                )
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
+            }
 
             if !searchText.isEmpty && !appState.searchResults.isEmpty {
                 SearchFilterBar(selection: Binding(
@@ -207,6 +219,7 @@ struct QuickSendSongSheet: View {
             } : nil)
             ForEach(artists) { artist in
                 ArtistResultRow(artist: artist) {
+                    commitCurrentSearch()
                     detailArtist = artist
                 }
                 .id(artist.id)
@@ -242,8 +255,14 @@ struct QuickSendSongSheet: View {
             ForEach(albums) { album in
                 AlbumResultRow(
                     album: album,
-                    onTap: { detailAlbum = album },
-                    onShareTap: { shareAlbum = album }
+                    onTap: {
+                        commitCurrentSearch()
+                        detailAlbum = album
+                    },
+                    onShareTap: {
+                        commitCurrentSearch()
+                        shareAlbum = album
+                    }
                 )
                 .id(album.id)
                 .overlay(alignment: .bottom) {
@@ -257,6 +276,7 @@ struct QuickSendSongSheet: View {
     private var artistsFullList: some View {
         ForEach(appState.searchResults.artists) { artist in
             ArtistResultRow(artist: artist) {
+                commitCurrentSearch()
                 detailArtist = artist
             }
             .id(artist.id)
@@ -278,8 +298,14 @@ struct QuickSendSongSheet: View {
         ForEach(appState.searchResults.albums) { album in
             AlbumResultRow(
                 album: album,
-                onTap: { detailAlbum = album },
-                onShareTap: { shareAlbum = album }
+                onTap: {
+                    commitCurrentSearch()
+                    detailAlbum = album
+                },
+                onShareTap: {
+                    commitCurrentSearch()
+                    shareAlbum = album
+                }
             )
             .id(album.id)
             .overlay(alignment: .bottom) {
@@ -293,6 +319,7 @@ struct QuickSendSongSheet: View {
         switch hit {
         case .artist(let artist):
             ArtistResultRow(artist: artist) {
+                commitCurrentSearch()
                 detailArtist = artist
             }
             .id(artist.id)
@@ -301,8 +328,14 @@ struct QuickSendSongSheet: View {
         case .album(let album):
             AlbumResultRow(
                 album: album,
-                onTap: { detailAlbum = album },
-                onShareTap: { shareAlbum = album }
+                onTap: {
+                    commitCurrentSearch()
+                    detailAlbum = album
+                },
+                onShareTap: {
+                    commitCurrentSearch()
+                    shareAlbum = album
+                }
             )
             .id(album.id)
         }
@@ -419,35 +452,12 @@ struct QuickSendSongSheet: View {
 
     private var noResultsView: some View {
         VStack(spacing: 14) {
-            if appState.isMusicSearchDenied {
-                Image(systemName: "music.note.list")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.white.opacity(0.15))
-                Text("Allow Apple Music access to search songs")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-                Button {
-                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url)
-                    }
-                } label: {
-                    Text("Open Settings")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 10)
-                        .background(Capsule().fill(.white))
-                }
-            } else {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.white.opacity(0.15))
-                Text("No results for \"\(searchText)\"")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.3))
-            }
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 36))
+                .foregroundStyle(.white.opacity(0.15))
+            Text("No results for \"\(searchText)\"")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -467,6 +477,23 @@ struct QuickSendSongSheet: View {
             guard !Task.isCancelled else { return }
             await appState.searchSongs(query: trimmed)
         }
+    }
+
+    private func commitCurrentSearch() {
+        recentSearchesRaw = RecentSongSearchStore.adding(searchText, to: recentSearchesRaw)
+    }
+
+    private func applyRecentSearch(_ query: String) {
+        isSearchFocused = false
+        if searchText == query {
+            performSearch(query)
+        } else {
+            searchText = query
+        }
+    }
+
+    private func removeRecentSearch(_ query: String) {
+        recentSearchesRaw = RecentSongSearchStore.removing(query, from: recentSearchesRaw)
     }
 
     private func songRow(_ song: Song) -> some View {
@@ -517,6 +544,7 @@ struct QuickSendSongSheet: View {
                     .lineLimit(1)
                 if let artistId = song.artistId {
                     Button {
+                        commitCurrentSearch()
                         detailArtist = ArtistSummary(
                             id: artistId,
                             name: song.artist,
@@ -542,6 +570,7 @@ struct QuickSendSongSheet: View {
             Spacer()
 
             Button {
+                commitCurrentSearch()
                 selectedSong = song
                 withAnimation(.spring(duration: 0.3)) { step = 1 }
             } label: {
@@ -564,6 +593,7 @@ struct QuickSendSongSheet: View {
             // Row tap routes directly to compose — preview/scrub live
             // alongside the Send button there, so the extra detail step
             // is no longer useful. Back chevron returns here.
+            commitCurrentSearch()
             selectedSong = song
             withAnimation(.spring(duration: 0.3)) { step = 1 }
         }

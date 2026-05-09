@@ -1023,37 +1023,39 @@ private struct MixtapesGridView: View {
             let captionBlockHeight: CGFloat = 34
             let cardSpacing: CGFloat = 6
             let rowHeight = mosaicHeight + cardSpacing + captionBlockHeight
+            let columns = [
+                GridItem(.fixed(columnWidth), spacing: spacing, alignment: .top),
+                GridItem(.fixed(columnWidth), spacing: spacing, alignment: .top)
+            ]
 
             ScrollView {
                 LazyVStack(spacing: 0) {
                     if filtered.isEmpty {
                         emptyState.padding(.top, 80)
                     } else {
-                        PinterestStaggeredGrid(
-                            items: filtered,
-                            columnWidth: columnWidth,
-                            rowHeight: rowHeight,
-                            spacing: spacing
-                        ) { mixtape, colW in
-                            VStack(alignment: .leading, spacing: cardSpacing) {
-                                MixtapeBoardCardCover(mixtape: mixtape, cornerRadius: 14)
-                                    .frame(width: colW)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(mixtape.name)
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(.white)
-                                        .lineLimit(1)
-                                    Text("\(mixtape.songCount) song\(mixtape.songCount == 1 ? "" : "s")")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.white.opacity(0.45))
-                                        .lineLimit(1)
+                        LazyVGrid(columns: columns, alignment: .center, spacing: spacing) {
+                            ForEach(filtered) { mixtape in
+                                VStack(alignment: .leading, spacing: cardSpacing) {
+                                    MixtapeBoardCardCover(mixtape: mixtape, cornerRadius: 14)
+                                        .frame(width: columnWidth)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(mixtape.name)
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundStyle(.white)
+                                            .lineLimit(1)
+                                        Text("\(mixtape.songCount) song\(mixtape.songCount == 1 ? "" : "s")")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(.white.opacity(0.45))
+                                            .lineLimit(1)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 4)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 4)
-                            }
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                onTap(mixtape)
+                                .frame(width: columnWidth, height: rowHeight, alignment: .top)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    onTap(mixtape)
+                                }
                             }
                         }
                         .padding(.horizontal, horizontalPadding)
@@ -1957,35 +1959,12 @@ private struct AddSongsToMixtapeSheet: View {
 
     private var noResultsView: some View {
         VStack(spacing: 14) {
-            if appState.isMusicSearchDenied {
-                Image(systemName: "music.note.list")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.white.opacity(0.15))
-                Text("Allow Apple Music access to search songs")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-                Button {
-                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url)
-                    }
-                } label: {
-                    Text("Open Settings")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 10)
-                        .background(Capsule().fill(.white))
-                }
-            } else {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.white.opacity(0.15))
-                Text("No results for \"\(searchText)\"")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.3))
-            }
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 36))
+                .foregroundStyle(.white.opacity(0.15))
+            Text("No results for \"\(searchText)\"")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)

@@ -88,8 +88,8 @@ actor ArtistLookupService {
     ///    which was the bug that relabeled "Taylor Swift" as
     ///    "BOYS LIKE GIRLS" when a feat-collab track ranked #1), and
     ///    `topSongs` as ranked by Apple.
-    /// 2. If MusicKit isn't authorized or the request fails, fall back
-    ///    to the legacy iTunes `/lookup` path so the page still
+    /// 2. If the MusicKit request fails, fall back to the legacy iTunes
+    ///    `/lookup` path so the page still
     ///    renders *something*. iTunes returns a looser catalog order
     ///    and can mis-attribute feat tracks, but it's better than an
     ///    empty page.

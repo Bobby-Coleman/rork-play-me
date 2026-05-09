@@ -31,6 +31,7 @@ struct SendSongSheet: View {
     /// `saveAlbum` state mirrored here.
     @State private var shareAlbum: Album?
     @State private var audioPlayer: AudioPlayerService = .shared
+    @AppStorage("songSearch.recentQueries") private var recentSearchesRaw: String = "[]"
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
@@ -139,6 +140,7 @@ struct SendSongSheet: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.white.opacity(0.4))
                 AppTextField("Search songs or artists...", text: $searchText, submitLabel: .search) {
+                    commitCurrentSearch()
                     isSearchFocused = false
                 }
                     .foregroundStyle(.white)
@@ -167,6 +169,16 @@ struct SendSongSheet: View {
             .clipShape(.rect(cornerRadius: 12))
             .padding(.horizontal, 20)
             .padding(.bottom, 8)
+
+            if searchText.isEmpty {
+                RecentSongSearchList(
+                    searches: RecentSongSearchStore.decode(recentSearchesRaw),
+                    onSelect: applyRecentSearch(_:),
+                    onRemove: removeRecentSearch(_:)
+                )
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
+            }
 
             // Filter tabs only surface once the user actually has results
             // to slice. Hiding them for empty/hint states keeps the first
@@ -236,6 +248,7 @@ struct SendSongSheet: View {
             } : nil)
             ForEach(artists) { artist in
                 ArtistResultRow(artist: artist) {
+                    commitCurrentSearch()
                     detailArtist = artist
                 }
                 .id(artist.id)
@@ -271,8 +284,14 @@ struct SendSongSheet: View {
             ForEach(albums) { album in
                 AlbumResultRow(
                     album: album,
-                    onTap: { detailAlbum = album },
-                    onShareTap: { shareAlbum = album }
+                    onTap: {
+                        commitCurrentSearch()
+                        detailAlbum = album
+                    },
+                    onShareTap: {
+                        commitCurrentSearch()
+                        shareAlbum = album
+                    }
                 )
                 .id(album.id)
                 .overlay(alignment: .bottom) {
@@ -286,6 +305,7 @@ struct SendSongSheet: View {
     private var artistsFullList: some View {
         ForEach(appState.searchResults.artists) { artist in
             ArtistResultRow(artist: artist) {
+                commitCurrentSearch()
                 detailArtist = artist
             }
             .id(artist.id)
@@ -307,8 +327,14 @@ struct SendSongSheet: View {
         ForEach(appState.searchResults.albums) { album in
             AlbumResultRow(
                 album: album,
-                onTap: { detailAlbum = album },
-                onShareTap: { shareAlbum = album }
+                onTap: {
+                    commitCurrentSearch()
+                    detailAlbum = album
+                },
+                onShareTap: {
+                    commitCurrentSearch()
+                    shareAlbum = album
+                }
             )
             .id(album.id)
             .overlay(alignment: .bottom) {
@@ -326,6 +352,7 @@ struct SendSongSheet: View {
         switch hit {
         case .artist(let artist):
             ArtistResultRow(artist: artist) {
+                commitCurrentSearch()
                 detailArtist = artist
             }
             .id(artist.id)
@@ -334,8 +361,14 @@ struct SendSongSheet: View {
         case .album(let album):
             AlbumResultRow(
                 album: album,
-                onTap: { detailAlbum = album },
-                onShareTap: { shareAlbum = album }
+                onTap: {
+                    commitCurrentSearch()
+                    detailAlbum = album
+                },
+                onShareTap: {
+                    commitCurrentSearch()
+                    shareAlbum = album
+                }
             )
             .id(album.id)
         }
@@ -356,35 +389,12 @@ struct SendSongSheet: View {
 
     private var noResultsView: some View {
         VStack(spacing: 14) {
-            if appState.isMusicSearchDenied {
-                Image(systemName: "music.note.list")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.white.opacity(0.15))
-                Text("Allow Apple Music access to search songs")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-                Button {
-                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url)
-                    }
-                } label: {
-                    Text("Open Settings")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 10)
-                        .background(Capsule().fill(.white))
-                }
-            } else {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.white.opacity(0.15))
-                Text("No results for \"\(searchText)\"")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.3))
-            }
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 36))
+                .foregroundStyle(.white.opacity(0.15))
+            Text("No results for \"\(searchText)\"")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -404,6 +414,23 @@ struct SendSongSheet: View {
             guard !Task.isCancelled else { return }
             await appState.searchSongs(query: trimmed)
         }
+    }
+
+    private func commitCurrentSearch() {
+        recentSearchesRaw = RecentSongSearchStore.adding(searchText, to: recentSearchesRaw)
+    }
+
+    private func applyRecentSearch(_ query: String) {
+        isSearchFocused = false
+        if searchText == query {
+            performSearch(query)
+        } else {
+            searchText = query
+        }
+    }
+
+    private func removeRecentSearch(_ query: String) {
+        recentSearchesRaw = RecentSongSearchStore.removing(query, from: recentSearchesRaw)
     }
 
     private func songRow(_ song: Song) -> some View {
@@ -458,6 +485,7 @@ struct SendSongSheet: View {
                 // convention used on `SongCardView`).
                 if let artistId = song.artistId {
                     Button {
+                        commitCurrentSearch()
                         detailArtist = ArtistSummary(
                             id: artistId,
                             name: song.artist,
@@ -483,6 +511,7 @@ struct SendSongSheet: View {
             Spacer()
 
             Button {
+                commitCurrentSearch()
                 selectedSong = song
                 withAnimation(.spring(duration: 0.3)) { step = 1 }
             } label: {
@@ -506,12 +535,96 @@ struct SendSongSheet: View {
             // now owns preview/scrub itself, so the intermediate detail
             // sheet is no longer worth an extra step. The back chevron on
             // that screen brings the user right back to these results.
+            commitCurrentSearch()
             selectedSong = song
             withAnimation(.spring(duration: 0.3)) { step = 1 }
         }
         .overlay(alignment: .bottom) {
             Color.white.opacity(0.05)
                 .frame(height: 0.5)
+        }
+    }
+}
+
+enum RecentSongSearchStore {
+    static let limit = 8
+
+    static func decode(_ raw: String) -> [String] {
+        guard let data = raw.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return decoded
+    }
+
+    static func adding(_ query: String, to raw: String) -> String {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return raw }
+
+        var searches = decode(raw)
+        searches.removeAll { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
+        searches.insert(trimmed, at: 0)
+        return encode(Array(searches.prefix(limit)))
+    }
+
+    static func removing(_ query: String, from raw: String) -> String {
+        encode(decode(raw).filter { $0 != query })
+    }
+
+    private static func encode(_ searches: [String]) -> String {
+        guard let data = try? JSONEncoder().encode(searches),
+              let raw = String(data: data, encoding: .utf8) else {
+            return "[]"
+        }
+        return raw
+    }
+}
+
+struct RecentSongSearchList: View {
+    let searches: [String]
+    let onSelect: (String) -> Void
+    let onRemove: (String) -> Void
+
+    var body: some View {
+        if !searches.isEmpty {
+            VStack(spacing: 0) {
+                ForEach(searches, id: \.self) { query in
+                    HStack(spacing: 10) {
+                        Button {
+                            onSelect(query)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.35))
+                                Text(query)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.75))
+                                    .lineLimit(1)
+                                Spacer()
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            onRemove(query)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.45))
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove \(query)")
+                    }
+                    .padding(.vertical, 9)
+
+                    if query != searches.last {
+                        Divider().background(Color.white.opacity(0.06))
+                    }
+                }
+            }
         }
     }
 }

@@ -108,7 +108,7 @@ struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Turn on notifications for PlayMe in the Settings app to get alerts when friends share songs or message you.")
+            Text("Turn on notifications for RIFF in the Settings app to get alerts when friends share songs or message you.")
         }
     }
 

@@ -20,6 +20,7 @@ struct ContentView: View {
     @State private var showSendSheet = false
     @State private var showAddFriends = false
     @State private var selectedTab: Int = MainTab.discovery.rawValue
+    @State private var messagesNavigationResetToken: Int = 0
     @State private var miniPlayerSong: Song?
     /// Tracks whether the Discovery tab is currently showing its hero page
     /// (vs. scrolled into the history feed). Mini-player stays hidden on the
@@ -48,29 +49,37 @@ struct ContentView: View {
     }
 
     var body: some View {
-        Group {
-            if appState.isOnboarded {
-                mainTabView
-                    .task {
-                        await appState.loadData()
+        ZStack {
+            // Global background driven by the user's chosen RIFF theme.
+            // Painting it behind the main UI gives every screen a tinted
+            // backdrop without each surface re-implementing the swap.
+            // Foreground elements still render in their existing white-on-
+            // dark style; cross-screen accent recoloring is a follow-up.
+            appState.appTheme.bg.ignoresSafeArea()
+
+            Group {
+                if appState.isOnboarded {
+                    mainTabView
+                        .task {
+                            await appState.loadData()
+                        }
+                        .task {
+                            await requestNotificationPermissionOnceIfNeeded()
+                        }
+                } else {
+                    OnboardingView(appState: appState) {
+                        withAnimation(.easeInOut(duration: 0.5)) {
+                            appState.isOnboarded = true
+                        }
+                        // Force the Discovery (magnifier) tab on first landing.
+                        // Despite the new Home tab being to its left visually,
+                        // the magnifier is still the "true home" of the app
+                        // and we want returning + brand-new users alike to
+                        // land there.
+                        selectedTab = MainTab.discovery.rawValue
+                        Task { await appState.loadData() }
                     }
-                    .task {
-                        await requestNotificationPermissionOnceIfNeeded()
-                    }
-            } else {
-                OnboardingView(appState: appState) {
-                    withAnimation(.easeInOut(duration: 0.5)) {
-                        appState.isOnboarded = true
-                    }
-                    // Force the Discovery (magnifier) tab on first landing.
-                    // Despite the new Home tab being to its left visually,
-                    // the magnifier is still the "true home" of the app
-                    // and we want returning + brand-new users alike to
-                    // land there.
-                    selectedTab = MainTab.discovery.rawValue
-                    Task { await appState.loadData() }
                 }
-                .preferredColorScheme(.dark)
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -104,7 +113,13 @@ struct ContentView: View {
         appState.pendingDiscoveryShareId = trimmed
     }
 
-    /// First-launch-after-onboarding: ask iOS directly. No custom explainer.
+    /// Fallback path that asks for notification permission once after a
+    /// signed-in session lands on the main UI. The new RIFF onboarding
+    /// has its own dedicated `NotificationsPermissionView` step that
+    /// sets the same `hasRequestedNotificationPermission` UserDefaults
+    /// key, so this fallback is a no-op for any user who completed the
+    /// new flow. It still covers existing installs that completed
+    /// onboarding before this rebuild shipped.
     private func requestNotificationPermissionOnceIfNeeded() async {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: hasRequestedNotificationPermissionKey) else { return }
@@ -166,10 +181,17 @@ struct ContentView: View {
                         scrollDiscoveryToHero()
                     }
                 } else {
-                    selectedTab = new
+                    selectTab(new)
                 }
             }
         )
+    }
+
+    private func selectTab(_ newTab: Int) {
+        if newTab == MainTab.messages.rawValue {
+            messagesNavigationResetToken &+= 1
+        }
+        selectedTab = newTab
     }
 
     private func openSearch() {
@@ -191,12 +213,12 @@ struct ContentView: View {
         if horizontal < -60 {
             guard idx + 1 < ordered.count else { return }
             withAnimation(.easeInOut(duration: 0.28)) {
-                selectedTab = ordered[idx + 1]
+                selectTab(ordered[idx + 1])
             }
         } else if horizontal > 60 {
             guard idx > 0 else { return }
             withAnimation(.easeInOut(duration: 0.28)) {
-                selectedTab = ordered[idx - 1]
+                selectTab(ordered[idx - 1])
             }
         }
     }
@@ -215,7 +237,7 @@ struct ContentView: View {
             }
 
             Tab(value: MainTab.messages.rawValue) {
-                MessagesListView(appState: appState)
+                MessagesListView(appState: appState, resetToken: messagesNavigationResetToken)
             } label: {
                 Image(systemName: "bubble.left.and.bubble.right.fill")
             }

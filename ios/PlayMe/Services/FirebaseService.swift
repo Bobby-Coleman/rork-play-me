@@ -153,7 +153,14 @@ class FirebaseService {
 
     // MARK: - User Profile
 
-    func claimUsernameAndCreateProfile(username: String, firstName: String, lastName: String = "", phone: String) async -> Bool {
+    func claimUsernameAndCreateProfile(
+        username: String,
+        firstName: String,
+        lastName: String = "",
+        phone: String,
+        tasteGenres: [String] = [],
+        tasteArtists: [String] = []
+    ) async -> Bool {
         guard let uid = firebaseUID else { return false }
         let lowered = username.lowercased()
         // Store phone in canonical E.164 so the server-side claim trigger
@@ -185,14 +192,21 @@ class FirebaseService {
                     "createdAt": FieldValue.serverTimestamp(),
                 ], forDocument: usernameRef)
 
-                transaction.setData([
+                var userPayload: [String: Any] = [
                     "username": lowered,
                     "firstName": firstName,
                     "lastName": lastName,
                     "phone": FieldValue.delete(),
                     "createdAt": FieldValue.serverTimestamp(),
                     "updatedAt": FieldValue.serverTimestamp(),
-                ], forDocument: userRef, merge: true)
+                ]
+                if !tasteGenres.isEmpty {
+                    userPayload["tasteGenres"] = tasteGenres
+                }
+                if !tasteArtists.isEmpty {
+                    userPayload["tasteArtists"] = tasteArtists
+                }
+                transaction.setData(userPayload, forDocument: userRef, merge: true)
 
                 transaction.setData([
                     "phone": normalizedPhone,
@@ -1450,9 +1464,112 @@ class FirebaseService {
     }()
 
     private var deleteAccountEndpoint: URL? {
+        functionEndpoint(name: "deleteAccount")
+    }
+
+    /// Compose the v2 onRequest endpoint URL for any Cloud Function in the
+    /// project's default region. Single source so validateInviteCode /
+    /// redeemInviteCode / future endpoints don't each duplicate the format.
+    private func functionEndpoint(name: String) -> URL? {
         guard let projectId = Self.cachedProjectId else { return nil }
-        let urlString = "https://\(Self.functionsRegion)-\(projectId).cloudfunctions.net/deleteAccount"
-        return URL(string: urlString)
+        return URL(string: "https://\(Self.functionsRegion)-\(projectId).cloudfunctions.net/\(name)")
+    }
+
+    // MARK: - Invite codes
+
+    /// Validation reason from the `validateInviteCode` Cloud Function.
+    /// Allows the client to surface a precise error to the user instead
+    /// of a generic "code didn't work."
+    enum InviteCodeReason: String {
+        case notFound = "not_found"
+        case disabled
+        case expired
+        case exhausted
+        case missingCode = "missing_code"
+        case methodNotAllowed = "method_not_allowed"
+        case serverError = "server_error"
+        case network
+    }
+
+    /// Returns `(valid, reason?)`. Valid codes return `(true, nil)`.
+    func validateInviteCode(_ code: String) async -> (valid: Bool, reason: InviteCodeReason?) {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !trimmed.isEmpty else {
+            return (false, .missingCode)
+        }
+        guard let url = functionEndpoint(name: "validateInviteCode") else {
+            return (false, .network)
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["code": trimmed])
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            let http = response as? HTTPURLResponse
+            let status = http?.statusCode ?? -1
+
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+
+            if (200...299).contains(status) {
+                guard let json else {
+                    return (false, .serverError)
+                }
+                if json["valid"] as? Bool == true {
+                    return (true, nil)
+                }
+                let raw = (json["reason"] as? String) ?? "server_error"
+                return (false, InviteCodeReason(rawValue: raw) ?? .serverError)
+            }
+
+            // Non-2xx: still try to interpret JSON (some errors return structured bodies).
+            if let json, json["valid"] as? Bool == false {
+                let raw = (json["reason"] as? String) ?? "server_error"
+                return (false, InviteCodeReason(rawValue: raw) ?? .serverError)
+            }
+
+            let bodyPreview = String(data: data, encoding: .utf8).map { String($0.prefix(300)) } ?? ""
+            print("FirebaseService: validateInviteCode HTTP \(status) body=\(bodyPreview)")
+            return (false, .serverError)
+        } catch {
+            print("FirebaseService: validateInviteCode network error: \(error.localizedDescription)")
+            return (false, .network)
+        }
+    }
+
+    /// Atomically redeem a previously-validated invite code for the current
+    /// signed-in user. Stamps `users/{uid}.invitedBy` server-side so the
+    /// client doesn't have to write that field from the unprivileged
+    /// profile-creation transaction.
+    func redeemInviteCode(_ code: String) async -> Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !trimmed.isEmpty else { return false }
+        guard let url = functionEndpoint(name: "redeemInviteCode") else { return false }
+        let idToken: String
+        do { idToken = try await user.getIDToken() } catch { return false }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["code": trimmed])
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            let http = response as? HTTPURLResponse
+            guard http?.statusCode == 200 else {
+                let body = String(data: data, encoding: .utf8) ?? ""
+                print("FirebaseService: redeemInviteCode rejected status=\(http?.statusCode ?? -1) body=\(body)")
+                return false
+            }
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return false
+            }
+            return json["redeemed"] as? Bool == true
+        } catch {
+            print("FirebaseService: redeemInviteCode error: \(error.localizedDescription)")
+            return false
+        }
     }
 
     /// Calls the server-side `deleteAccount` HTTPS function with the current
@@ -1630,6 +1747,7 @@ class FirebaseService {
                 "unreadCount_\(uid)": 0,
                 "unreadCount_\(friendId)": 0,
                 "songStreakCount": 0,
+                "songMessageCount": 0,
             ]
             try await ref.setData(data)
             print("FirebaseService: conversation \(convId) created successfully")
@@ -1642,6 +1760,7 @@ class FirebaseService {
                 lastMessageTimestamp: Date(),
                 unreadCount: 0,
                 songStreakCount: 0,
+                songMessageCount: 0,
                 lastReadAt: [:]
             )
         } catch {
@@ -1737,6 +1856,7 @@ class FirebaseService {
                 }
 
                 if song != nil {
+                    updates["songMessageCount"] = FieldValue.increment(Int64(1))
                     let today = Self.localDateString()
                     let yesterday = Self.localYesterdayDateString()
                     let lastDay = data["songStreakLastDay"] as? String
@@ -1879,6 +1999,27 @@ class FirebaseService {
         }
     }
 
+    /// One-time aggregate backfill for legacy conversations created before
+    /// `songMessageCount` existed. Uses Firestore's server-side count so long
+    /// threads don't stream full history into the client.
+    func backfillSongMessageCountIfNeeded(conversation: Conversation) async -> Int {
+        guard conversation.songMessageCount == 0 else { return conversation.songMessageCount }
+        do {
+            let convRef = db.collection("conversations").document(conversation.id)
+            let query = convRef.collection("messages")
+                .whereField("song", isNotEqualTo: NSNull())
+            let snapshot = try await query.count.getAggregation(source: .server)
+            let count = snapshot.count.intValue
+            if count > 0 {
+                try await convRef.setData(["songMessageCount": count], merge: true)
+            }
+            return count
+        } catch {
+            print("FirebaseService: song message count backfill failed: \(error.localizedDescription)")
+            return conversation.songMessageCount
+        }
+    }
+
     /// Per-conversation timestamp of the last successful read receipt
     /// write, used by `markConversationRead` to enforce a 1Hz cap. Reset
     /// on sign-out.
@@ -1975,9 +2116,11 @@ class FirebaseService {
         let uid = firebaseUID ?? ""
         let unread = data["unreadCount_\(uid)"] as? Int ?? 0
         let storedStreak = data["songStreakCount"] as? Int ?? 0
+        let songMessageCount = data["songMessageCount"] as? Int ?? 0
+        let streakLastDay = data["songStreakLastDay"] as? String
         let streak = Self.effectiveSongStreak(
             count: storedStreak,
-            lastDay: data["songStreakLastDay"] as? String
+            lastDay: streakLastDay
         )
 
         // Read receipt map: scan participants for `lastReadAt_<uid>` and
@@ -2000,6 +2143,8 @@ class FirebaseService {
             lastMessageTimestamp: lastTs,
             unreadCount: unread,
             songStreakCount: streak,
+            songMessageCount: songMessageCount,
+            songStreakLastDay: streakLastDay,
             lastReadAt: lastReadAt
         )
     }

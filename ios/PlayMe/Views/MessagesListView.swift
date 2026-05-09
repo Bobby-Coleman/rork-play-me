@@ -2,11 +2,13 @@ import SwiftUI
 
 struct MessagesListView: View {
     let appState: AppState
+    let resetToken: Int
 
     @State private var quickSendRecipient: AppUser?
+    @State private var navigationPath = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             ZStack {
                 Color.black.ignoresSafeArea()
 
@@ -49,9 +51,20 @@ struct MessagesListView: View {
         .task {
             await appState.loadConversations()
         }
+        .onAppear {
+            resetToInbox()
+        }
+        .onChange(of: resetToken) { _, _ in
+            resetToInbox()
+        }
         .sheet(item: $quickSendRecipient) { recipient in
             QuickSendSongSheet(recipient: recipient, appState: appState)
         }
+    }
+
+    private func resetToInbox() {
+        guard !navigationPath.isEmpty else { return }
+        navigationPath = NavigationPath()
     }
 
     private func recipientAppUser(for conversation: Conversation) -> AppUser {
@@ -92,13 +105,7 @@ struct MessagesListView: View {
 
                     Group {
                         if conversation.songStreakCount > 0 {
-                            HStack(spacing: 3) {
-                                Image(systemName: "flame.fill")
-                                    .font(.system(size: 11))
-                                Text("\(conversation.songStreakCount)")
-                                    .font(.system(size: 13, weight: .bold))
-                            }
-                            .foregroundStyle(.orange)
+                            streakBadge(for: conversation)
                         } else {
                             Text("start a streak")
                                 .font(.system(size: 10, weight: .medium))
@@ -151,5 +158,63 @@ struct MessagesListView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
     }
+
+    private func streakBadge(for conversation: Conversation) -> some View {
+        TimelineView(.periodic(from: .now, by: 60)) { timeline in
+            HStack(spacing: 5) {
+                StreakCountdownRing(progress: streakRemainingProgress(for: conversation, now: timeline.date))
+
+                Text("\(conversation.songStreakCount)")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+            }
+            .accessibilityLabel("Streak \(conversation.songStreakCount)")
+        }
+    }
+
+    private func streakRemainingProgress(for conversation: Conversation, now: Date) -> Double {
+        guard let deadline = streakResetDeadline(for: conversation),
+              let start = streakStartDate(for: conversation) else {
+            return 0
+        }
+        let total = deadline.timeIntervalSince(start)
+        guard total > 0 else { return 0 }
+        let remaining = deadline.timeIntervalSince(now)
+        return max(0, min(1, remaining / total))
+    }
+
+    private func streakResetDeadline(for conversation: Conversation) -> Date? {
+        guard let start = streakStartDate(for: conversation) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        return calendar.date(byAdding: .day, value: 2, to: start)
+    }
+
+    private func streakStartDate(for conversation: Conversation) -> Date? {
+        guard let lastDay = conversation.songStreakLastDay else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: lastDay)
+    }
 }
 
+private struct StreakCountdownRing: View {
+    let progress: Double
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.16), lineWidth: 1.4)
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(
+                    Color.white.opacity(0.86),
+                    style: StrokeStyle(lineWidth: 1.4, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 14, height: 14)
+    }
+}

@@ -191,7 +191,7 @@ struct AddFriendsView: View {
         }
         .overlay(alignment: .top) {
             if showReportedToast {
-                Text("Report submitted. Thanks for keeping PlayMe safe.")
+                Text("Report submitted. Thanks for keeping RIFF safe.")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14)
@@ -454,7 +454,7 @@ struct AddFriendsView: View {
 
     private var shareLinkSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("Share your Play Me link", icon: "square.and.arrow.up")
+            sectionHeader("Share your RIFF link", icon: "square.and.arrow.up")
 
             shareRow(icon: "message.fill", color: .green, title: "Messages") {
                 messageRecipient = MessageRecipient(numbers: [])

@@ -4,6 +4,8 @@ import UserNotifications
 import UIKit
 
 struct ChatView: View {
+    private static let bottomAnchorID = "chat-bottom-anchor"
+
     let conversation: Conversation
     let appState: AppState
 
@@ -16,6 +18,7 @@ struct ChatView: View {
     @State private var reportTarget: ReportTarget?
     @State private var showReportedToast: Bool = false
     @State private var pendingBlock: AppUser?
+    @State private var backfilledSongMessageCount: Int?
 
     /// Pagination state for the lazy "Load earlier messages" sentinel at
     /// the top of the thread. The tail listener only carries the most
@@ -83,6 +86,24 @@ struct ChatView: View {
         appState.conversations.first(where: { $0.id == conversation.id }) ?? conversation
     }
 
+    private var displayedSongMessageCount: Int {
+        max(liveConversation.songMessageCount, backfilledSongMessageCount ?? 0)
+    }
+
+    private var chatHeaderSubtitle: String {
+        "\(songCountText) - \(streakText)"
+    }
+
+    private var songCountText: String {
+        displayedSongMessageCount == 1 ? "1 song" : "\(displayedSongMessageCount) songs"
+    }
+
+    private var streakText: String {
+        let count = liveConversation.songStreakCount
+        guard count > 0 else { return "start a streak" }
+        return count == 1 ? "1 day streak" : "\(count) day streak"
+    }
+
     /// The id of the most recent message I've sent that the friend has
     /// already read, per `liveConversation.lastReadAt[friendUID]`.
     /// Drives the single iMessage-style "Read" indicator below that
@@ -141,9 +162,17 @@ struct ChatView: View {
                                 .id(message.id)
                                 .animation(.easeInOut(duration: 0.25), value: mostRecentReadMessageId)
                             }
+                            Color.clear
+                                .frame(height: 1)
+                                .id(Self.bottomAnchorID)
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
+                    }
+                    .onAppear {
+                        DispatchQueue.main.async {
+                            scrollToBottom(proxy, animated: false)
+                        }
                     }
                     .scrollIndicators(.hidden)
                     // iMessage-style: dragging the message list dismisses
@@ -160,8 +189,12 @@ struct ChatView: View {
                         // and the user's reading position is preserved.
                         guard let id = newId, id != lastBottomMessageId else { return }
                         lastBottomMessageId = id
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo(id, anchor: .bottom)
+                        scrollToBottom(proxy, animated: true)
+                    }
+                    .onChange(of: initialTailLoaded) { _, loaded in
+                        guard loaded else { return }
+                        DispatchQueue.main.async {
+                            scrollToBottom(proxy, animated: false)
                         }
                     }
                     // iMessage-style reply mode: when the user picks
@@ -195,10 +228,23 @@ struct ChatView: View {
                 inputBar
             }
         }
-        .navigationTitle(friendName)
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 1) {
+                    Text(friendName)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(chatHeaderSubtitle)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+                .accessibilityElement(children: .combine)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button(role: .destructive) {
@@ -221,6 +267,8 @@ struct ChatView: View {
             startListening()
             Task {
                 await FirebaseService.shared.markConversationRead(conversationId: conversation.id)
+                let count = await FirebaseService.shared.backfillSongMessageCountIfNeeded(conversation: conversation)
+                backfilledSongMessageCount = count
             }
             markThisConversationReadLocally()
             clearDeliveredNotificationsForThisConversation()
@@ -552,7 +600,7 @@ struct ChatView: View {
     }
 
     private func inlineSongCard(_ song: Song) -> some View {
-        HStack(spacing: 10) {
+        ZStack(alignment: .bottomLeading) {
             AsyncImage(url: URL(string: song.albumArtURL)) { phase in
                 if let image = phase.image {
                     image
@@ -562,38 +610,41 @@ struct ChatView: View {
                     Color(.systemGray5)
                 }
             }
-            .frame(width: 44, height: 44)
-            .clipShape(.rect(cornerRadius: 6))
+            .frame(width: 190, height: 190)
+            .clipped()
 
-            VStack(alignment: .leading, spacing: 2) {
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.72)],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+
+            VStack(alignment: .leading, spacing: 3) {
                 Text(song.title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white)
-                    .lineLimit(1)
+                    .lineLimit(2)
                 if song.artistId != nil {
                     Button {
                         artistSong = song
                     } label: {
                         Text(song.artist)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.72))
                             .lineLimit(1)
                     }
                     .buttonStyle(.plain)
                 } else {
                     Text(song.artist)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.72))
                         .lineLimit(1)
                 }
             }
-
-            Spacer()
+            .padding(12)
         }
-        .padding(8)
-        .background(Color.white.opacity(0.08))
-        .clipShape(.rect(cornerRadius: 12))
-        .frame(maxWidth: 240)
+        .frame(width: 190, height: 190)
+        .clipShape(.rect(cornerRadius: 14))
         .contentShape(.rect)
         .onTapGesture {
             sheetSong = song
@@ -711,6 +762,18 @@ struct ChatView: View {
                 .map { $0.request.identifier }
             guard !ids.isEmpty else { return }
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard !messages.isEmpty else { return }
+        lastBottomMessageId = messages.last?.id
+        if animated {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
         }
     }
 

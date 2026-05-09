@@ -124,7 +124,7 @@ struct OnboardingInviteView: View {
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(.white)
 
-            Text("Play Me uses your contacts to find friends.")
+            Text("RIFF uses your contacts to find friends.")
                 .font(.system(size: 15))
                 .foregroundStyle(.white.opacity(0.55))
                 .multilineTextAlignment(.center)
@@ -163,14 +163,14 @@ struct OnboardingInviteView: View {
     private var mainContent: some View {
         AppScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                Text("Invite friends to Play Me")
+                Text("Invite friends to RIFF")
                     .font(.system(size: 26, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.top, 24)
                     .padding(.bottom, 6)
 
-                Text("You must have at least one friend added to use Play Me.")
+                Text("You must have at least one friend added to use RIFF.")
                     .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.55))
                     .multilineTextAlignment(.center)
@@ -237,7 +237,7 @@ struct OnboardingInviteView: View {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.8))
-                Text("Share your Play Me link")
+                Text("Share your RIFF link")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(.white.opacity(0.85))
                 Spacer()
@@ -438,7 +438,7 @@ struct OnboardingInviteView: View {
     private var bottomBar: some View {
         VStack(spacing: 8) {
             if gateErrorVisible {
-                Text("You need at least one friend to use Play Me")
+                Text("You need at least one friend to use RIFF")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12)

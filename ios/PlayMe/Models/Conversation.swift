@@ -9,6 +9,11 @@ struct Conversation: Identifiable, Hashable, Sendable {
     let unreadCount: Int
     /// Consecutive UTC days with at least one song message from either participant.
     let songStreakCount: Int
+    /// Total song messages sent between these two participants.
+    let songMessageCount: Int
+    /// Local day string (`yyyy-MM-dd`) for the last song message that advanced
+    /// the streak. Used only for reset countdown display.
+    let songStreakLastDay: String?
     /// Last-read timestamp per participant, parsed from
     /// `lastReadAt_<uid>` fields on the conversation document. Drives the
     /// iMessage-style "Read" indicator under the most recent message the
@@ -23,6 +28,8 @@ struct Conversation: Identifiable, Hashable, Sendable {
         lastMessageTimestamp: Date,
         unreadCount: Int,
         songStreakCount: Int,
+        songMessageCount: Int = 0,
+        songStreakLastDay: String? = nil,
         lastReadAt: [String: Date] = [:]
     ) {
         self.id = id
@@ -32,6 +39,8 @@ struct Conversation: Identifiable, Hashable, Sendable {
         self.lastMessageTimestamp = lastMessageTimestamp
         self.unreadCount = unreadCount
         self.songStreakCount = songStreakCount
+        self.songMessageCount = songMessageCount
+        self.songStreakLastDay = songStreakLastDay
         self.lastReadAt = lastReadAt
     }
 
@@ -64,6 +73,8 @@ struct Conversation: Identifiable, Hashable, Sendable {
             lastMessageTimestamp: lastMessageTimestamp,
             unreadCount: newCount,
             songStreakCount: songStreakCount,
+            songMessageCount: songMessageCount,
+            songStreakLastDay: songStreakLastDay,
             lastReadAt: lastReadAt
         )
     }

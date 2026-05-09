@@ -8,6 +8,7 @@
   "scripts": {
     "check": "node --check index.js",
     "seed:featured-songs": "node scripts/seed-featured-songs.js",
+    "seed:invite-codes": "node scripts/seed-invite-codes.js",
     "staging:load": "node scripts/staging-load-test.js"
   },
   "dependencies": {

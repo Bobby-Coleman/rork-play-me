@@ -37,8 +37,8 @@ final class DeepLinkService {
         )
         .setIOSBehaviour(.app)
         .setSocialParameters(
-            title: "Join me on PlayMe!",
-            description: "\(username) invited you to share music on PlayMe",
+            title: "Join me on RIFF!",
+            description: "\(username) invited you to share music on RIFF",
             imageUrl: ""
         )
         .setLinkName("invite-\(userId.prefix(8))-\(Int(Date().timeIntervalSince1970))")

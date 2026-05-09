@@ -47,7 +47,7 @@ struct SplashView: View {
                 Spacer()
 
                 VStack(spacing: 4) {
-                    Text("PLAY ME")
+                    Text("RIFF")
                         .font(.system(size: 48, weight: .black))
                         .foregroundStyle(.white)
                         .tracking(2)

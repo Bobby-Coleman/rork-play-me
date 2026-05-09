@@ -18,7 +18,7 @@ struct WidgetInstructionsView: View {
                 VStack(spacing: 24) {
                     instructionRow(number: "1", text: "Hold down on any app\nto edit your Home Screen")
                     instructionRow(number: "2", text: "Tap the + button\nin the top left")
-                    instructionRow(number: "3", text: "Search for \"Play Me\"\nand add the widget")
+                    instructionRow(number: "3", text: "Search for \"RIFF\"\nand add the widget")
                 }
                 .padding(.horizontal, 32)
 

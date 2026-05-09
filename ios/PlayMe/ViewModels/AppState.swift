@@ -135,14 +135,13 @@ class AppState {
     /// layer fetches everything every time and this just picks the slice.
     var searchFilter: SearchFilter = .all
     var isSearchingSongs: Bool = false
-    /// Last-observed MusicKit authorization status. `noResultsView` gates
-    /// the "Open Settings" prompt on this being `.denied`.
+    /// Last-observed MusicKit authorization status. Reads are non-prompting;
+    /// the permission sheet is only requested from Apple Music onboarding.
     var musicAuthStatus: MusicAuthorization.Status = MusicAuthorization.currentStatus
     var createMixtapeDraft = CreateMixtapeDraft()
 
-    /// Convenience for views that only need to know whether to surface
-    /// the Settings deep-link (keeps `import MusicKit` out of the view
-    /// layer).
+    /// Convenience for personalization-specific views that may need to surface
+    /// a Settings deep-link after the user has denied Apple Music access.
     var isMusicSearchDenied: Bool { musicAuthStatus == .denied }
     var receivedShares: [SongShare] = []
     var sentShares: [SongShare] = []
@@ -275,6 +274,29 @@ class AppState {
     /// first-song step. Keep the full profiles here so they remain selectable
     /// as first-song recipients.
     var onboardingRequestedUsers: [AppUser] = []
+    /// Invite code the user submitted on the gate screen. Validated via the
+    /// `validateInviteCode` Cloud Function before SMS verification, then
+    /// redeemed once the profile is created. Cleared on signOut.
+    var inviteCode: String = ""
+    /// Last invite-code validation error message surfaced in the gate UI.
+    var inviteCodeError: String? = nil
+    /// Genres the user picked on the taste screen. Persisted to
+    /// `users/{uid}.tasteGenres` once registration succeeds.
+    var tasteGenres: [String] = []
+    /// Artists the user picked on the taste screen. Persisted to
+    /// `users/{uid}.tasteArtists` once registration succeeds.
+    var tasteArtists: [String] = []
+
+    /// User-selected onboarding theme. Drives onboarding screens, the
+    /// app-wide background color, and is persisted across launches under
+    /// `appTheme` in UserDefaults. Stored property (rather than computed)
+    /// so SwiftUI's `@Observable` registrar tracks reads and re-renders
+    /// dependent views when the theme picker swaps it out.
+    var appTheme: RiffTheme = RiffTheme.byId(
+        UserDefaults.standard.string(forKey: "appTheme") ?? RiffTheme.black.id
+    ) {
+        didSet { UserDefaults.standard.set(appTheme.id, forKey: "appTheme") }
+    }
 
     var likedShares: [SongShare] {
         (receivedShares + sentShares).filter { likedShareIds.contains($0.id) }
@@ -290,9 +312,11 @@ class AppState {
         // a separate observer hookup.
         mixtapeStore.saveService = saveService
         mixtapeStore.likedSharesProvider = { [weak self] in self?.likedShares ?? [] }
-        // Fire-and-forget: caches MusicKit's auth status off the hot
-        // path so the first keystroke in search doesn't pay for it.
-        Task { await AppleMusicSearchService.shared.prewarmAuthorization() }
+        // Fire-and-forget: cache MusicKit's current status without prompting.
+        Task { [weak self] in
+            let status = await AppleMusicSearchService.shared.refreshCachedAuthorizationStatus()
+            await MainActor.run { self?.musicAuthStatus = status }
+        }
     }
 
     private func loadSavedUser() {
@@ -315,6 +339,33 @@ class AppState {
         case .failure(let error):
             registrationError = error.localizedDescription
             return false
+        }
+    }
+
+    /// Validates an invite code via the server callable. Stores a
+    /// human-readable reason on `inviteCodeError` if validation failed
+    /// so the gate UI can surface it inline.
+    func validateInviteCode(_ code: String) async -> Bool {
+        inviteCodeError = nil
+        let result = await FirebaseService.shared.validateInviteCode(code)
+        if result.valid {
+            return true
+        }
+        inviteCodeError = Self.message(for: result.reason)
+        return false
+    }
+
+    private static func message(for reason: FirebaseService.InviteCodeReason?) -> String {
+        switch reason {
+        case .notFound:        return "That code isn't valid."
+        case .disabled:        return "That code has been deactivated."
+        case .expired:         return "That code has expired."
+        case .exhausted:       return "That code is already used."
+        case .missingCode:     return "Enter your invite code."
+        case .network:         return "We couldn't reach the server. Check your connection."
+        case .methodNotAllowed,
+             .serverError,
+             .none:            return "Something went wrong. Try again."
         }
     }
 
@@ -361,7 +412,9 @@ class AppState {
             username: username,
             firstName: firstName,
             lastName: lastName,
-            phone: phoneNumber
+            phone: phoneNumber,
+            tasteGenres: tasteGenres,
+            tasteArtists: tasteArtists
         )
 
         guard claimed else {
@@ -371,6 +424,12 @@ class AppState {
 
         isBackendAvailable = true
         currentUser = AppUser(id: uid, firstName: firstName, lastName: lastName, username: username.lowercased(), phone: phoneNumber)
+
+        // Redeem the invite code now that the profile exists. Server-side
+        // bumps the use count and stamps `users/{uid}.invitedBy`.
+        if !inviteCode.isEmpty {
+            _ = await firebase.redeemInviteCode(inviteCode)
+        }
 
         // The `onUserProfileCreated` Cloud Function will fire automatically from
         // the users/{uid} doc creation in `claimUsernameAndCreateProfile`. We
