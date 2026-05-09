@@ -276,17 +276,25 @@ struct RiffTypewriter: View {
         }
     }
 
+    /// Caret is part of the `Text` flow so it stays glued to the last glyph on
+    /// the final line; a trailing `Rectangle` in an `HStack` sits at the view's
+    /// layout trailing edge, which is wrong for wrapped, center-aligned copy.
+    @ViewBuilder
     private var typedView: some View {
-        HStack(alignment: .lastTextBaseline, spacing: 1) {
-            Text(typed)
-                .font(font)
-                .multilineTextAlignment(alignment)
-                .foregroundStyle(color ?? theme.fg.opacity(0.78))
+        let fg = color ?? theme.fg.opacity(0.78)
+        Group {
             if caret {
-                Rectangle()
-                    .frame(width: 2, height: 17)
-                    .foregroundStyle(color ?? theme.fg.opacity(0.78))
-                    .opacity(caretOpaque ? 1 : 0)
+                (Text(typed).foregroundStyle(fg)
+                    + Text("|").foregroundStyle(fg.opacity(caretOpaque ? 1 : 0)))
+                    .font(font)
+                    .multilineTextAlignment(alignment)
+                    .lineSpacing(3)
+            } else {
+                Text(typed)
+                    .font(font)
+                    .multilineTextAlignment(alignment)
+                    .lineSpacing(3)
+                    .foregroundStyle(fg)
             }
         }
     }

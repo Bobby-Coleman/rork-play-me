@@ -7,7 +7,7 @@ import SwiftUI
 /// - 1.4–1.9s: last image collapses → 6 dots in a hex around center
 /// - 1.9–2.35s: dots converge to a single pulsing center dot
 /// - 2.35–2.95s: dot expands → RIFF wordmark + scattered thumbnails
-/// - 2.95s+: revealed state with typewriter tagline + CTAs
+/// - 2.95s+: same wordmark + thumbs hold; tagline + CTAs fade in (no screen swap)
 ///
 /// Album-art assets ship as image-set names `coldopen_1…coldopen_6` and
 /// `reveal_1…reveal_10`. While the user has not provided photos yet,
@@ -21,41 +21,54 @@ struct ColdOpenSplashView: View {
     /// pattern.
     var replayKey: Int = 0
 
-    @State private var phase: Phase = .cold
     @State private var ckey: Int = 0
-
-    private enum Phase { case cold, revealed }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            switch phase {
-            case .cold:
-                ColdOpenAnimation(key: ckey) {
-                    withAnimation(.easeInOut(duration: 0.3)) { phase = .revealed }
-                }
-            case .revealed:
-                ColdOpenRevealed(onContinue: onContinue, onSignIn: onSignIn)
-            }
+            ColdOpenAnimation(key: ckey, onContinue: onContinue, onSignIn: onSignIn)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .riffTheme(.black)
+        .preferredColorScheme(.dark)
         .onChange(of: replayKey) { _, _ in
             ckey += 1
-            phase = .cold
         }
     }
 }
 
 // MARK: - Cold open animation
 
+/// Fires a closure at most once per `reset()` cycle. Used from
+/// `TimelineView` progress handling without toggling `@State` every frame.
+private final class ColdOpenCompletionGate {
+    private var didSchedule = false
+
+    func reset() {
+        didSchedule = false
+    }
+
+    func scheduleOnce(_ action: @escaping () -> Void) {
+        guard !didSchedule else { return }
+        didSchedule = true
+        DispatchQueue.main.async(execute: action)
+    }
+}
+
 /// 4-beat timeline. We drive a single `progress` (0…1) and gate sub-views
 /// on the elapsed seconds rather than per-beat booleans for smoother
 /// transitions between beats.
 private struct ColdOpenAnimation: View {
     var key: Int
-    let onDone: () -> Void
+    let onContinue: () -> Void
+    let onSignIn: () -> Void
 
-    @State private var t: Double = 0
+    /// Reference gate so we only schedule `onDone` once without writing
+    /// `@State` during `TimelineView` body updates (which can fight the
+    /// layout system). Reset by replacing the instance when `key` changes.
+    @State private var completionGate = ColdOpenCompletionGate()
+    @State private var showRevealChrome = false
 
     private let flickerCount = 6
     private let flickerStep: Double = 0.23           // sec per flicker frame
@@ -66,9 +79,6 @@ private struct ColdOpenAnimation: View {
 
     var body: some View {
         TimelineView(.animation) { context in
-            Canvas { _, _ in }   // No-op; just to hook into TimelineView.
-                .hidden()
-
             let elapsed = max(0, context.date.timeIntervalSince(startDate))
             let _ = handleProgress(elapsed)
 
@@ -83,10 +93,57 @@ private struct ColdOpenAnimation: View {
                     expandToWordmark(progress: clamp01((elapsed - beat3End) / 0.6))
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .overlay(alignment: .bottom) {
+                if showRevealChrome {
+                    VStack(spacing: 0) {
+                        RiffStagger(delay: 0.42) {
+                            RiffPrimaryButton(title: "Get started") { onContinue() }
+                                .padding(.horizontal, 24)
+                        }
+                        RiffStagger(delay: 0.58) {
+                            HStack(spacing: 4) {
+                                Text("Already have an account?")
+                                    .foregroundStyle(Color.white.opacity(0.55))
+                                Button(action: onSignIn) {
+                                    Text("Sign in")
+                                        .foregroundStyle(.white)
+                                        .fontWeight(.medium)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .font(.system(size: 14))
+                            .padding(.top, 16)
+                        }
+                        .padding(.bottom, 28)
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .overlay(alignment: .center) {
+                if showRevealChrome {
+                    RiffTypewriter(
+                        text: "Discover new music\nfrom your best friends.",
+                        startDelay: 0.3,
+                        color: Color.white.opacity(0.78)
+                    )
+                    .padding(.horizontal, 40)
+                    .offset(y: 56)
+                    .transition(.opacity)
+                }
+            }
         }
         .id(key)
+        .animation(.easeOut(duration: 0.28), value: showRevealChrome)
         .onAppear {
             startDate = Date()
+            completionGate.reset()
+            showRevealChrome = false
+        }
+        .onChange(of: key) { _, _ in
+            startDate = Date()
+            completionGate.reset()
+            showRevealChrome = false
         }
     }
 
@@ -95,7 +152,9 @@ private struct ColdOpenAnimation: View {
 
     private func handleProgress(_ elapsed: Double) -> Double {
         if elapsed > beat4End + 0.6 {
-            DispatchQueue.main.async { onDone() }
+            completionGate.scheduleOnce {
+                showRevealChrome = true
+            }
         }
         return elapsed
     }
@@ -241,85 +300,6 @@ private struct ColdOpenScatteredThumbs: View {
                     .offset(x: s.x, y: s.y)
                     .opacity(local)
                     .scaleEffect(0.7 + local * 0.3)
-            }
-        }
-    }
-}
-
-// MARK: - Revealed state
-
-/// Static reveal screen mounted after the cold-open finishes. Wordmark
-/// + scattered thumbs hold; tagline types out; CTAs fade in.
-private struct ColdOpenRevealed: View {
-    let onContinue: () -> Void
-    let onSignIn: () -> Void
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            ColdOpenStaticThumbs()
-
-            VStack(spacing: 26) {
-                Spacer()
-                RiffWordmark(size: 84, color: .white, style: .heavy)
-                RiffTypewriter(
-                    text: "Discover new music from your best friends.",
-                    startDelay: 0.3,
-                    color: Color.white.opacity(0.78)
-                )
-                .frame(maxWidth: 280)
-                Spacer()
-            }
-
-            VStack(spacing: 0) {
-                Spacer()
-                RiffStagger(delay: 0.42) {
-                    RiffPrimaryButton(title: "Get started") { onContinue() }
-                        .padding(.horizontal, 24)
-                }
-                RiffStagger(delay: 0.58) {
-                    HStack(spacing: 4) {
-                        Text("Already have an account?")
-                            .foregroundStyle(Color.white.opacity(0.55))
-                        Button(action: onSignIn) {
-                            Text("Sign in")
-                                .foregroundStyle(.white)
-                                .fontWeight(.medium)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .font(.system(size: 14))
-                    .padding(.top, 16)
-                }
-                .padding(.bottom, 28)
-            }
-        }
-        .riffTheme(.black)
-        .preferredColorScheme(.dark)
-    }
-}
-
-private struct ColdOpenStaticThumbs: View {
-    private let scatter: [(x: CGFloat, y: CGFloat, size: CGFloat, seed: Int)] = [
-        (-120, -120, 56, 11),
-        ( 90, -140, 44, 12),
-        (140, -40,  64, 13),
-        (-160, -10, 48, 14),
-        (-100, 110, 72, 15),
-        ( 60, 130,  52, 16),
-        (150, 100,  40, 17),
-        (-150, 180, 58, 18),
-        (100, 200,  46, 19),
-    ]
-
-    var body: some View {
-        ZStack {
-            ForEach(0..<scatter.count, id: \.self) { i in
-                let s = scatter[i]
-                RevealThumb(seed: s.seed)
-                    .frame(width: s.size, height: s.size)
-                    .offset(x: s.x, y: s.y)
             }
         }
     }
