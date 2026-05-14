@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Screen 7 — Username with the animated "Nice to meet you, {name}." headline.
+/// Screen 7 — Username with the "Nice to meet you, {name}." headline.
 ///
 /// Reuses `appState.checkUsername` for live availability checking with
 /// the same 400ms debounce as the previous `UsernamePickerView`.
@@ -26,47 +26,48 @@ struct UsernameRiffView: View {
 
     var body: some View {
         RiffScreenChrome(stepIdx: stepIdx, totalSteps: totalSteps, onBack: onBack) {
-            RiffStagger(delay: 0.06) {
-                animatedGreeting
-            }
-            RiffStagger(delay: 0.76) {
-                RiffSubhead(text: "Now choose a username.")
-                    .padding(.top, 12)
-            }
-            RiffStagger(delay: 0.92) {
-                RiffFieldInput(
-                    text: $username,
-                    placeholder: "username",
-                    prefix: "@",
-                    keyboard: .asciiCapable,
-                    contentType: .username,
-                    capitalization: .never,
-                    autocorrection: false,
-                    maxLength: 20,
-                    autoFocus: true,
-                    onChange: { v in
-                        let cleaned = v.replacingOccurrences(of: " ", with: "").lowercased()
-                        if cleaned != username { username = cleaned }
-                        checkUsernameAvailability(cleaned)
-                    },
-                    onSubmit: {
-                        if canContinue { onContinue() }
+            OnboardingUpperFormSlot {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        animatedGreeting
+                        RiffSubhead(text: "Now choose a username.")
+                            .padding(.top, 12)
                     }
-                )
-                .padding(.top, 36)
+                    .frame(maxWidth: .infinity, minHeight: OnboardingFormLayout.usernameHeadlineBlockMinHeight, alignment: .topLeading)
 
-                availabilityMeta
-                    .padding(.top, 8)
+                    RiffFieldInput(
+                        text: $username,
+                        placeholder: "username",
+                        prefix: "@",
+                        keyboard: .asciiCapable,
+                        contentType: .username,
+                        capitalization: .never,
+                        autocorrection: false,
+                        maxLength: 20,
+                        autoFocus: true,
+                        onChange: { v in
+                            let cleaned = v.replacingOccurrences(of: " ", with: "").lowercased()
+                            if cleaned != username { username = cleaned }
+                            checkUsernameAvailability(cleaned)
+                        },
+                        onSubmit: {
+                            if canContinue { onContinue() }
+                        }
+                    )
+                    .padding(.top, 24)
+
+                    availabilityMeta
+                        .padding(.top, 8)
+
+                    Spacer(minLength: 0)
+                }
             }
-            Spacer(minLength: 0)
         } footer: {
-            RiffStagger(delay: 0.52) {
-                RiffPrimaryButton(
-                    title: "Continue",
-                    disabled: !canContinue,
-                    action: onContinue
-                )
-            }
+            RiffPrimaryButton(
+                title: "Continue",
+                disabled: !canContinue,
+                action: onContinue
+            )
         }
         .appKeyboardDismiss()
     }
@@ -75,11 +76,9 @@ struct UsernameRiffView: View {
         let displayName = firstName.isEmpty ? "you" : firstName
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
             RiffHeadline(text: "Nice to meet you,")
-            RiffStagger(delay: 0.42, fromOffsetY: 6, duration: 0.6) {
-                Text("\(displayName).")
-                    .font(.system(size: 34, weight: .bold))
-                    .foregroundStyle(theme.fg)
-            }
+            Text("\(displayName).")
+                .font(.system(size: 34, weight: .bold))
+                .foregroundStyle(theme.fg)
         }
     }
 

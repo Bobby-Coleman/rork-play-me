@@ -1,5 +1,7 @@
 import SwiftUI
 
+private let inviteTypewriterLine = "Right now, Riff is invite only."
+
 /// Invite-only step: validates code via Cloud Function, then advances to phone.
 struct InviteCodeOnlyView: View {
     let appState: AppState
@@ -9,6 +11,9 @@ struct InviteCodeOnlyView: View {
     @State private var inviteCode: String = ""
     @State private var isChecking = false
     @State private var errorMessage: String?
+    @State private var showForm = false
+
+    @Environment(\.riffTheme) private var theme
 
     private var canContinue: Bool {
         let code = inviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -20,35 +25,89 @@ struct InviteCodeOnlyView: View {
             onBack: onBack,
             showProgressDots: false
         ) {
-            RiffStagger(delay: 0.06) {
-                RiffHeadline(text: "RIFF is invite-only.")
-            }
-            RiffStagger(delay: 0.14) {
-                RiffSubhead(text: "Enter your invite code to continue.")
-                    .padding(.top, 12)
-            }
-
-            RiffStagger(delay: 0.22) {
-                VStack(alignment: .leading, spacing: 8) {
-                    RiffLabel(text: "Invite code")
-                    RiffFieldInput(
-                        text: $inviteCode,
-                        placeholder: "••••••",
-                        monospace: true,
-                        capitalization: .characters,
-                        autocorrection: false,
-                        maxLength: 8,
-                        autoFocus: true,
-                        onChange: { v in
-                            inviteCode = v.uppercased()
-                        },
-                        onSubmit: {
-                            if canContinue { submit() }
+            Group {
+                if showForm {
+                    OnboardingUpperFormSlot {
+                        formStack
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                } else {
+                    GeometryReader { geo in
+                        VStack {
+                            Spacer()
+                            RiffTypewriter(
+                                text: inviteTypewriterLine,
+                                startDelay: 0.22,
+                                charDelay: 0.034,
+                                font: .system(size: 30, weight: .semibold),
+                                alignment: .center,
+                                color: theme.fg,
+                                onFinishTyping: {
+                                    withAnimation(.easeOut(duration: 0.38)) {
+                                        showForm = true
+                                    }
+                                }
+                            )
+                            .padding(.horizontal, 8)
+                            Spacer()
                         }
-                    )
+                        .frame(width: geo.size.width, height: geo.size.height)
+                    }
                 }
-                .padding(.top, 36)
             }
+        } footer: {
+            if showForm {
+                VStack(spacing: 0) {
+                    RiffPrimaryButton(
+                        title: isChecking ? "Checking…" : "Continue",
+                        disabled: !canContinue,
+                        action: submit
+                    )
+                    #if DEBUG
+                    RiffTextLink(title: "Skip invite (dev)") {
+                        appState.inviteCode = ""
+                        appState.inviteCodeError = nil
+                        onValidated()
+                    }
+                    .padding(.top, 12)
+                    #endif
+                }
+                .transition(.opacity)
+            }
+        }
+        .appKeyboardDismiss()
+    }
+
+    private var formStack: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(inviteTypewriterLine)
+                .font(.system(size: 30, weight: .semibold))
+                .tracking(-30 * 0.022)
+                .foregroundStyle(theme.fg)
+                .fixedSize(horizontal: false, vertical: true)
+
+            RiffSubhead(text: "Enter your invite code to continue.")
+                .padding(.top, 12)
+
+            VStack(alignment: .leading, spacing: 8) {
+                RiffLabel(text: "Invite code")
+                RiffFieldInput(
+                    text: $inviteCode,
+                    placeholder: "••••••",
+                    monospace: true,
+                    capitalization: .characters,
+                    autocorrection: false,
+                    maxLength: 8,
+                    autoFocus: true,
+                    onChange: { v in
+                        inviteCode = v.uppercased()
+                    },
+                    onSubmit: {
+                        if canContinue { submit() }
+                    }
+                )
+            }
+            .padding(.top, 24)
 
             if let errorMessage {
                 Text(errorMessage)
@@ -58,26 +117,7 @@ struct InviteCodeOnlyView: View {
             }
 
             Spacer(minLength: 0)
-        } footer: {
-            VStack(spacing: 0) {
-                RiffStagger(delay: 0.42) {
-                    RiffPrimaryButton(
-                        title: isChecking ? "Checking…" : "Continue",
-                        disabled: !canContinue,
-                        action: submit
-                    )
-                }
-                #if DEBUG
-                RiffTextLink(title: "Skip invite (dev)") {
-                    appState.inviteCode = ""
-                    appState.inviteCodeError = nil
-                    onValidated()
-                }
-                .padding(.top, 12)
-                #endif
-            }
         }
-        .appKeyboardDismiss()
     }
 
     private func submit() {

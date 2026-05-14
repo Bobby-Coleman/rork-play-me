@@ -42,12 +42,10 @@ struct OnboardingView: View {
 
     private var isForward: Bool { step.rawValue >= lastStepIndex }
 
-    /// Steps that participate in the progress dots. Excludes the cold
-    /// open + social proof + invite/phone/OTP, since those are pre-account
-    /// screens, and the final send step which is the terminal screen
-    /// (no progress dot).
+    /// Steps that participate in the progress dots. Excludes cold open,
+    /// social proof, invite, phone, and OTP. `intro` remains an enum case but is not routed.
     private static let progressSteps: [RiffOnboardingStep] = [
-        .intro, .firstName, .username, .musicService, .taste, .theme,
+        .firstName, .username, .musicService, .taste, .theme,
         .contactsPermission, .inviteIntro, .pickFriends, .notifications, .widget,
     ]
 
@@ -84,10 +82,11 @@ struct OnboardingView: View {
         switch step {
         case .coldOpen:
             ColdOpenSplashView(
-                onContinue: { advance(to: .socialProof) },
+                onContinue: { advance(to: .inviteCodeOnly) },
                 onSignIn: { advance(to: .inviteCodeOnly) }
             )
 
+        // Disabled in default graph: re-enable by routing cold open through `.socialProof` first.
         case .socialProof:
             SocialProofView(
                 stepIdx: 0,
@@ -100,7 +99,7 @@ struct OnboardingView: View {
             InviteCodeOnlyView(
                 appState: appState,
                 onValidated: { advance(to: .phoneEntry) },
-                onBack: { advance(to: .socialProof, isBack: true) }
+                onBack: { advance(to: .coldOpen, isBack: true) }
             )
 
         case .phoneEntry:
@@ -118,16 +117,17 @@ struct OnboardingView: View {
                         if await appState.checkForExistingUser() {
                             onComplete()
                         } else {
-                            await MainActor.run { advance(to: .intro) }
+                            await MainActor.run { advance(to: .firstName) }
                         }
                     }
                 },
                 onBack: { advance(to: .phoneEntry, isBack: true) }
             )
 
+        // Kept for potential reuse; not used in the default graph (OTP goes to firstName).
         case .intro:
             RiffIntroView(
-                stepIdx: progressIndex(for: .intro) ?? 0,
+                stepIdx: 0,
                 totalSteps: totalProgress,
                 onContinue: { advance(to: .firstName) },
                 onBack: nil
@@ -139,7 +139,7 @@ struct OnboardingView: View {
                 stepIdx: progressIndex(for: .firstName) ?? 0,
                 totalSteps: totalProgress,
                 onContinue: { advance(to: .username) },
-                onBack: { advance(to: .intro, isBack: true) }
+                onBack: { advance(to: .otpVerify, isBack: true) }
             )
 
         case .username:

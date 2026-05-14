@@ -253,6 +253,8 @@ struct RiffTypewriter: View {
     var font: Font = .system(size: 15)
     var alignment: TextAlignment = .center
     var color: Color? = nil
+    /// Fires once on the main actor after the full string has been typed (before caret blink loop).
+    var onFinishTyping: (() -> Void)? = nil
 
     @State private var typed: String = ""
     @State private var done: Bool = false
@@ -315,6 +317,10 @@ struct RiffTypewriter: View {
             try? await Task.sleep(nanoseconds: UInt64((charDelay + extra) * 1_000_000_000))
         }
         done = true
+        let finish = onFinishTyping
+        await MainActor.run {
+            finish?()
+        }
         // Blinking caret loop.
         while !Task.isCancelled, done {
             try? await Task.sleep(nanoseconds: 450_000_000)

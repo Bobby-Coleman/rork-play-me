@@ -23,85 +23,83 @@ struct OTPVerifyView: View {
 
     var body: some View {
         RiffScreenChrome(onBack: onBack, showProgressDots: false) {
-            RiffStagger(delay: 0.06) {
-                RiffHeadline(text: "Enter the code")
-            }
-            RiffStagger(delay: 0.14) {
-                RiffSubhead(text: "We sent a 6-digit code to your phone.")
-                    .padding(.top, 8)
-            }
+            OnboardingUpperFormSlot {
+                VStack(alignment: .leading, spacing: 0) {
+                    RiffHeadline(text: "Enter the code")
+                    RiffSubhead(text: "We sent a 6-digit code to your phone.")
+                        .padding(.top, 8)
 
-            RiffStagger(delay: 0.24) {
-                ZStack {
-                    HStack(spacing: 10) {
-                        ForEach(0..<6, id: \.self) { index in
-                            let chars = Array(codeText)
-                            let digit = index < chars.count ? String(chars[index]) : ""
-                            let isCurrent = index == codeText.count && fieldIsFocused
-                            Text(digit)
-                                .font(.system(size: 24, weight: .bold))
-                                .foregroundStyle(theme.fg)
-                                .frame(width: 44, height: 52)
-                                .background(theme.fg.opacity(isCurrent ? 0.15 : 0.08))
-                                .clipShape(.rect(cornerRadius: 10))
+                    ZStack {
+                        HStack(spacing: 10) {
+                            ForEach(0..<6, id: \.self) { index in
+                                let chars = Array(codeText)
+                                let digit = index < chars.count ? String(chars[index]) : ""
+                                let isCurrent = index == codeText.count && fieldIsFocused
+                                Text(digit)
+                                    .font(.system(size: 24, weight: .bold))
+                                    .foregroundStyle(theme.fg)
+                                    .frame(width: 44, height: 52)
+                                    .background(theme.fg.opacity(isCurrent ? 0.15 : 0.08))
+                                    .clipShape(.rect(cornerRadius: 10))
+                            }
                         }
+                        .allowsHitTesting(false)
+
+                        OTPTextField(text: $codeText) { verifyCode() }
+                            .frame(height: 52)
+                            .task {
+                                try? await Task.sleep(for: .milliseconds(250))
+                                fieldIsFocused = true
+                            }
                     }
-                    .allowsHitTesting(false)
+                    .padding(.top, 24)
 
-                    OTPTextField(text: $codeText) { verifyCode() }
-                        .frame(height: 52)
-                        .task {
-                            try? await Task.sleep(for: .milliseconds(250))
-                            fieldIsFocused = true
+                    if isVerifying {
+                        HStack(spacing: 6) {
+                            ProgressView().tint(theme.fg).scaleEffect(0.7)
+                            Text("Verifying…")
+                                .font(.caption)
+                                .foregroundStyle(theme.sub)
                         }
-                }
-                .padding(.top, 32)
-            }
-
-            if isVerifying {
-                HStack(spacing: 6) {
-                    ProgressView().tint(theme.fg).scaleEffect(0.7)
-                    Text("Verifying…")
-                        .font(.caption)
-                        .foregroundStyle(theme.sub)
-                }
-                .padding(.top, 12)
-            }
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .padding(.top, 8)
-            }
-            if let resendConfirmation {
-                Text(resendConfirmation)
-                    .font(.caption)
-                    .foregroundStyle(theme.sub)
-                    .padding(.top, 6)
-            }
-
-            Button { Task { await resendCode() } } label: {
-                Group {
-                    if isResending {
-                        HStack(spacing: 8) {
-                            ProgressView().tint(theme.fg.opacity(0.75)).scaleEffect(0.85)
-                            Text("Sending new code…")
-                        }
-                    } else if resendCooldownRemaining > 0 {
-                        Text("Resend code in \(resendCooldownRemaining)s")
-                    } else {
-                        Text("Didn't receive a code?")
+                        .padding(.top, 12)
                     }
-                }
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(theme.fg.opacity(resendCooldownRemaining > 0 || isResending ? 0.35 : 0.65))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 20)
-            }
-            .buttonStyle(.plain)
-            .disabled(isResending || resendCooldownRemaining > 0 || appState.phoneNumber.isEmpty)
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .padding(.top, 8)
+                    }
+                    if let resendConfirmation {
+                        Text(resendConfirmation)
+                            .font(.caption)
+                            .foregroundStyle(theme.sub)
+                            .padding(.top, 6)
+                    }
 
-            Spacer(minLength: 0)
+                    Button { Task { await resendCode() } } label: {
+                        Group {
+                            if isResending {
+                                HStack(spacing: 8) {
+                                    ProgressView().tint(theme.fg.opacity(0.75)).scaleEffect(0.85)
+                                    Text("Sending new code…")
+                                }
+                            } else if resendCooldownRemaining > 0 {
+                                Text("Resend code in \(resendCooldownRemaining)s")
+                            } else {
+                                Text("Didn't receive a code?")
+                            }
+                        }
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(theme.fg.opacity(resendCooldownRemaining > 0 || isResending ? 0.35 : 0.65))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 20)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isResending || resendCooldownRemaining > 0 || appState.phoneNumber.isEmpty)
+
+                    Spacer(minLength: 0)
+                }
+            }
         } footer: {
             EmptyView()
         }

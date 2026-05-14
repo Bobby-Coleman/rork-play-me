@@ -20,48 +20,44 @@ struct PhoneEntryRiffView: View {
             onBack: onBack,
             showProgressDots: false
         ) {
-            RiffStagger(delay: 0.06) {
-                RiffHeadline(text: "What's your number?")
-            }
-            RiffStagger(delay: 0.14) {
-                RiffSubhead(text: "We'll text you a code to verify it's you.")
-                    .padding(.top, 12)
-            }
+            OnboardingUpperFormSlot {
+                VStack(alignment: .leading, spacing: 0) {
+                    RiffHeadline(text: "What's your number?")
+                    RiffSubhead(text: "We'll text you a code to verify it's you.")
+                        .padding(.top, 12)
 
-            RiffStagger(delay: 0.22) {
-                VStack(alignment: .leading, spacing: 8) {
-                    RiffLabel(text: "Phone number")
-                    RiffFieldInput(
-                        text: $phone,
-                        placeholder: "(555) 555-0142",
-                        prefix: "🇺🇸 +1",
-                        keyboard: .phonePad,
-                        contentType: .telephoneNumber,
-                        autocorrection: false,
-                        onSubmit: {
-                            if canSubmit { submit() }
-                        }
-                    )
+                    VStack(alignment: .leading, spacing: 8) {
+                        RiffLabel(text: "Phone number")
+                        RiffFieldInput(
+                            text: $phone,
+                            placeholder: "(555) 555-0142",
+                            prefix: "🇺🇸 +1",
+                            keyboard: .phonePad,
+                            contentType: .telephoneNumber,
+                            autocorrection: false,
+                            onSubmit: {
+                                if canSubmit { submit() }
+                            }
+                        )
+                    }
+                    .padding(.top, 24)
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.red)
+                            .padding(.top, 12)
+                    }
+
+                    Spacer(minLength: 0)
                 }
-                .padding(.top, 36)
             }
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.red)
-                    .padding(.top, 12)
-            }
-
-            Spacer(minLength: 0)
         } footer: {
-            RiffStagger(delay: 0.42) {
-                RiffPrimaryButton(
-                    title: isSending ? "Sending…" : "Send code",
-                    disabled: !canSubmit,
-                    action: submit
-                )
-            }
+            RiffPrimaryButton(
+                title: isSending ? "Sending…" : "Send code",
+                disabled: !canSubmit,
+                action: submit
+            )
         }
         .appKeyboardDismiss()
     }

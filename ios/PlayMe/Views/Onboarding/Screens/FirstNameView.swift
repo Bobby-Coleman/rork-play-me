@@ -18,33 +18,33 @@ struct FirstNameView: View {
 
     var body: some View {
         RiffScreenChrome(stepIdx: stepIdx, totalSteps: totalSteps, onBack: onBack) {
-            RiffStagger(delay: 0.06) {
-                RiffHeadline(text: "What should we call you?")
+            OnboardingUpperFormSlot {
+                VStack(alignment: .leading, spacing: 0) {
+                    RiffHeadline(text: "You're in. Now, what should we call you?")
+
+                    RiffFieldInput(
+                        text: $firstName,
+                        placeholder: "First name",
+                        contentType: .givenName,
+                        capitalization: .words,
+                        autocorrection: false,
+                        maxLength: 24,
+                        autoFocus: true,
+                        onSubmit: {
+                            if canContinue { onContinue() }
+                        }
+                    )
+                    .padding(.top, 24)
+
+                    Spacer(minLength: 0)
+                }
             }
-            RiffStagger(delay: 0.20) {
-                RiffFieldInput(
-                    text: $firstName,
-                    placeholder: "First name",
-                    contentType: .givenName,
-                    capitalization: .words,
-                    autocorrection: false,
-                    maxLength: 24,
-                    autoFocus: true,
-                    onSubmit: {
-                        if canContinue { onContinue() }
-                    }
-                )
-                .padding(.top, 32)
-            }
-            Spacer(minLength: 0)
         } footer: {
-            RiffStagger(delay: 0.42) {
-                RiffPrimaryButton(
-                    title: "Continue",
-                    disabled: !canContinue,
-                    action: onContinue
-                )
-            }
+            RiffPrimaryButton(
+                title: "Continue",
+                disabled: !canContinue,
+                action: onContinue
+            )
         }
         .appKeyboardDismiss()
     }
