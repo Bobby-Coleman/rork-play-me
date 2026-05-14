@@ -31,6 +31,8 @@
 	<string>PlayMe uses Apple Music access to personalize listening and library-based recommendations.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>PlayMe uses your contacts to help you find and invite friends.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>PlayMe listens for a few seconds to identify the song playing around you so you can send it to a friend.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>PlayMe lets you choose a photo from your library to use as a mixtape cover.</string>
 	<key>UIBackgroundModes</key>

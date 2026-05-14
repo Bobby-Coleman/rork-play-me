@@ -33,6 +33,15 @@ struct AMSearchResponse: Decodable {
     struct AlbumsBucket: Decodable { let data: [AMAlbumResource] }
 }
 
+// MARK: - /v1/catalog/{sf}/songs/{id} and /songs?filter[isrc]={isrc}
+
+/// Lookup envelopes for direct song-by-id and ISRC-filter requests. Apple
+/// returns the same `{ data: [AMSongResource] }` shape for both, so a
+/// single decoder covers them.
+struct AMSongLookupResponse: Decodable {
+    let data: [AMSongResource]
+}
+
 // MARK: - /v1/catalog/{sf}/search/suggestions
 
 /// Response shape for `kinds=topResults&types=songs,artists,albums`.

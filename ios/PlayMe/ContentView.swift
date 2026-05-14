@@ -15,9 +15,38 @@ enum MainTab: Int, CaseIterable {
     case mixtapes = 3
 }
 
+/// Why an intent enum instead of `Bool + Song?`:
+/// SwiftUI's `.sheet(isPresented:)` reuses the same view identity across
+/// presentations of the same sheet. `SendSongSheet` sets its initial
+/// `step` from `initialSong` via `@State`'s initial value, but `@State`
+/// only honors that initial value on the **first** allocation for a
+/// given identity. Once the user opens the empty search sheet once,
+/// every subsequent presentation (including a Shazam-with-song one)
+/// reuses the existing `@State` storage at `step = 0` and the new
+/// initial value is silently dropped — so the recipient picker never
+/// appears.
+///
+/// Driving the sheet with `.sheet(item:)` on this enum forces SwiftUI to
+/// rebuild `SendSongSheet` from scratch every time the intent changes
+/// (different `id`), so the `_step = State(initialValue:)` line in the
+/// sheet's init is honored every presentation.
+private enum SendSheetIntent: Identifiable {
+    case search
+    case sendShazamMatch(Song)
+
+    var id: String {
+        switch self {
+        case .search:
+            return "search"
+        case .sendShazamMatch(let song):
+            return "send:\(song.id)"
+        }
+    }
+}
+
 struct ContentView: View {
     @State private var appState = AppState()
-    @State private var showSendSheet = false
+    @State private var sendSheetIntent: SendSheetIntent?
     @State private var showAddFriends = false
     @State private var selectedTab: Int = MainTab.discovery.rawValue
     @State private var messagesNavigationResetToken: Int = 0
@@ -197,7 +226,7 @@ struct ContentView: View {
     private func openSearch() {
         searchHaptic.prepare()
         searchHaptic.impactOccurred()
-        showSendSheet = true
+        sendSheetIntent = .search
     }
 
     /// Bumps the shared scroll-to-hero counter. `DiscoveryView` observes it
@@ -248,6 +277,9 @@ struct ContentView: View {
                     feedItems: appState.discoveryFeedItems,
                     appState: appState,
                     onSearchTap: openSearch,
+                    onShazamSongResolved: { song in
+                        sendSheetIntent = .sendShazamMatch(song)
+                    },
                     onAddFriends: { showAddFriends = true },
                     onHeroVisibilityChange: { isHero in
                         discoveryIsOnHero = isHero
@@ -279,10 +311,16 @@ struct ContentView: View {
                 Task { await appState.loadConversations() }
             }
         }
-        .sheet(isPresented: $showSendSheet) {
-            SendSongSheet(appState: appState)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+        .sheet(item: $sendSheetIntent) { intent in
+            SendSongSheet(
+                appState: appState,
+                initialSong: {
+                    if case .sendShazamMatch(let song) = intent { return song }
+                    return nil
+                }()
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showAddFriends) {
             AddFriendsView(appState: appState)

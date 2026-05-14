@@ -328,6 +328,76 @@ actor AppleMusicSearchService {
         return merged
     }
 
+    // MARK: - Single-song lookup (Shazam, deep links, etc.)
+
+    /// Resolves a single `Song` from any combination of identifiers that
+    /// `ShazamMatchService` (or other callers) may have. Tries in order:
+    /// 1. `/v1/catalog/{sf}/songs/{appleMusicID}` — most reliable when
+    ///    the upstream gives us a canonical Apple Music id.
+    /// 2. `/v1/catalog/{sf}/songs?filter[isrc]={isrc}` — fallback used
+    ///    when the matched media item lacks an Apple Music id (rare,
+    ///    but happens for older catalog entries / regional gaps).
+    /// 3. `searchExpanded(term: "title artist", limit: 1)` — last-ditch
+    ///    full-text search so we never strand the user without a tappable
+    ///    result.
+    ///
+    /// Returns `nil` only if all three paths fail (no auth/network, or
+    /// the track is genuinely missing from this storefront).
+    func lookupSong(
+        appleMusicID: String?,
+        isrc: String?,
+        title: String,
+        artist: String
+    ) async -> Song? {
+        if let appleMusicID, !appleMusicID.isEmpty,
+           let resource = await Self.fetchSongByID(appleMusicID) {
+            return Self.mapSong(resource, artistIdByName: [:])
+        }
+        if let isrc, !isrc.isEmpty,
+           let resource = await Self.fetchSongByISRC(isrc) {
+            return Self.mapSong(resource, artistIdByName: [:])
+        }
+
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        let searchTerm = [trimmedTitle, trimmedArtist]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard !searchTerm.isEmpty else { return nil }
+
+        let fallback = await searchExpanded(term: searchTerm, limit: 1)
+        return fallback.songs.first
+    }
+
+    /// `GET /v1/catalog/{sf}/songs/{id}` — typed Apple-Music song resource.
+    private static func fetchSongByID(_ id: String) async -> AMSongResource? {
+        guard let url = buildURL(path: "songs/\(id)", query: [:]) else { return nil }
+        guard let data = await authedGet(url) else { return nil }
+        do {
+            let decoded = try JSONDecoder().decode(AMSongLookupResponse.self, from: data)
+            return decoded.data.first
+        } catch {
+            print("[AppleMusicSearch] song-by-id decode error for '\(id)': \(error)")
+            return nil
+        }
+    }
+
+    /// `GET /v1/catalog/{sf}/songs?filter[isrc]={isrc}` — first match wins.
+    private static func fetchSongByISRC(_ isrc: String) async -> AMSongResource? {
+        guard let url = buildURL(
+            path: "songs",
+            query: ["filter[isrc]": isrc]
+        ) else { return nil }
+        guard let data = await authedGet(url) else { return nil }
+        do {
+            let decoded = try JSONDecoder().decode(AMSongLookupResponse.self, from: data)
+            return decoded.data.first
+        } catch {
+            print("[AppleMusicSearch] song-by-isrc decode error for '\(isrc)': \(error)")
+            return nil
+        }
+    }
+
     // MARK: - Artist id resolution
 
     /// Resolves a MusicKit artist id for a free-form artist name. Used

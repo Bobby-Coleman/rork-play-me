@@ -34,6 +34,21 @@ struct SendSongSheet: View {
     @AppStorage("songSearch.recentQueries") private var recentSearchesRaw: String = "[]"
     @FocusState private var isSearchFocused: Bool
 
+    init(
+        appState: AppState,
+        invitedContacts: [SimpleContact] = [],
+        onboardingRequestedUsers: [AppUser] = [],
+        initialSong: Song? = nil,
+        onSent: (() -> Void)? = nil
+    ) {
+        self.appState = appState
+        self.invitedContacts = invitedContacts
+        self.onboardingRequestedUsers = onboardingRequestedUsers
+        self.onSent = onSent
+        _selectedSong = State(initialValue: initialSong)
+        _step = State(initialValue: initialSong == nil ? 0 : 1)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -56,6 +71,7 @@ struct SendSongSheet: View {
                     )
                     .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .trailing)))
                 }
+
             }
             .animation(.spring(duration: 0.3), value: step)
             .toolbar {
@@ -544,6 +560,7 @@ struct SendSongSheet: View {
                 .frame(height: 0.5)
         }
     }
+
 }
 
 enum RecentSongSearchStore {

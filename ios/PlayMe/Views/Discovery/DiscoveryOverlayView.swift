@@ -18,7 +18,12 @@ import Combine
 /// it. Keeps the hero's hit surface predictable.
 struct DiscoverySearchCTA: View {
     let action: () -> Void
+    let shazamAction: () -> Void
+    var isShazamActive: Bool = false
+    var shazamHint: String? = nil
+
     @State private var isPressed: Bool = false
+    @State private var isShazamPressed: Bool = false
 
     var body: some View {
         VStack(spacing: 14) {
@@ -28,20 +33,68 @@ struct DiscoverySearchCTA: View {
                 .shadow(color: .black.opacity(0.5), radius: 10, y: 2)
                 .allowsHitTesting(false)
 
-            Button(action: action) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 62, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .shadow(color: .white.opacity(0.35), radius: 18)
-                    .shadow(color: .black.opacity(0.55), radius: 18, y: 4)
-                    .scaleEffect(isPressed ? 0.94 : 1.0)
+            // Keep the magnifier centered in the hero width; pin Shazam to the
+            // left *of the magnifier* (not as a single centered HStack group).
+            HStack(spacing: 0) {
+                HStack {
+                    Spacer(minLength: 0)
+                    Button(action: shazamAction) {
+                        ZStack {
+                            if isShazamActive {
+                                Circle()
+                                    .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                                    .frame(width: 48, height: 48)
+                                    .scaleEffect(1.08)
+                            }
+                            Image(systemName: "shazam.logo")
+                                .symbolRenderingMode(.monochrome)
+                                .font(.system(size: 30, weight: .semibold))
+                                .foregroundStyle(.white.opacity(isShazamActive ? 1 : 0.82))
+                                .shadow(color: .white.opacity(0.22), radius: 12)
+                                .shadow(color: .black.opacity(0.55), radius: 14, y: 3)
+                        }
+                        .frame(width: 52, height: 52)
+                        .scaleEffect(isShazamPressed ? 0.92 : 1.0)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Identify song with Shazam")
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in if !isShazamPressed { isShazamPressed = true } }
+                            .onEnded { _ in isShazamPressed = false }
+                    )
+                }
+                .frame(maxWidth: .infinity)
+
+                Button(action: action) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 62, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .shadow(color: .white.opacity(0.35), radius: 18)
+                        .shadow(color: .black.opacity(0.55), radius: 18, y: 4)
+                        .scaleEffect(isPressed ? 0.94 : 1.0)
+                }
+                .buttonStyle(.plain)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { _ in if !isPressed { isPressed = true } }
+                        .onEnded { _ in isPressed = false }
+                )
+
+                Color.clear
+                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.plain)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in if !isPressed { isPressed = true } }
-                    .onEnded { _ in isPressed = false }
-            )
+            .frame(maxWidth: .infinity)
+
+            if let shazamHint {
+                Text(shazamHint)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 260)
+                    .transition(.opacity)
+            }
         }
     }
 }
@@ -123,7 +176,7 @@ struct HistoryAlbumPreview: View {
     ZStack {
         Color.black.ignoresSafeArea()
         VStack(spacing: 40) {
-            DiscoverySearchCTA(action: {})
+            DiscoverySearchCTA(action: {}, shazamAction: {})
             DiscoveryHistoryHint()
         }
     }

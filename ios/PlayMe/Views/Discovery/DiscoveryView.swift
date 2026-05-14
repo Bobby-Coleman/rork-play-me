@@ -14,6 +14,7 @@ struct DiscoveryView: View {
     let feedItems: [DiscoveryFeedItem]
     let appState: AppState
     let onSearchTap: () -> Void
+    let onShazamSongResolved: (Song) -> Void
     let onAddFriends: () -> Void
 
     /// Reports whether the hero page is currently visible so the parent can
@@ -27,6 +28,10 @@ struct DiscoveryView: View {
     @FocusState private var isReplyFocused: Bool
 
     @State private var gridVM = SongGridViewModel()
+    @StateObject private var shazam = ShazamMatchService()
+    @State private var isResolvingShazamMatch = false
+    @State private var shazamHint: String?
+    @Environment(\.scenePhase) private var scenePhase
 
     private static let heroId = "__discovery_hero__"
     private let restingBottom: CGFloat = 8
@@ -203,6 +208,15 @@ struct DiscoveryView: View {
                     // just fades out in place.
                     .transition(.opacity)
             }
+
+            if shouldShowShazamOverlay {
+                ShazamListeningOverlay(
+                    isResolving: isResolvingShazamMatch,
+                    onCancel: cancelShazam
+                )
+                .transition(.opacity)
+                .zIndex(10)
+            }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             // Friends pill is visible across the whole Discovery tab —
@@ -228,6 +242,20 @@ struct DiscoveryView: View {
         .onAppear {
             onHeroVisibilityChange?(isOnHero)
         }
+        .onChange(of: shazam.state) { _, newValue in
+            handleShazamStateChange(newValue)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase != .active {
+                shazam.stop()
+                isResolvingShazamMatch = false
+            }
+        }
+        .onDisappear {
+            shazam.stop()
+            isResolvingShazamMatch = false
+        }
+        .animation(.easeInOut(duration: 0.2), value: shouldShowShazamOverlay)
     }
 
     // MARK: - Widget deep-link routing
@@ -288,7 +316,12 @@ struct DiscoveryView: View {
 
             Spacer().frame(minHeight: gridToCTAGap, maxHeight: gridToCTAGap * 2)
 
-            DiscoverySearchCTA(action: onSearchTap)
+            DiscoverySearchCTA(
+                action: onSearchTap,
+                shazamAction: startShazam,
+                isShazamActive: shouldShowShazamOverlay,
+                shazamHint: shazamHint
+            )
 
             Spacer(minLength: ctaToHistoryMin)
 
@@ -434,6 +467,81 @@ struct DiscoveryView: View {
                 try? await Task.sleep(for: .seconds(1.5))
                 showSentConfirmation = false
             }
+        }
+    }
+
+    // MARK: - Shazam
+
+    private var shouldShowShazamOverlay: Bool {
+        if isResolvingShazamMatch { return true }
+        switch shazam.state {
+        case .preparing, .listening: return true
+        default: return false
+        }
+    }
+
+    private func startShazam() {
+        switch shazam.state {
+        case .preparing, .listening:
+            return
+        default:
+            break
+        }
+        if isResolvingShazamMatch { return }
+
+        AudioPlayerService.shared.pause()
+        withAnimation(.easeInOut(duration: 0.2)) { shazamHint = nil }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
+        Task { await shazam.start() }
+    }
+
+    private func cancelShazam() {
+        shazam.stop()
+        isResolvingShazamMatch = false
+    }
+
+    private func handleShazamStateChange(_ newState: ShazamMatchService.State) {
+        switch newState {
+        case .matched(let match):
+            isResolvingShazamMatch = true
+            Task { await resolveShazamMatch(match) }
+        case .noMatch:
+            withAnimation(.easeInOut(duration: 0.2)) {
+                shazamHint = "Didn't catch a song. Try again somewhere quieter."
+            }
+            shazam.reset()
+        case .error(let message):
+            withAnimation(.easeInOut(duration: 0.2)) {
+                shazamHint = message
+            }
+            shazam.reset()
+        case .idle, .preparing, .listening:
+            break
+        }
+    }
+
+    private func resolveShazamMatch(_ match: ShazamMatchService.Match) async {
+        let resolved = await AppleMusicSearchService.shared.lookupSong(
+            appleMusicID: match.appleMusicID,
+            isrc: match.isrc,
+            title: match.title,
+            artist: match.artist
+        )
+
+        await MainActor.run {
+            isResolvingShazamMatch = false
+            shazam.reset()
+            guard let song = resolved else {
+                let label = match.title.isEmpty ? "the song" : "\"\(match.title)\""
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    shazamHint = "We heard \(label) but couldn't find it in Apple Music."
+                }
+                return
+            }
+
+            withAnimation(.easeInOut(duration: 0.2)) { shazamHint = nil }
+            onShazamSongResolved(song)
         }
     }
 
