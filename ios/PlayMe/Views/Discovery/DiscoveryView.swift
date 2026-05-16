@@ -32,10 +32,11 @@ struct DiscoveryView: View {
     @State private var isResolvingShazamMatch = false
     @State private var shazamHint: String?
     @State private var keyboardHeight: CGFloat = 0
+    @State private var listenerListItem: SentSongHistoryItem?
     @Environment(\.scenePhase) private var scenePhase
 
     private static let heroId = "__discovery_hero__"
-    private let restingBottom: CGFloat = 8
+    private let restingBottom: CGFloat = 14
     private let scrollHaptic = UIImpactFeedbackGenerator(style: .soft)
 
     // MARK: - Derived
@@ -53,6 +54,18 @@ struct DiscoveryView: View {
         return nil
     }
 
+    /// The active sent-history entry when the visible page is a song the
+    /// current user sent. The reply lane swaps to a listens pill in this
+    /// case instead of leaving the slot empty.
+    private var activeSentItem: SentSongHistoryItem? {
+        guard let id = visiblePageId, id != Self.heroId else { return nil }
+        guard let item = feedItems.first(where: { $0.id == id }) else { return nil }
+        if case .sent(let sentItem) = item {
+            return sentItem
+        }
+        return nil
+    }
+
     private var viewerIsSender: Bool {
         guard let me = appState.currentUser?.id, let share = activeShare else { return false }
         return share.sender.id == me
@@ -64,8 +77,10 @@ struct DiscoveryView: View {
     }
 
     private var replyPlaceholder: String {
-        guard let target = replyRecipient else { return "Reply..." }
-        return viewerIsSender ? "Message \(target.firstName)..." : "Reply to \(target.firstName)..."
+        guard let target = replyRecipient else { return "Send a message..." }
+        return viewerIsSender
+            ? "Message \(target.firstName)..."
+            : "Send a message to \(target.firstName)..."
     }
 
     // MARK: - Body
@@ -200,15 +215,26 @@ struct DiscoveryView: View {
                         .transition(.opacity)
                 }
 
-                if !isOnHero && activeShare != nil {
-                    replyBar
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                        .padding(.bottom, replyBarBottomPadding(safeBottom: safeInsets.bottom))
-                        // Plain opacity (no translation) so the pill can't
-                        // visually "travel" during a scroll-to-hero — it
-                        // just fades out in place.
-                        .transition(.opacity)
-                        .zIndex(2)
+                if !isOnHero {
+                    // Single chrome slot: received pages get the message
+                    // box, sent pages get the listens activity pill, hero
+                    // is excluded above. Both branches share the same
+                    // `replyBarBottomPadding`, so the pill docks at the
+                    // exact same y regardless of branch.
+                    Group {
+                        if activeShare != nil {
+                            replyBar
+                        } else if let sent = activeSentItem {
+                            listensPill(for: sent)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, replyBarBottomPadding(safeBottom: safeInsets.bottom))
+                    // Plain opacity (no translation) so the pill can't
+                    // visually "travel" during a scroll-to-hero — it
+                    // just fades out in place.
+                    .transition(.opacity)
+                    .zIndex(2)
                 }
 
                 if shouldShowShazamOverlay {
@@ -222,6 +248,11 @@ struct DiscoveryView: View {
             }
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        .sheet(item: $listenerListItem) { item in
+            ShareListenerListSheet(listeners: item.listeners)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
         .animation(.easeOut(duration: 0.22), value: isReplyFocused)
         .animation(.easeOut(duration: 0.22), value: keyboardHeight)
         .onReceive(KeyboardObserver.shared.publisher) { height in
@@ -409,7 +440,7 @@ struct DiscoveryView: View {
                         submitLabel: .send
                     )
                     .lineLimit(1...5)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(.white)
                     .tint(.white)
                     .focused($isReplyFocused)
@@ -444,14 +475,59 @@ struct DiscoveryView: View {
                         .disabled(isSendingReply)
                     }
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
                 .background(Color(white: 0.16).opacity(0.94))
-                .clipShape(.rect(cornerRadius: 26, style: .continuous))
+                .clipShape(.rect(cornerRadius: 28, style: .continuous))
             }
         }
         .padding(.horizontal, 14)
         .animation(.easeInOut(duration: 0.2), value: showSentConfirmation)
+    }
+
+    // MARK: - Listens pill (sent-song variant of the reply lane chrome)
+
+    /// Renders the listens activity in the same slot as the reply pill on
+    /// pages where the viewer is the sender. Empty state shows
+    /// "No listens yet"; one listener shows their name; multiple show an
+    /// avatar stack + count and open the full list on tap.
+    private func listensPill(for sent: SentSongHistoryItem) -> some View {
+        let listeners = sent.listeners
+        let summary: String = {
+            if listeners.isEmpty { return "No listens yet" }
+            if listeners.count == 1 {
+                return "Listened by \(listeners[0].user.firstName)"
+            }
+            let names = listeners.prefix(2).map(\.user.firstName).joined(separator: ", ")
+            let rest = listeners.count - 2
+            return rest > 0 ? "Listened by \(names) + \(rest)" : "Listened by \(names)"
+        }()
+
+        return Button {
+            if listeners.count > 1 { listenerListItem = sent }
+        } label: {
+            HStack(spacing: 10) {
+                if listeners.count > 1 {
+                    ListenerAvatarStack(listeners: listeners)
+                }
+                Text(summary)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(listeners.isEmpty ? .white.opacity(0.42) : .white.opacity(0.82))
+                    .lineLimit(1)
+                if listeners.count > 1 {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.white.opacity(0.08), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(listeners.count <= 1)
+        .accessibilityLabel(summary)
     }
 
     private func sendReply() {

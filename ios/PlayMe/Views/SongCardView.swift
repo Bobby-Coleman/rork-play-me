@@ -25,7 +25,6 @@ struct SongCardView: View {
     /// for older data.
     @State private var resolvedArtistId: String?
     @State private var isResolvingArtist: Bool = false
-    @State private var showListenerList: Bool = false
     @State private var recordedListenSources: Set<String> = []
     private var isCurrentSong: Bool {
         audioPlayer.currentSongId == share.song.id
@@ -55,10 +54,6 @@ struct SongCardView: View {
         } else {
             return "\(share.sender.firstName.uppercased()) SENT YOU A SONG"
         }
-    }
-
-    private var listeners: [SentSongListener] {
-        sentHistory?.listeners ?? []
     }
 
     private var shouldRecordListen: Bool {
@@ -99,12 +94,7 @@ struct SongCardView: View {
                         .frame(height: artFrame.bottom + 10)
 
                     senderDateRow
-                        .padding(.bottom, shouldShowListenerRow ? 6 : 8)
-
-                    if shouldShowListenerRow {
-                        listenerRow
-                            .padding(.bottom, 6)
-                    }
+                        .padding(.bottom, 8)
 
                     playerControls
                         .padding(.horizontal, 32)
@@ -177,11 +167,6 @@ struct SongCardView: View {
             .sheet(isPresented: $showDetailSheet) {
                 SongActionSheet(song: share.song, appState: appState, share: share)
                     .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
-            }
-            .sheet(isPresented: $showListenerList) {
-                ShareListenerListSheet(listeners: listeners)
-                    .presentationDetents([.medium])
                     .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showSaveSheet) {
@@ -371,42 +356,6 @@ struct SongCardView: View {
         .disabled(viewerIsSender || sentHistory != nil || isOpeningChat)
     }
 
-    private var listenerRow: some View {
-        Button {
-            if listeners.count > 1 {
-                showListenerList = true
-            }
-        } label: {
-            HStack(spacing: 10) {
-                if listeners.count > 1 {
-                    ListenerAvatarStack(listeners: listeners)
-                }
-
-                Text(listenerSummary)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(listeners.isEmpty ? .white.opacity(0.42) : .white.opacity(0.82))
-                    .lineLimit(1)
-
-                if listeners.count > 1 {
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.45))
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color.white.opacity(0.08), in: Capsule())
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .disabled(listenersAreInformational)
-        .accessibilityLabel(listenerSummary)
-    }
-
-    private var shouldShowListenerRow: Bool {
-        sentHistory != nil && !listeners.isEmpty
-    }
-
     /// Opens the artist profile sheet. Uses the song's stored
     /// `artistId` when present; falls back to a MusicKit search keyed
     /// by artist name for legacy shares that pre-date the stored id.
@@ -526,23 +475,6 @@ struct SongCardView: View {
         }
     }
 
-    private var listenerSummary: String {
-        guard !listeners.isEmpty else { return "No listens yet" }
-        if listeners.count == 1, let listener = listeners.first {
-            return "Listened by \(listener.user.firstName)"
-        }
-        let names = listeners.prefix(2).map { $0.user.firstName }.joined(separator: ", ")
-        let remaining = listeners.count - min(listeners.count, 2)
-        if remaining > 0 {
-            return "Listened by \(names) + \(remaining)"
-        }
-        return "Listened by \(names)"
-    }
-
-    private var listenersAreInformational: Bool {
-        listeners.count <= 1
-    }
-
     private func sentRecipientSummary(_ recipients: [AppUser]) -> String {
         guard !recipients.isEmpty else { return "Sent" }
         let names = recipients.prefix(2).map(\.firstName).joined(separator: ", ")
@@ -563,7 +495,7 @@ struct SongCardView: View {
 
 }
 
-private struct ListenerAvatarStack: View {
+struct ListenerAvatarStack: View {
     let listeners: [SentSongListener]
 
     var body: some View {
@@ -597,7 +529,7 @@ private struct InitialsAvatar: View {
     }
 }
 
-private struct ShareListenerListSheet: View {
+struct ShareListenerListSheet: View {
     let listeners: [SentSongListener]
     @Environment(\.dismiss) private var dismiss
 
