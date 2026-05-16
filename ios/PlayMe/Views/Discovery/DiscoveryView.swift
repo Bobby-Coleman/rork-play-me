@@ -369,13 +369,20 @@ struct DiscoveryView: View {
     /// The reply bar is chrome over a stable pager. The bottom
     /// `discoveryReplyLaneHeight` of the tab content is permanently
     /// reserved for it; this padding just docks the bar at the bottom
-    /// of that lane (above the tab bar's safe area), and lifts it when
-    /// the keyboard appears. Page size and artwork never reflow.
+    /// of that lane (the GeometryReader already excludes the tab bar's
+    /// safe area, so we don't add `safeBottom` here — that would
+    /// double-count the tab bar height and float the pill far above
+    /// the nav). Keyboard lifts the bar without resizing the page.
+    ///
+    /// When the keyboard is up, the GR ends `safeBottom` above the screen
+    /// bottom (tab bar + home indicator), but `keyboardHeight` is measured
+    /// from the screen bottom. Subtract `safeBottom` so the bar lands
+    /// exactly `restingBottom` above the keyboard top.
     private func replyBarBottomPadding(safeBottom: CGFloat) -> CGFloat {
         if keyboardHeight > 0 {
-            return keyboardHeight + restingBottom
+            return max(restingBottom, keyboardHeight - safeBottom + restingBottom)
         }
-        return max(safeBottom, restingBottom)
+        return restingBottom
     }
 
     // MARK: - Reply bar (mirrors HomeFeedView behavior)

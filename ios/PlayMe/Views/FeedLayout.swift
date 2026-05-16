@@ -40,13 +40,19 @@ enum FeedLayout {
     /// composer. Keeping it outside the page's art/control math prevents
     /// the keyboard or composer from re-centering the card. When no
     /// reply bar is showing (e.g. the hero), the lane is intentionally
-    /// empty space — the layout above it does not reflow.
-    static let discoveryReplyLaneHeight: CGFloat = 96
+    /// empty space — the layout above it does not reflow. Sized so the
+    /// pager has enough vertical room for the hero's CTA + history
+    /// cluster while still comfortably containing the docked reply pill
+    /// (~58pt bar + `restingBottom`).
+    static let discoveryReplyLaneHeight: CGFloat = 76
 
     /// Compact non-art lanes around the fixed artwork frame. Used by both
     /// the hero grid and `SongCardView` so the artwork center is identical
-    /// across every Discovery page.
-    static let discoveryHeaderLaneHeight: CGFloat = 96
+    /// across every Discovery page. The header lane reserves enough room
+    /// for the Add Friends pill plus a comfortable gap before the
+    /// "X SENT YOU A SONG" label, so the label is never visually clipped
+    /// against the pill.
+    static let discoveryHeaderLaneHeight: CGFloat = 120
     static let discoveryControlsLaneHeight: CGFloat = 108
 
     /// Computes the artwork side length for a given page size, leaving
