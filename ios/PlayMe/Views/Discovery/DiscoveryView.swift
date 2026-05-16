@@ -31,6 +31,7 @@ struct DiscoveryView: View {
     @StateObject private var shazam = ShazamMatchService()
     @State private var isResolvingShazamMatch = false
     @State private var shazamHint: String?
+    @State private var keyboardHeight: CGFloat = 0
     @Environment(\.scenePhase) private var scenePhase
 
     private static let heroId = "__discovery_hero__"
@@ -70,31 +71,32 @@ struct DiscoveryView: View {
     // MARK: - Body
 
     var body: some View {
-        // Root `ZStack(alignment: .bottom)` floats the focus-dim and
-        // reply pill above the paging stack. The pager lives inside a
-        // `VStack` with a fixed `Color.clear` sibling reserving exactly
-        // the reply-pill slot — that gives `GeometryReader` inside a
-        // single, unambiguous page size to hand down to every page.
+        // TikTok-style feed model adapted for a tab-contained view: one
+        // stable in-tab viewport, pages exactly equal to that viewport,
+        // and chrome floating above the pager. Keyboard/reply UI never
+        // participates in page measurement, so song cards cannot resize
+        // or drift when the composer focuses.
         //
-        // This layout deliberately avoids mixing
-        // `.containerRelativeFrame([.horizontal, .vertical])` with
-        // `.safeAreaInset(edge: .bottom)` on the same ScrollView:
-        // `containerRelativeFrame` measures against the ScrollView's
-        // full frame while `.scrollTargetBehavior(.paging)` snaps by
-        // the visible content region, and on some iPhones those two
-        // numbers disagree enough that the next page's top leaks past
-        // the snap seam. Measuring once with `GeometryReader` and
-        // `.frame(height:)` each page explicitly guarantees page
-        // height == snap distance on every device.
-        ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                GeometryReader { pageGeo in
-                    let pageSize = pageGeo.size
+        // The root is `ZStack(alignment: .top)` so the pager pins to the
+        // top of the tab content area. The bottom `discoveryReplyLaneHeight`
+        // is permanently reserved for the reply composer — that lane is
+        // empty space on the hero (per spec), and the reply bar docks
+        // inside it on song-card pages.
+        GeometryReader { pageGeo in
+            let replyLaneHeight = FeedLayout.discoveryReplyLaneHeight
+            let pagerHeight = max(1, pageGeo.size.height - replyLaneHeight)
+            let pagerSize = CGSize(width: pageGeo.size.width, height: pagerHeight)
+            let safeInsets = pageGeo.safeAreaInsets
+
+            ZStack(alignment: .top) {
+                Color.black
+
+                VStack(spacing: 0) {
                     ScrollViewReader { proxy in
                         ScrollView(.vertical) {
                             LazyVStack(spacing: 0) {
-                                hero(pageSize: pageSize, scrollProxy: proxy)
-                                    .frame(width: pageSize.width, height: pageSize.height)
+                                hero(pageSize: pagerSize, scrollProxy: proxy)
+                                    .frame(width: pagerSize.width, height: pagerSize.height)
                                     .id(Self.heroId)
 
                                 ForEach(feedItems) { item in
@@ -106,7 +108,7 @@ struct DiscoveryView: View {
                                             appState: appState,
                                             onToggleLike: { appState.toggleLike(shareId: share.id) }
                                         )
-                                        .frame(width: pageSize.width, height: pageSize.height)
+                                        .frame(width: pagerSize.width, height: pagerSize.height)
                                         .clipped()
                                         .id(item.id)
 
@@ -119,7 +121,7 @@ struct DiscoveryView: View {
                                                 appState: appState,
                                                 onToggleLike: { appState.toggleLike(shareId: share.id) }
                                             )
-                                            .frame(width: pageSize.width, height: pageSize.height)
+                                            .frame(width: pagerSize.width, height: pagerSize.height)
                                             .clipped()
                                             .id(item.id)
                                         }
@@ -128,11 +130,10 @@ struct DiscoveryView: View {
                             }
                             .scrollTargetLayout()
                         }
-                        .scrollTargetBehavior(.paging)
+                        .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
                         .scrollPosition(id: $visiblePageId)
                         .scrollIndicators(.hidden)
-                        .scrollDismissesKeyboard(.immediately)
-                        .ignoresSafeArea(.keyboard, edges: .bottom)
+                        .frame(width: pagerSize.width, height: pagerSize.height, alignment: .top)
                         .refreshable { await appState.refreshShares() }
                         .onChange(of: visiblePageId) { oldValue, newValue in
                             guard let newValue, let oldValue, newValue != oldValue else { return }
@@ -181,61 +182,51 @@ struct DiscoveryView: View {
                             )
                         }
                     }
+
+                    // Reply lane is always reserved at the bottom of the
+                    // tab content. When the reply bar is hidden (hero
+                    // page or no active share), this is just empty space
+                    // — no other element reflows into it.
+                    Color.clear.frame(height: replyLaneHeight)
                 }
 
-                // Fixed slot the reply pill renders into. Kept as a
-                // VStack sibling (rather than a ScrollView
-                // safeAreaInset) so the `pageGeo` above measures the
-                // exact scrollable area and every page matches the
-                // paging snap distance.
-                Color.clear
-                    .frame(height: FeedLayout.replyBarReservedHeight)
-            }
+                addFriendsOverlay()
 
-            if isReplyFocused {
-                Color.black.opacity(0.38)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture { isReplyFocused = false }
+                if isReplyFocused {
+                    Color.black.opacity(0.38)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { isReplyFocused = false }
+                        .transition(.opacity)
+                }
+
+                if !isOnHero && activeShare != nil {
+                    replyBar
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                        .padding(.bottom, replyBarBottomPadding(safeBottom: safeInsets.bottom))
+                        // Plain opacity (no translation) so the pill can't
+                        // visually "travel" during a scroll-to-hero — it
+                        // just fades out in place.
+                        .transition(.opacity)
+                        .zIndex(2)
+                }
+
+                if shouldShowShazamOverlay {
+                    ShazamListeningOverlay(
+                        isResolving: isResolvingShazamMatch,
+                        onCancel: cancelShazam
+                    )
                     .transition(.opacity)
-            }
-
-            if !isOnHero && activeShare != nil {
-                replyBar
-                    .padding(.bottom, restingBottom)
-                    // Plain opacity (no translation) so the pill can't
-                    // visually "travel" during a scroll-to-hero — it
-                    // just fades out in place.
-                    .transition(.opacity)
-            }
-
-            if shouldShowShazamOverlay {
-                ShazamListeningOverlay(
-                    isResolving: isResolvingShazamMatch,
-                    onCancel: cancelShazam
-                )
-                .transition(.opacity)
-                .zIndex(10)
+                    .zIndex(10)
+                }
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            // Friends pill is visible across the whole Discovery tab —
-            // both the hero and the history feed. Keeping it always
-            // mounted removes the layout toggle on page change, which
-            // was the last contributor to the scroll "bounce" feel.
-            //
-            // The strip has a solid black backdrop so scrolled content
-            // (notably the hero's history chevron) can't ghost through
-            // the translucent pill material during a hero → card swipe.
-            HStack {
-                Spacer(minLength: 0)
-                addFriendsPill
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity)
-            .background(Color.black)
-        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .animation(.easeOut(duration: 0.22), value: isReplyFocused)
+        .animation(.easeOut(duration: 0.22), value: keyboardHeight)
+        .onReceive(KeyboardObserver.shared.publisher) { height in
+            keyboardHeight = height
+        }
         .task {
             await gridVM.loadIfNeeded()
         }
@@ -295,47 +286,36 @@ struct DiscoveryView: View {
     ///   * History row (tap-to-scroll + rotating album preview) —
     ///     hidden entirely on accounts with no received shares.
     private func hero(pageSize: CGSize, scrollProxy: ScrollViewProxy) -> some View {
-        // Non-grid content: search CTA (~80pt) + history row (~44pt)
-        // + inter-group spacing. Passed to `FeedLayout.artSize` so
-        // the grid shrinks gracefully on short viewports rather than
-        // clipping the CTA or row.
-        let nonGridHeight: CGFloat = 200
-        let gridSide = FeedLayout.artSize(forPageSize: pageSize, nonArtHeight: nonGridHeight)
-        let gridToCTAGap = max(18, pageSize.height * 0.028)
-        let ctaToHistoryMin = max(18, pageSize.height * 0.028)
-        let historyBottom = max(20, pageSize.height * 0.03)
+        let artFrame = FeedLayout.discoveryArtFrame(forPageSize: pageSize)
+        let ctaTop = artFrame.bottom + 12
 
-        return VStack(spacing: 0) {
-            Spacer(minLength: 0)
-
+        return ZStack(alignment: .top) {
             AlbumArtGridBackgroundView(
                 items: gridVM.dedupedDisplayItems,
-                side: gridSide
+                side: artFrame.side
             )
-            .frame(width: gridSide, height: gridSide)
+            .frame(width: artFrame.side, height: artFrame.side)
+            .position(x: pageSize.width / 2, y: artFrame.centerY)
 
-            Spacer().frame(minHeight: gridToCTAGap, maxHeight: gridToCTAGap * 2)
+            VStack(spacing: 10) {
+                DiscoverySearchCTA(
+                    action: onSearchTap,
+                    shazamAction: startShazam,
+                    isShazamActive: shouldShowShazamOverlay,
+                    shazamHint: shazamHint
+                )
 
-            DiscoverySearchCTA(
-                action: onSearchTap,
-                shazamAction: startShazam,
-                isShazamActive: shouldShowShazamOverlay,
-                shazamHint: shazamHint
-            )
-
-            Spacer(minLength: ctaToHistoryMin)
-
-            if !feedItems.isEmpty {
-                historyRow(scrollProxy: scrollProxy)
-                    .padding(.bottom, historyBottom)
-                    // Fade out within the first ~25% of a hero → card
-                    // swipe so the row never crosses the friends pill.
-                    .scrollTransition(axis: .vertical) { content, phase in
-                        content.opacity(max(0, 1 - abs(phase.value) * 4))
-                    }
-            } else {
-                Spacer().frame(height: historyBottom)
+                if !feedItems.isEmpty {
+                    historyRow(scrollProxy: scrollProxy)
+                        // Fade out within the first ~25% of a hero → card
+                        // swipe so the row never crosses the friends pill.
+                        .scrollTransition(axis: .vertical) { content, phase in
+                            content.opacity(max(0, 1 - abs(phase.value) * 4))
+                        }
+                }
             }
+            .padding(.top, ctaTop)
+            .frame(width: pageSize.width, alignment: .top)
         }
         .frame(width: pageSize.width, height: pageSize.height)
         .background(Color.black)
@@ -366,6 +346,36 @@ struct DiscoveryView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    /// Top chrome floats above the pager instead of using `safeAreaInset`,
+    /// so it never changes the measured page height or snap interval.
+    private func addFriendsOverlay() -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer(minLength: 0)
+                addFriendsPill
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity)
+            .background(Color.black)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .zIndex(3)
+    }
+
+    /// The reply bar is chrome over a stable pager. The bottom
+    /// `discoveryReplyLaneHeight` of the tab content is permanently
+    /// reserved for it; this padding just docks the bar at the bottom
+    /// of that lane (above the tab bar's safe area), and lifts it when
+    /// the keyboard appears. Page size and artwork never reflow.
+    private func replyBarBottomPadding(safeBottom: CGFloat) -> CGFloat {
+        if keyboardHeight > 0 {
+            return keyboardHeight + restingBottom
+        }
+        return max(safeBottom, restingBottom)
     }
 
     // MARK: - Reply bar (mirrors HomeFeedView behavior)

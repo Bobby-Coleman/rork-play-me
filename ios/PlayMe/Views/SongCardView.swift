@@ -27,15 +27,6 @@ struct SongCardView: View {
     @State private var isResolvingArtist: Bool = false
     @State private var showListenerList: Bool = false
     @State private var recordedListenSources: Set<String> = []
-    /// Measured height of the content above the artwork (header block).
-    /// Updated in-place via a `PreferenceKey` probe so the art size
-    /// recomputes when Dynamic Type or localized strings change the
-    /// header's rendered size.
-    @State private var topBlockHeight: CGFloat = 68
-    /// Measured height of the content below the artwork (sender row +
-    /// player controls).
-    @State private var bottomBlockHeight: CGFloat = 140
-
     private var isCurrentSong: Bool {
         audioPlayer.currentSongId == share.song.id
     }
@@ -84,58 +75,41 @@ struct SongCardView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let nonArt = topBlockHeight + bottomBlockHeight
-            let artSize = FeedLayout.artSize(forPageSize: proxy.size, nonArtHeight: nonArt)
+            let artFrame = FeedLayout.discoveryArtFrame(forPageSize: proxy.size)
 
-            ZStack {
+            ZStack(alignment: .top) {
                 Color.black
 
-                // Symmetric flexible spacers geometrically center the
-                // content within the page. The page size is the scroll
-                // container's visible region (see `DiscoveryView`'s
-                // top + bottom safe-area insets), so there's no need
-                // for an asymmetric bottom padding to "push content up
-                // above the reply pill" — the reply pill lives outside
-                // the page entirely.
+                // Keep the artwork in the same frame on every card. Text,
+                // listener state, and controls can vary around it without
+                // changing the page's visual center while paging.
+                header
+                    .padding(.horizontal, 24)
+                    .frame(
+                        width: proxy.size.width,
+                        height: max(64, artFrame.top - 16),
+                        alignment: .bottom
+                    )
+
+                artwork(size: artFrame.side)
+                    .position(x: proxy.size.width / 2, y: artFrame.centerY)
+
                 VStack(spacing: 0) {
-                    Spacer(minLength: 0)
+                    Spacer()
+                        .frame(height: artFrame.bottom + 10)
 
-                    header
-                        .padding(.top, 8)
-                        .padding(.bottom, 24)
-                        .padding(.horizontal, 24)
-                        .background(heightProbe(TopBlockHeightKey.self))
+                    senderDateRow
+                        .padding(.bottom, shouldShowListenerRow ? 6 : 8)
 
-                    artwork(size: artSize)
-
-                    VStack(spacing: 0) {
-                        senderDateRow
-                            .padding(.top, 20)
-                            .padding(.bottom, 12)
-
-                        if sentHistory != nil {
-                            listenerRow
-                                .padding(.bottom, 12)
-                        }
-
-                        playerControls
-                            .padding(.horizontal, 32)
-                            .padding(.bottom, 12)
+                    if shouldShowListenerRow {
+                        listenerRow
+                            .padding(.bottom, 6)
                     }
-                    .background(heightProbe(BottomBlockHeightKey.self))
 
-                    Spacer(minLength: 0)
+                    playerControls
+                        .padding(.horizontal, 32)
                 }
-            }
-            .onPreferenceChange(TopBlockHeightKey.self) { newValue in
-                if abs(newValue - topBlockHeight) > 0.5 {
-                    topBlockHeight = newValue
-                }
-            }
-            .onPreferenceChange(BottomBlockHeightKey.self) { newValue in
-                if abs(newValue - bottomBlockHeight) > 0.5 {
-                    bottomBlockHeight = newValue
-                }
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
             .task {
                 // View-time prefetch for the "Open in Spotify" pill.
@@ -429,6 +403,10 @@ struct SongCardView: View {
         .accessibilityLabel(listenerSummary)
     }
 
+    private var shouldShowListenerRow: Bool {
+        sentHistory != nil && !listeners.isEmpty
+    }
+
     /// Opens the artist profile sheet. Uses the song's stored
     /// `artistId` when present; falls back to a MusicKit search keyed
     /// by artist name for legacy shares that pre-date the stored id.
@@ -475,9 +453,9 @@ struct SongCardView: View {
     // MARK: - Player controls
 
     private var playerControls: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             ScrubBarView(songId: share.song.id, fallbackDuration: share.song.duration)
-                .padding(.bottom, 2)
+                .padding(.bottom, 0)
 
             HStack(spacing: 12) {
                 Button {
@@ -583,17 +561,6 @@ struct SongCardView: View {
         }
     }
 
-    // MARK: - Height probe
-
-    /// Transparent `GeometryReader` background that publishes the host
-    /// view's rendered height through the supplied `PreferenceKey`. Used
-    /// by `SongCardView` to discover the real size of the top/bottom
-    /// non-art blocks and size the artwork to the leftover space.
-    private func heightProbe<Key: PreferenceKey>(_ key: Key.Type) -> some View where Key.Value == CGFloat {
-        GeometryReader { geo in
-            Color.clear.preference(key: key, value: geo.size.height)
-        }
-    }
 }
 
 private struct ListenerAvatarStack: View {
@@ -700,20 +667,6 @@ private struct ShareListenerListSheet: View {
             return "Opened in app"
         }
         return "Previewed"
-    }
-}
-
-private struct TopBlockHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 68
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-private struct BottomBlockHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 140
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 
