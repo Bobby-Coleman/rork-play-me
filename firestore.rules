@@ -378,10 +378,33 @@ service cloud.firestore {
     }
 
     // Invite codes gate the new-user signup flow. The client never
-    // touches these directly — validation + redemption go through the
-    // `validateInviteCode` / `redeemInviteCode` callables, which run
-    // with admin privileges. Locking everything down here prevents
-    // enumeration even from authenticated clients.
+    // touches these directly — validation + redemption + minting go
+    // through the `validateInviteCode` / `redeemInviteCode` /
+    // `generateInviteCode` callables, which run with admin privileges.
+    // Locking everything down here prevents enumeration even from
+    // authenticated clients.
+    //
+    // Doc shape (`inviteCodes/{CODE_UPPER}`):
+    //   {
+    //     // Original / always-present
+    //     disabled?:   bool,
+    //     redeemed?:   bool,
+    //     redeemedBy?: string,         // last redeemer's uid
+    //     redeemedAt?: timestamp,
+    //     expiresAt?:  timestamp,
+    //     maxUses?:    number (default 1),
+    //     useCount?:   number (default 0),
+    //
+    //     // Phase B additions (all optional, backward-compatible)
+    //     kind?:         "personal" | "creator" | "admin"   // default "personal"
+    //     createdByUid?: string                              // attribution target
+    //     campaign?:     string                              // free-form tag
+    //
+    //     // Rotation bookkeeping (written by seed --rotate)
+    //     rotatedFrom?: string,
+    //     rotatedTo?:   string,
+    //     rotatedAt?:   timestamp,
+    //   }
     match /inviteCodes/{code} {
       allow read, write: if false;
     }

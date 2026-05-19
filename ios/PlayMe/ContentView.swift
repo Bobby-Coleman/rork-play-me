@@ -341,18 +341,11 @@ struct ContentView: View {
         // spring settle into child ScrollViews (contributing to the
         // landing-page bounce the spec calls out).
         .animation(.easeInOut(duration: 0.22), value: AudioPlayerService.shared.currentSong?.id)
-        .onReceive(NotificationCenter.default.publisher(for: .didReceiveDeepLink)) { notification in
-            guard let data = notification.userInfo as? [String: Any],
-                  let referrerId = data["referringUserId"] as? String,
-                  !referrerId.isEmpty,
-                  let currentUID = appState.currentUser?.id,
-                  referrerId != currentUID else { return }
-
-            DeepLinkService.shared.pendingReferrerId = referrerId
-            DeepLinkService.shared.pendingReferrerUsername = data["referringUsername"] as? String
-            Task {
-                await appState.processReferralIfNeeded(currentUID: currentUID)
-            }
-        }
+        // Phase B: the old `?referringUserId=` auto-friend-on-foreground
+        // path was removed. Auto-friending now happens server-side
+        // during `redeemInviteCode` for `personal` invite codes. An
+        // already-signed-in user tapping an invite link still resolves
+        // the deep link (via ChottuLink) but the embedded `?code=` is
+        // ignored — they're already past the gate.
     }
 }

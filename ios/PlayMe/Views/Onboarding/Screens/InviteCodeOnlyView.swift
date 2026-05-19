@@ -12,12 +12,20 @@ struct InviteCodeOnlyView: View {
     @State private var isChecking = false
     @State private var errorMessage: String?
     @State private var showForm = false
+    /// Set when a deep-link-supplied code has been validated and we're
+    /// flashing a brief "Invite code accepted" affordance before
+    /// auto-advancing. While true, the form is locked.
+    @State private var autoAdvanceConfirming = false
+    /// One-shot guard so a re-render of this view (e.g. theme change)
+    /// doesn't re-trigger the deep-link auto-fill after the user has
+    /// already typed over it.
+    @State private var didAttemptDeepLinkAutofill = false
 
     @Environment(\.riffTheme) private var theme
 
     private var canContinue: Bool {
         let code = inviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !isChecking && code.count >= 4
+        return !isChecking && !autoAdvanceConfirming && code.count >= 4
     }
 
     var body: some View {
@@ -109,7 +117,13 @@ struct InviteCodeOnlyView: View {
             }
             .padding(.top, 24)
 
-            if let errorMessage {
+            if autoAdvanceConfirming {
+                Text("Invite code accepted — welcome to RIFF.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.fg.opacity(0.8))
+                    .padding(.top, 12)
+                    .transition(.opacity)
+            } else if let errorMessage {
                 Text(errorMessage)
                     .font(.system(size: 12))
                     .foregroundStyle(.red)
@@ -117,6 +131,21 @@ struct InviteCodeOnlyView: View {
             }
 
             Spacer(minLength: 0)
+        }
+        .task(id: showForm) {
+            // Auto-fill from a deep-link-supplied invite code the first
+            // time the form actually appears. Gating on `showForm`
+            // (rather than `.onAppear`) avoids racing the typewriter
+            // intro and avoids re-firing if SwiftUI rebuilds the view
+            // body. The deep-link code is consumed immediately so a
+            // subsequent gate visit (e.g. user backs out + comes back)
+            // shows the empty form rather than re-auto-fill.
+            guard showForm, !didAttemptDeepLinkAutofill else { return }
+            didAttemptDeepLinkAutofill = true
+            guard let pending = DeepLinkService.shared.pendingInviteCode,
+                  !pending.isEmpty else { return }
+            DeepLinkService.shared.clearPendingInviteCode()
+            await autoSubmit(code: pending.uppercased())
         }
     }
 
@@ -135,6 +164,29 @@ struct InviteCodeOnlyView: View {
             } else {
                 errorMessage = appState.inviteCodeError ?? "That invite code didn't work."
             }
+        }
+    }
+
+    /// Validates a deep-link-supplied code and, if it's good, briefly
+    /// confirms before advancing. On failure, the code shows up in the
+    /// field so the user can correct it manually.
+    private func autoSubmit(code: String) async {
+        inviteCode = code
+        isChecking = true
+        errorMessage = nil
+
+        let ok = await appState.validateInviteCode(code)
+        isChecking = false
+
+        if ok {
+            appState.inviteCode = code
+            withAnimation(.easeOut(duration: 0.18)) {
+                autoAdvanceConfirming = true
+            }
+            try? await Task.sleep(for: .milliseconds(650))
+            onValidated()
+        } else {
+            errorMessage = appState.inviteCodeError ?? "That invite code didn't work."
         }
     }
 }

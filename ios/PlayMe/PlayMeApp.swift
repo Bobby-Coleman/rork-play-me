@@ -132,23 +132,35 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     // MARK: - ChottuLinkDelegate
 
     func chottuLink(didResolveDeepLink link: URL, metadata: [String: Any]?) {
+        #if DEBUG
         print("[ChottuLink] resolved link: \(link.absoluteString)")
+        #endif
 
         guard let components = URLComponents(url: link, resolvingAgainstBaseURL: false),
               let queryItems = components.queryItems else { return }
 
-        let referrerId = queryItems.first(where: { $0.name == "referringUserId" })?.value
-        let referrerUsername = queryItems.first(where: { $0.name == "referringUsername" })?.value
+        // Phase B: `?code=` is the new canonical query param. When
+        // present, stash it for the onboarding gate to auto-fill. The
+        // gate validates server-side before consuming, so a stale/typo'd
+        // code just shows an inline error rather than blocking.
+        if let code = queryItems.first(where: { $0.name == "code" })?.value,
+           !code.isEmpty {
+            DeepLinkService.shared.pendingInviteCode = code
+            #if DEBUG
+            print("[ChottuLink] stored pendingInviteCode")
+            #endif
+            return
+        }
 
-        if let referrerId, !referrerId.isEmpty {
+        // Legacy `?referringUserId=` links from pre-Phase-B installs.
+        // No longer trigger auto-friend (that moved server-side via the
+        // `redeemInviteCode` fan-out). We still note the referrer for
+        // analytics, but nothing else happens.
+        if let referrerId = queryItems.first(where: { $0.name == "referringUserId" })?.value,
+           !referrerId.isEmpty {
             DeepLinkService.shared.pendingReferrerId = referrerId
-            DeepLinkService.shared.pendingReferrerUsername = referrerUsername
-
-            NotificationCenter.default.post(
-                name: .didReceiveDeepLink,
-                object: nil,
-                userInfo: ["referringUserId": referrerId, "referringUsername": referrerUsername ?? ""]
-            )
+            DeepLinkService.shared.pendingReferrerUsername = queryItems
+                .first(where: { $0.name == "referringUsername" })?.value
         }
     }
 

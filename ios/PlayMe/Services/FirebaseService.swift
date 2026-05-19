@@ -1605,17 +1605,44 @@ class FirebaseService {
         case missingCode = "missing_code"
         case methodNotAllowed = "method_not_allowed"
         case serverError = "server_error"
+        case rateLimited = "rate_limited"
         case network
     }
 
-    /// Returns `(valid, reason?)`. Valid codes return `(true, nil)`.
-    func validateInviteCode(_ code: String) async -> (valid: Bool, reason: InviteCodeReason?) {
+    /// The kind of code, per the server-side schema. Drives kind-specific
+    /// UI copy (e.g. "Joined via Bobby's launch code" vs "You'll be friends
+    /// with Sarah once you finish setting up.").
+    enum InviteCodeKind: String {
+        case personal
+        case creator
+        case admin
+    }
+
+    /// Outcome of redeem. `kind` echoes the doc kind; `autoFriend`
+    /// describes whether the server tried (and succeeded) auto-friending
+    /// the inviter on `personal` codes. UI shows a soft warning if the
+    /// inviter was already at their friend cap.
+    struct RedeemInviteResult {
+        let redeemed: Bool
+        let kind: InviteCodeKind?
+        let autoFriend: String?
+    }
+
+    /// Result of `generateInviteCode`. iOS turns this into a ChottuLink
+    /// shortlink via `DeepLinkService.createPersonalInvite`.
+    struct GeneratedInvite {
+        let code: String
+        let destinationURL: String
+    }
+
+    /// Returns `(valid, reason?, kind?)`. Valid codes return `(true, nil, kind)`.
+    func validateInviteCode(_ code: String) async -> (valid: Bool, reason: InviteCodeReason?, kind: InviteCodeKind?) {
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !trimmed.isEmpty else {
-            return (false, .missingCode)
+            return (false, .missingCode, nil)
         }
         guard let url = functionEndpoint(name: "validateInviteCode") else {
-            return (false, .network)
+            return (false, .network, nil)
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -1630,41 +1657,59 @@ class FirebaseService {
 
             if (200...299).contains(status) {
                 guard let json else {
-                    return (false, .serverError)
+                    return (false, .serverError, nil)
                 }
                 if json["valid"] as? Bool == true {
-                    return (true, nil)
+                    let kindRaw = json["kind"] as? String
+                    let kind = kindRaw.flatMap { InviteCodeKind(rawValue: $0) }
+                    return (true, nil, kind)
                 }
                 let raw = (json["reason"] as? String) ?? "server_error"
-                return (false, InviteCodeReason(rawValue: raw) ?? .serverError)
+                return (false, InviteCodeReason(rawValue: raw) ?? .serverError, nil)
             }
 
-            // Non-2xx: still try to interpret JSON (some errors return structured bodies).
+            // Non-2xx (including 429 rate-limited): the server still
+            // returns a structured `{ valid:false, reason:... }` body for
+            // most of these, so prefer the JSON if we can parse it.
             if let json, json["valid"] as? Bool == false {
                 let raw = (json["reason"] as? String) ?? "server_error"
-                return (false, InviteCodeReason(rawValue: raw) ?? .serverError)
+                return (false, InviteCodeReason(rawValue: raw) ?? .serverError, nil)
             }
 
+            #if DEBUG
             let bodyPreview = String(data: data, encoding: .utf8).map { String($0.prefix(300)) } ?? ""
             print("FirebaseService: validateInviteCode HTTP \(status) body=\(bodyPreview)")
-            return (false, .serverError)
+            #endif
+            return (false, .serverError, nil)
         } catch {
+            #if DEBUG
             print("FirebaseService: validateInviteCode network error: \(error.localizedDescription)")
-            return (false, .network)
+            #endif
+            return (false, .network, nil)
         }
     }
 
     /// Atomically redeem a previously-validated invite code for the current
-    /// signed-in user. Stamps `users/{uid}.invitedBy` server-side so the
-    /// client doesn't have to write that field from the unprivileged
-    /// profile-creation transaction.
-    func redeemInviteCode(_ code: String) async -> Bool {
-        guard let user = Auth.auth().currentUser else { return false }
+    /// signed-in user. Stamps `users/{uid}.invitedBy`, `invitedByUid`, and
+    /// `invitedByKind` server-side; for `personal` codes the server also
+    /// best-effort auto-friends the code's `createdByUid`.
+    func redeemInviteCode(_ code: String) async -> RedeemInviteResult {
+        guard let user = Auth.auth().currentUser else {
+            return RedeemInviteResult(redeemed: false, kind: nil, autoFriend: nil)
+        }
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard !trimmed.isEmpty else { return false }
-        guard let url = functionEndpoint(name: "redeemInviteCode") else { return false }
+        guard !trimmed.isEmpty else {
+            return RedeemInviteResult(redeemed: false, kind: nil, autoFriend: nil)
+        }
+        guard let url = functionEndpoint(name: "redeemInviteCode") else {
+            return RedeemInviteResult(redeemed: false, kind: nil, autoFriend: nil)
+        }
         let idToken: String
-        do { idToken = try await user.getIDToken() } catch { return false }
+        do {
+            idToken = try await user.getIDToken()
+        } catch {
+            return RedeemInviteResult(redeemed: false, kind: nil, autoFriend: nil)
+        }
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -1675,17 +1720,66 @@ class FirebaseService {
             let (data, response) = try await URLSession.shared.data(for: req)
             let http = response as? HTTPURLResponse
             guard http?.statusCode == 200 else {
+                #if DEBUG
                 let body = String(data: data, encoding: .utf8) ?? ""
                 print("FirebaseService: redeemInviteCode rejected status=\(http?.statusCode ?? -1) body=\(body)")
-                return false
+                #endif
+                return RedeemInviteResult(redeemed: false, kind: nil, autoFriend: nil)
             }
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return false
+                return RedeemInviteResult(redeemed: false, kind: nil, autoFriend: nil)
             }
-            return json["redeemed"] as? Bool == true
+            let ok = json["redeemed"] as? Bool == true
+            let kind = (json["kind"] as? String).flatMap { InviteCodeKind(rawValue: $0) }
+            let autoFriend = json["autoFriend"] as? String
+            return RedeemInviteResult(redeemed: ok, kind: kind, autoFriend: autoFriend)
         } catch {
+            #if DEBUG
             print("FirebaseService: redeemInviteCode error: \(error.localizedDescription)")
-            return false
+            #endif
+            return RedeemInviteResult(redeemed: false, kind: nil, autoFriend: nil)
+        }
+    }
+
+    /// Mint a fresh single-use personal invite code for the signed-in
+    /// user via the `generateInviteCode` Cloud Function. Returns `nil`
+    /// on any failure (unauth, rate limit, network, server error).
+    func generateInviteCode() async -> GeneratedInvite? {
+        guard let user = Auth.auth().currentUser else { return nil }
+        guard let url = functionEndpoint(name: "generateInviteCode") else { return nil }
+        let idToken: String
+        do { idToken = try await user.getIDToken() } catch { return nil }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Empty body — server doesn't take params today, but keep the
+        // POST + content-type so this can grow (e.g. campaign tag) later.
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [String: Any]())
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            guard status == 200 else {
+                #if DEBUG
+                let body = String(data: data, encoding: .utf8) ?? ""
+                print("FirebaseService: generateInviteCode rejected status=\(status) body=\(body)")
+                #endif
+                return nil
+            }
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  json["ok"] as? Bool == true,
+                  let code = json["code"] as? String, !code.isEmpty,
+                  let destinationURL = json["destinationURL"] as? String, !destinationURL.isEmpty else {
+                return nil
+            }
+            return GeneratedInvite(code: code, destinationURL: destinationURL)
+        } catch {
+            #if DEBUG
+            print("FirebaseService: generateInviteCode error: \(error.localizedDescription)")
+            #endif
+            return nil
         }
     }
 

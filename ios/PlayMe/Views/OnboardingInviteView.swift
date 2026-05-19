@@ -14,7 +14,9 @@ struct OnboardingInviteView: View {
     @State private var messageRecipient: OutgoingInvite?
     @State private var showShareSheet = false
     @State private var searchText = ""
+    @State private var inviteCode: String = ""
     @State private var inviteLink: String = ""
+    @State private var isMintingInvite = false
     @State private var gateErrorVisible = false
     /// Live username-search results. Mirrors the main-app AddFriendsView
     /// flow so a new user can add existing PlayMe users directly during
@@ -26,10 +28,10 @@ struct OnboardingInviteView: View {
     @FocusState private var searchFocused: Bool
 
     private var inviteBody: String {
-        let link = inviteLink.isEmpty
-            ? DeepLinkService.publicTestFlightInviteURL
-            : inviteLink
-        return "wanna do this? \(link)"
+        guard !inviteCode.isEmpty, !inviteLink.isEmpty else {
+            return "wanna do this? \(DeepLinkService.publicTestFlightInviteURL)"
+        }
+        return "wanna do this? I have an extra invite code \(inviteCode) — \(inviteLink)"
     }
 
     private var isActive: Bool { !searchText.isEmpty }
@@ -84,8 +86,13 @@ struct OnboardingInviteView: View {
             }
         }
         .task {
-            if let uid = Auth.auth().currentUser?.uid {
-                inviteLink = await DeepLinkService.shared.createInviteLink(userId: uid, username: username) ?? ""
+            if !isMintingInvite, inviteCode.isEmpty, Auth.auth().currentUser != nil {
+                isMintingInvite = true
+                if let invite = await DeepLinkService.shared.createPersonalInvite(for: username) {
+                    inviteCode = invite.code
+                    inviteLink = invite.shortURL
+                }
+                isMintingInvite = false
             }
             // If the user has already granted contacts previously (e.g. via
             // AddFriendsView), skip the pre-permission gate entirely.

@@ -20,7 +20,9 @@ struct PickFriendsView: View {
 
     @State private var search: String = ""
     @State private var inviteRecipient: OutgoingInvite?
+    @State private var inviteCode: String = ""
     @State private var inviteLink: String = ""
+    @State private var isMintingInvite = false
     @State private var visibleContactCount: Int = 20
     @FocusState private var searchFocused: Bool
 
@@ -29,10 +31,13 @@ struct PickFriendsView: View {
     private let contactPageSize = 20
 
     private var inviteBody: String {
-        let link = inviteLink.isEmpty
-            ? DeepLinkService.publicTestFlightInviteURL
-            : inviteLink
-        return "wanna do this? \(link)"
+        // Same wire format as `AddFriendsView`: per-recipient single-use
+        // personal code + ChottuLink shortlink. Falls back to a bare
+        // TestFlight URL while the code is still minting.
+        guard !inviteCode.isEmpty, !inviteLink.isEmpty else {
+            return "wanna do this? \(DeepLinkService.publicTestFlightInviteURL)"
+        }
+        return "wanna do this? I have an extra invite code \(inviteCode) — \(inviteLink)"
     }
 
     private var filteredContacts: [SimpleContact] {
@@ -134,9 +139,18 @@ struct PickFriendsView: View {
             }
         }
         .task {
-            if let uid = Auth.auth().currentUser?.uid,
-               let username = appState.currentUser?.username {
-                inviteLink = await DeepLinkService.shared.createInviteLink(userId: uid, username: username) ?? ""
+            // Onboarding gets its own personal invite code (same flow
+            // as AddFriendsView). Done lazily here so it's ready by the
+            // time the user taps "Add" on a contact.
+            if !isMintingInvite, inviteCode.isEmpty,
+               let username = appState.currentUser?.username,
+               Auth.auth().currentUser != nil {
+                isMintingInvite = true
+                if let invite = await DeepLinkService.shared.createPersonalInvite(for: username) {
+                    inviteCode = invite.code
+                    inviteLink = invite.shortURL
+                }
+                isMintingInvite = false
             }
         }
         .sheet(item: $inviteRecipient) { invite in

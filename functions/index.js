@@ -1614,14 +1614,52 @@ async function verifyAuthHeader(req) {
   }
 }
 
+// Invite-code constants shared by validate / redeem / generate.
+//
+// Schema for `inviteCodes/{CODE_UPPER}`:
+//   {
+//     // Original fields
+//     disabled?:   bool,
+//     redeemed?:   bool,
+//     redeemedBy?: string,         // last redeemer's uid (overwritten on multi-use)
+//     redeemedAt?: timestamp,
+//     expiresAt?:  timestamp,
+//     maxUses?:    int (default 1),
+//     useCount?:   int (default 0),
+//     // Phase B additions (all optional, backward-compatible)
+//     kind?:         "personal" | "creator" | "admin"   // default "personal"
+//     createdByUid?: string                              // attribution
+//     campaign?:     string                              // free-form tag
+//   }
+//
+// Fan-out by kind on redeem:
+//   personal → write users/{uid}.invitedByUid + auto-friend createdByUid
+//              (skipped silently if inviter is at friend cap or missing)
+//   creator  → write users/{uid}.invitedByUid + invitedByKind; no friendship
+//   admin    → write users/{uid}.invitedByKind only; no invitedByUid; no friendship
+const INVITE_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
+const INVITE_CODE_LENGTH = 8;
+const INVITE_KINDS = new Set(["personal", "creator", "admin"]);
+
+function inviteKindFromDoc(data) {
+  const raw = typeof data.kind === "string" ? data.kind : "personal";
+  return INVITE_KINDS.has(raw) ? raw : "personal";
+}
+
+function randomInviteCode() {
+  const bytes = crypto.randomBytes(INVITE_CODE_LENGTH);
+  let out = "";
+  for (let i = 0; i < INVITE_CODE_LENGTH; i++) {
+    out += INVITE_CODE_ALPHABET[bytes[i] % INVITE_CODE_ALPHABET.length];
+  }
+  return out;
+}
+
 // `validateInviteCode` (POST { code }) — non-destructive read used by the
 // onboarding invite gate to fail fast before we burn an SMS verification.
 // Does NOT mark the code redeemed; that happens inside `redeemInviteCode`
-// once the user actually completes signup. Codes live at
-// `inviteCodes/{CODE_UPPER}` with shape:
-//   { disabled?: bool, redeemed?: bool, redeemedBy?: string,
-//     redeemedAt?: ts,  expiresAt?: ts, maxUses?: int (default 1),
-//     useCount?: int }
+// once the user actually completes signup. On success returns the code
+// `kind` so the client can show kind-specific confirmation copy.
 exports.validateInviteCode = onRequest(async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).json({ valid: false, reason: "method_not_allowed" });
@@ -1676,7 +1714,7 @@ exports.validateInviteCode = onRequest(async (req, res) => {
       res.json({ valid: false, reason: "exhausted" });
       return;
     }
-    res.json({ valid: true });
+    res.json({ valid: true, kind: inviteKindFromDoc(data) });
   } catch (err) {
     console.log("validateInviteCode error:", err && err.message ? err.message : err);
     res.status(500).json({ valid: false, reason: "server_error" });
@@ -1723,8 +1761,22 @@ exports.cleanupPushDedupe = onSchedule(
 
 // `redeemInviteCode` (POST { code }) — atomic redeem called from the
 // client immediately after profile creation. Bumps `useCount` and stamps
-// `redeemedBy/redeemedAt`. Writes `users/{uid}.invitedBy` so analytics
-// can attribute the new account.
+// `redeemedBy/redeemedAt`. Then fans out by `kind`:
+//
+//   personal → auto-friend the code's `createdByUid` (best effort; skipped
+//              silently if the inviter is at their friend cap, doesn't
+//              exist, or matches the redeemer). Stamps `invitedByUid`.
+//   creator  → no friendship written, but stamps `invitedByUid` for
+//              attribution (e.g. "joined via Bobby's launch code").
+//   admin    → attribution only; no `invitedByUid`, no friendship.
+//
+// Response always includes `redeemed: true` on success plus optional
+// `autoFriend` field for personal codes:
+//   "applied"               — friend docs were written
+//   "skipped_inviter_at_cap"— inviter already at friendLimit
+//   "skipped_self"          — redeemer = creator (shouldn't happen)
+//   "skipped_inviter_missing"— inviter doc deleted/missing
+//   "n/a"                   — non-personal kind, no auto-friend attempted
 exports.redeemInviteCode = onRequest(async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).json({ redeemed: false, reason: "method_not_allowed" });
@@ -1747,7 +1799,7 @@ exports.redeemInviteCode = onRequest(async (req, res) => {
   const userRef = db.collection("users").doc(uid);
 
   try {
-    await db.runTransaction(async (txn) => {
+    const outcome = await db.runTransaction(async (txn) => {
       const codeSnap = await txn.get(codeRef);
       if (!codeSnap.exists) {
         const err = new Error("not_found");
@@ -1772,22 +1824,182 @@ exports.redeemInviteCode = onRequest(async (req, res) => {
         err.code = 409;
         throw err;
       }
+
+      const kind = inviteKindFromDoc(data);
+      const createdByUid = typeof data.createdByUid === "string" ? data.createdByUid : null;
+
+      // Determine auto-friend disposition. We read both user docs INSIDE
+      // the transaction so a concurrent friend add can't push the
+      // inviter over their cap between our cap-check and our write.
+      // Firestore transactions retry on concurrent writes to any read
+      // doc, so this is safe.
+      let autoFriend = "n/a";
+      let redeemerSnap = null;
+      let inviterSnap = null;
+      if (kind === "personal") {
+        if (!createdByUid) {
+          autoFriend = "skipped_inviter_missing";
+        } else if (createdByUid === uid) {
+          autoFriend = "skipped_self";
+        } else {
+          const inviterRef = db.collection("users").doc(createdByUid);
+          [redeemerSnap, inviterSnap] = await Promise.all([
+            txn.get(userRef),
+            txn.get(inviterRef),
+          ]);
+          if (!inviterSnap.exists) {
+            autoFriend = "skipped_inviter_missing";
+          } else {
+            const inviterData = inviterSnap.data() || {};
+            const fc = typeof inviterData.friendCount === "number" ? inviterData.friendCount : 0;
+            const fl = typeof inviterData.friendLimit === "number" ? inviterData.friendLimit : 8;
+            if (fc >= fl) {
+              autoFriend = "skipped_inviter_at_cap";
+            } else {
+              autoFriend = "applied";
+            }
+          }
+        }
+      }
+
+      // ----- Writes -----
       txn.update(codeRef, {
         useCount: useCount + 1,
         redeemedBy: uid,
         redeemedAt: admin.firestore.FieldValue.serverTimestamp(),
         redeemed: useCount + 1 >= maxUses,
       });
-      txn.set(userRef, {
+
+      // Build user-doc patch. Admin codes get no `invitedByUid` because
+      // there's no inviter to attribute to.
+      const userPatch = {
         invitedBy: code,
+        invitedByKind: kind,
+        invitedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
+      };
+      if (createdByUid && kind !== "admin") {
+        userPatch.invitedByUid = createdByUid;
+      }
+      txn.set(userRef, userPatch, { merge: true });
+
+      // Personal-kind auto-friend: write both sides of the friend pair.
+      // `onFriendCreated` will fan out friendCount bumps automatically.
+      if (autoFriend === "applied" && inviterSnap && redeemerSnap) {
+        const inviterRef = db.collection("users").doc(createdByUid);
+        const inviterData = inviterSnap.data() || {};
+        const redeemerData = redeemerSnap.data() || {};
+
+        const inviterFriendDoc = userRef.collection("friends").doc(createdByUid);
+        const redeemerFriendDoc = inviterRef.collection("friends").doc(uid);
+        const ts = admin.firestore.FieldValue.serverTimestamp();
+
+        txn.set(inviterFriendDoc, {
+          username: inviterData.username || "",
+          firstName: inviterData.firstName || "",
+          lastName: inviterData.lastName || "",
+          addedAt: ts,
+        });
+        txn.set(redeemerFriendDoc, {
+          username: redeemerData.username || "",
+          firstName: redeemerData.firstName || "",
+          lastName: redeemerData.lastName || "",
+          addedAt: ts,
+        });
+      }
+
+      return { kind, autoFriend };
     });
-    res.json({ redeemed: true });
+
+    res.json({
+      redeemed: true,
+      kind: outcome.kind,
+      autoFriend: outcome.autoFriend,
+    });
   } catch (err) {
     const status = err && typeof err.code === "number" ? err.code : 500;
     const reason = err && err.message ? err.message : "server_error";
     console.log("redeemInviteCode failed:", reason);
     res.status(status).json({ redeemed: false, reason });
+  }
+});
+
+// `generateInviteCode` (POST, auth required) — mints a fresh `personal`
+// invite code for the calling user. Returns `{ code, destinationURL }`
+// which the iOS client wraps in a ChottuLink shortlink via
+// `CLDynamicLinkBuilder` (same pattern as the existing referral link).
+//
+// Rate limit: 10 codes / UID / 24h. Generous for the friend-invite UX
+// (each personal invite consumes one because it's single-use) but cheap
+// to throttle abuse if a compromised account tries to mint a corpus of
+// codes.
+//
+// Collision handling: 5 retries on doc-already-exists. The 32-char
+// alphabet * 8 chars = ~1.1 trillion codes, so collisions are
+// astronomically rare. Failures past retry surface as `server_error`
+// rather than silently picking a "close enough" code.
+exports.generateInviteCode = onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).json({ ok: false, reason: "method_not_allowed" });
+    return;
+  }
+  const uid = await verifyAuthHeader(req);
+  if (!uid) {
+    res.status(401).json({ ok: false, reason: "unauthenticated" });
+    return;
+  }
+
+  const allowed = await consumeRateLimitToken("generateInviteCode", uid, {
+    max: 10,
+    windowSeconds: 86400,
+  });
+  if (!allowed) {
+    console.warn(
+      JSON.stringify({ event: "generate_invite_rate_limited", uid })
+    );
+    res.status(429).json({ ok: false, reason: "rate_limited" });
+    return;
+  }
+
+  const db = admin.firestore();
+  // Hard-coded for now. If you ever move the TestFlight join link, also
+  // update `DeepLinkService.publicTestFlightInviteURL` on iOS so the
+  // ChottuLink destination matches what we hand to the client.
+  const TESTFLIGHT_URL = "https://testflight.apple.com/join/yRycD1gD";
+
+  try {
+    let code = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidate = randomInviteCode();
+      const ref = db.collection("inviteCodes").doc(candidate);
+      const snap = await ref.get();
+      if (snap.exists) continue;
+      await ref.set({
+        kind: "personal",
+        createdByUid: uid,
+        redeemed: false,
+        useCount: 0,
+        maxUses: 1,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      code = candidate;
+      break;
+    }
+    if (!code) {
+      console.error(
+        JSON.stringify({ event: "generate_invite_collision_exhausted", uid })
+      );
+      res.status(500).json({ ok: false, reason: "server_error" });
+      return;
+    }
+
+    const destinationURL = `${TESTFLIGHT_URL}?code=${code}`;
+    res.json({ ok: true, code, destinationURL });
+  } catch (err) {
+    console.log(
+      "generateInviteCode failed:",
+      err && err.message ? err.message : err
+    );
+    res.status(500).json({ ok: false, reason: "server_error" });
   }
 });

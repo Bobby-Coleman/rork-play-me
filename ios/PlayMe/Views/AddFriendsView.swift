@@ -18,7 +18,9 @@ struct AddFriendsView: View {
 
     @State private var messageRecipient: MessageRecipient?
     @State private var showShareSheet = false
+    @State private var inviteCode: String = ""
     @State private var inviteLink: String = ""
+    @State private var isMintingInvite = false
 
     @State private var showFriendsList: Bool = true
     @State private var reportTarget: ReportTarget?
@@ -28,10 +30,17 @@ struct AddFriendsView: View {
     @FocusState private var searchFocused: Bool
 
     private var inviteBody: String {
-        let link = inviteLink.isEmpty
-            ? DeepLinkService.publicTestFlightInviteURL
-            : inviteLink
-        return "wanna do this? \(link)"
+        // Phase B: every share carries a single-use personal invite
+        // code + the ChottuLink shortlink. The recipient can either tap
+        // the link (deep-links straight into onboarding with the code
+        // auto-filled) or type the code manually if they got the
+        // message on a device that isn't the one they want to sign up
+        // on. Falls back to a bare TestFlight URL while the code is
+        // still minting (or if minting failed).
+        guard !inviteCode.isEmpty, !inviteLink.isEmpty else {
+            return "wanna do this? \(DeepLinkService.publicTestFlightInviteURL)"
+        }
+        return "wanna do this? I have an extra invite code \(inviteCode) — \(inviteLink)"
     }
 
     private var isActive: Bool { !searchText.isEmpty }
@@ -171,9 +180,21 @@ struct AddFriendsView: View {
             .toolbarBackground(.visible, for: .navigationBar)
         }
         .task {
-            if let uid = Auth.auth().currentUser?.uid,
-               let username = appState.currentUser?.username {
-                inviteLink = await DeepLinkService.shared.createInviteLink(userId: uid, username: username) ?? ""
+            // Mint the invite code lazily so we don't burn a code every
+            // time the user just glances at this view. We do it
+            // up-front here (rather than on share tap) so the share
+            // sheet is instantly ready by the time the user taps a
+            // contact; if they never share, the code goes unused — at
+            // 10/UID/24h that's a non-issue.
+            if !isMintingInvite, inviteCode.isEmpty,
+               let username = appState.currentUser?.username,
+               Auth.auth().currentUser != nil {
+                isMintingInvite = true
+                if let invite = await DeepLinkService.shared.createPersonalInvite(for: username) {
+                    inviteCode = invite.code
+                    inviteLink = invite.shortURL
+                }
+                isMintingInvite = false
             }
 
             let granted = await ContactsService.shared.requestAccess()

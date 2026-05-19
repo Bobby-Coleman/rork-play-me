@@ -280,6 +280,16 @@ class AppState {
     var inviteCode: String = ""
     /// Last invite-code validation error message surfaced in the gate UI.
     var inviteCodeError: String? = nil
+    /// Resolved kind of the validated code (personal | creator | admin).
+    /// Drives kind-specific copy on the gate confirmation and the
+    /// post-redeem messaging (e.g. "you'll be friends with X" vs
+    /// "joined via Bobby's launch code"). Nil until validation succeeds.
+    var inviteCodeKind: FirebaseService.InviteCodeKind? = nil
+    /// Outcome of the post-register redeem. Server tells us whether the
+    /// personal-code auto-friend was applied or skipped (inviter at cap,
+    /// missing, etc.). Surfaces a soft message after registration if not
+    /// `applied`. Nil until redeem completes.
+    var inviteRedeemAutoFriend: String? = nil
     /// Genres the user picked on the taste screen. Persisted to
     /// `users/{uid}.tasteGenres` once registration succeeds.
     var tasteGenres: [String] = []
@@ -344,13 +354,17 @@ class AppState {
 
     /// Validates an invite code via the server callable. Stores a
     /// human-readable reason on `inviteCodeError` if validation failed
-    /// so the gate UI can surface it inline.
+    /// so the gate UI can surface it inline. Also stashes the resolved
+    /// `kind` so the gate can show kind-specific confirmation copy
+    /// (e.g. "Joined via Bobby's launch code").
     func validateInviteCode(_ code: String) async -> Bool {
         inviteCodeError = nil
         let result = await FirebaseService.shared.validateInviteCode(code)
         if result.valid {
+            inviteCodeKind = result.kind
             return true
         }
+        inviteCodeKind = nil
         inviteCodeError = Self.message(for: result.reason)
         return false
     }
@@ -362,6 +376,7 @@ class AppState {
         case .expired:         return "That code has expired."
         case .exhausted:       return "That code is already used."
         case .missingCode:     return "Enter your invite code."
+        case .rateLimited:     return "Too many attempts. Please wait a few minutes and try again."
         case .network:         return "We couldn't reach the server. Check your connection."
         case .methodNotAllowed,
              .serverError,
@@ -426,10 +441,20 @@ class AppState {
         currentUser = AppUser(id: uid, firstName: firstName, lastName: lastName, username: username.lowercased(), phone: phoneNumber)
 
         // Redeem the invite code now that the profile exists. Server-side
-        // bumps the use count and stamps `users/{uid}.invitedBy`.
+        // bumps the use count, stamps attribution on the user doc, and
+        // (for `personal` codes) best-effort auto-friends the inviter.
+        // We capture the autoFriend disposition so the UI can show a
+        // soft "your friend is at capacity" message when applicable.
         if !inviteCode.isEmpty {
-            _ = await firebase.redeemInviteCode(inviteCode)
+            let result = await firebase.redeemInviteCode(inviteCode)
+            inviteRedeemAutoFriend = result.autoFriend
+            // If the server auto-friended, refresh our local friend list
+            // so the new friendship appears immediately on first paint.
+            if result.autoFriend == "applied" {
+                await refreshFriends()
+            }
         }
+        DeepLinkService.shared.clearPendingInviteCode()
 
         // The `onUserProfileCreated` Cloud Function will fire automatically from
         // the users/{uid} doc creation in `claimUsernameAndCreateProfile`. We
@@ -440,30 +465,7 @@ class AppState {
         // became eligible.
         await firebase.requestPendingSharesClaim(force: true)
 
-        await processReferralIfNeeded(currentUID: uid)
-
         return true
-    }
-
-    func processReferralIfNeeded(currentUID: String) async {
-        guard let referrerId = DeepLinkService.shared.pendingReferrerId,
-              !referrerId.isEmpty,
-              referrerId != currentUID else {
-            DeepLinkService.shared.clearPendingReferrer()
-            return
-        }
-
-        if let profile = await FirebaseService.shared.fetchUserProfile(uid: referrerId) {
-            await FirebaseService.shared.addFriend(
-                friendUID: referrerId,
-                friendUsername: profile.username,
-                friendFirstName: profile.firstName,
-                friendLastName: profile.lastName
-            )
-            await refreshFriends()
-        }
-
-        DeepLinkService.shared.clearPendingReferrer()
     }
 
     func loadData() async {
@@ -1435,6 +1437,15 @@ class AppState {
         mixtapeStore.clear()
         isOnboarded = false
         isBackendAvailable = false
+        // Phase B: reset invite-code onboarding state so a returning
+        // user starting a new signup on this device doesn't inherit a
+        // stale gate value or pending deep-link code.
+        inviteCode = ""
+        inviteCodeError = nil
+        inviteCodeKind = nil
+        inviteRedeemAutoFriend = nil
+        DeepLinkService.shared.clearPendingInviteCode()
+        DeepLinkService.shared.clearPendingReferrer()
         AudioPlayerService.shared.stop()
         FirebaseService.shared.signOut()
         UserDefaults.standard.removeObject(forKey: "currentUserId")
