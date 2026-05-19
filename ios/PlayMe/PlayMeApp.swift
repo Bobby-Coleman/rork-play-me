@@ -97,11 +97,22 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         FirebaseApp.configure()
 
-        let config = CLConfiguration(
-            apiKey: "c_app_3GyFRIbGUgB7iWYwMPEOM2Q7ogTMxPSf",
-            delegate: self
-        )
-        ChottuLink.initialize(config: config)
+        // ChottuLink API key is loaded from `Config.plist` (gitignored)
+        // or the runtime environment so it never ships in the public
+        // repo. When unset, deep-link resolution falls back to the OS
+        // share path silently — initialize is still safe to call.
+        let chottuKey = Config.CHOTTU_LINK_API_KEY
+        if !chottuKey.isEmpty {
+            let config = CLConfiguration(
+                apiKey: chottuKey,
+                delegate: self
+            )
+            ChottuLink.initialize(config: config)
+        } else {
+            #if DEBUG
+            print("[ChottuLink] no API key configured — deep-link resolution disabled")
+            #endif
+        }
 
         // Defer push / notification-center wiring to the next main run-loop
         // turn. Touching `UNUserNotificationCenter` and registering for

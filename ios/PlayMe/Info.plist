@@ -41,5 +41,14 @@
 	</array>
 	<key>UIRequiresFullScreen</key>
 	<true/>
+	<!--
+		Privacy policy URL surfaced in Settings → Privacy and required
+		for App Store review (Guideline 5.1.1). Update this URL to point
+		at the live hosted policy when it ships.
+	-->
+	<key>NSPrivacyPolicyURL</key>
+	<string>https://playme.app/privacy</string>
+	<key>NSTermsOfServiceURL</key>
+	<string>https://playme.app/terms</string>
 </dict>
 </plist>

@@ -435,7 +435,10 @@ class AppState {
         // the users/{uid} doc creation in `claimUsernameAndCreateProfile`. We
         // also write a claimRequest as belt-and-suspenders in case the trigger
         // missed (e.g. if the profile doc already existed from a prior signup).
-        await firebase.requestPendingSharesClaim()
+        // `force: true` — registration handoff always re-claims even if a
+        // previous session already ran one, because the user's phone just
+        // became eligible.
+        await firebase.requestPendingSharesClaim(force: true)
 
         await processReferralIfNeeded(currentUID: uid)
 
@@ -836,12 +839,18 @@ class AppState {
     func sendSongToPendingContact(_ song: Song, contact: SimpleContact, note: String?) async -> Bool {
         guard currentUser != nil else { return false }
         guard let e164 = PhoneNormalizer.normalize(contact.phoneNumber) else {
+            #if DEBUG
             print("AppState: event=pending_share_queue_failed reason=invalid_phone raw=\(contact.phoneNumber)")
+            #endif
             queuedContactError = "We couldn't read \(contact.firstName)'s phone number."
             clearQueuedContactFeedbackSoon()
             return false
         }
+        #if DEBUG
         print("AppState: event=pending_share_queue_attempt contact=\(contact.fullName) raw=\(contact.phoneNumber) normalized=\(e164)")
+        #else
+        print("AppState: event=pending_share_queue_attempt")
+        #endif
 
         let enriched = await enrichSongWithSpotifyURI(song)
         let result = await FirebaseService.shared.saveQueuedShare(
@@ -977,6 +986,12 @@ class AppState {
         if !serverFriends.isEmpty {
             friends = serverFriends.filter { !blockedUserIds.contains($0.id) }
         }
+        // Friend cap is derived from the public user doc which is
+        // updated by the `onFriendCreated` / `onFriendDeleted` Cloud
+        // Function triggers. Refresh alongside the friends list so the
+        // "X of Y friends" hint stays in sync without an extra round
+        // trip for every screen that surfaces it.
+        await refreshFriendCap()
     }
 
     // MARK: - Friend Requests
@@ -1158,11 +1173,54 @@ class AppState {
     }
 
     /// Accept an incoming friend request; refreshes `friends` so the
-    /// accepted user shows up in the friends list right away.
-    func acceptFriendRequest(_ user: AppUser) async {
-        await FirebaseService.shared.acceptFriendRequest(from: user)
-        incomingRequests.removeAll { $0.id == user.id }
-        await refreshFriends()
+    /// accepted user shows up in the friends list right away. Returns
+    /// the result so the calling view can surface a "you're at your
+    /// friend limit" upsell when the per-user cap is hit.
+    @discardableResult
+    func acceptFriendRequest(_ user: AppUser) async -> FirebaseService.AcceptFriendResult {
+        let result = await FirebaseService.shared.acceptFriendRequestChecked(from: user)
+        switch result {
+        case .success:
+            incomingRequests.removeAll { $0.id == user.id }
+            await refreshFriends()
+            await refreshFriendCap()
+        case .atCap(let limit):
+            // Surface a soft message — leave the request in the inbox
+            // so the user can either decline it or remove an existing
+            // friend and retry.
+            friendCapMessage = "You've reached your \(limit)-friend limit. Remove a friend or upgrade to add more."
+            clearFriendCapMessageSoon()
+        case .failed:
+            break
+        }
+        return result
+    }
+
+    /// Live snapshot of the current user's friend cap status. Defaults
+    /// to `nil` until the first refresh lands. Used by AddFriends and
+    /// the request list to gate the accept button. Tracked by the
+    /// `@Observable` macro on the enclosing class — no `@Published`
+    /// needed.
+    var friendCap: FirebaseService.FriendCapStatus?
+
+    /// User-facing toast surfaced when an accept attempt fails because
+    /// of the friend cap. Auto-cleared after a few seconds.
+    var friendCapMessage: String?
+
+    private var friendCapMessageClearTask: Task<Void, Never>?
+
+    private func clearFriendCapMessageSoon() {
+        friendCapMessageClearTask?.cancel()
+        friendCapMessageClearTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            self?.friendCapMessage = nil
+        }
+    }
+
+    func refreshFriendCap() async {
+        if let cap = await FirebaseService.shared.loadFriendCapStatus() {
+            self.friendCap = cap
+        }
     }
 
     func declineFriendRequest(_ user: AppUser) async {

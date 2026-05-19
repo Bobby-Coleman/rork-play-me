@@ -1,8 +1,10 @@
 const { onRequest } = require("firebase-functions/v2/https");
 const {
   onDocumentCreated,
+  onDocumentDeleted,
   onDocumentUpdated,
 } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const functionsV1 = require("firebase-functions/v1");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
@@ -208,6 +210,68 @@ async function shouldSendPush(key, ttlHours = 24) {
     });
   } catch (err) {
     console.error("push dedupe failed open:", err.message);
+    return true;
+  }
+}
+
+// --------------- Rate limiting (per-IP + per-UID) ---------------
+//
+// Lightweight Firestore-backed token-bucket throttle used by HTTP
+// callables that don't otherwise enforce a quota. Buckets live at
+// `rateLimits/{namespace}__{key}` and store `count` + `resetAt`.
+// Buckets reset at `resetAt`; counts above the cap return false so
+// the caller can respond 429. The throttle deliberately "fails open"
+// on read errors so a Firestore outage doesn't lock new users out of
+// onboarding — abuse is still gated by Firebase Auth's own SMS
+// limits + invite code checks.
+//
+// The IP-based variant is best-effort — Cloud Functions HTTP runs
+// behind a proxy that sets `x-forwarded-for`; the leftmost entry is
+// the original client. This is sufficient to slow down casual abuse;
+// determined attackers behind rotating IPs still need an invite code
+// and a real phone number to do harm.
+function clientIPFor(req) {
+  const fwd = req.headers["x-forwarded-for"];
+  if (typeof fwd === "string" && fwd.length > 0) {
+    return fwd.split(",")[0].trim();
+  }
+  return req.ip || "unknown";
+}
+
+async function consumeRateLimitToken(namespace, key, opts = {}) {
+  if (!namespace || !key) return true;
+  const max = typeof opts.max === "number" ? opts.max : 10;
+  const windowSeconds = typeof opts.windowSeconds === "number" ? opts.windowSeconds : 60;
+  const safeKey = crypto.createHash("sha256").update(key).digest("hex");
+  const ref = admin
+    .firestore()
+    .collection("rateLimits")
+    .doc(`${namespace}__${safeKey}`);
+  try {
+    return await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const now = Date.now();
+      const data = snap.exists ? snap.data() : null;
+      const resetAtMs = data?.resetAt?.toMillis?.() || 0;
+      if (!data || resetAtMs <= now) {
+        tx.set(ref, {
+          count: 1,
+          resetAt: admin.firestore.Timestamp.fromMillis(now + windowSeconds * 1000),
+          namespace,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return true;
+      }
+      const count = typeof data.count === "number" ? data.count : 0;
+      if (count >= max) return false;
+      tx.update(ref, {
+        count: count + 1,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return true;
+    });
+  } catch (err) {
+    console.error(`rate limit ${namespace} failed open:`, err.message);
     return true;
   }
 }
@@ -467,6 +531,114 @@ exports.onNewFriendRequest = onDocumentCreated(
       collapseId: `req-${fromUID}`,
       threadId: "friend-requests",
     });
+  }
+);
+
+// --------------- Friend count maintenance + hard cap ---------------
+//
+// Two-tier enforcement of the per-user friend cap:
+//
+//  1) Soft cap (rules-level): `firestore.rules`'s `friends/{friendId}`
+//     create rule checks `friendCount < friendLimit` BEFORE accepting
+//     the write. This blocks the obvious case where the user is
+//     already at their cap.
+//
+//  2) Hard cap (this function): a brief race window exists where two
+//     near-simultaneous accept-friend-request writes could each see
+//     `friendCount = 7` and pass the rule, landing the user at 9.
+//     `onFriendCreated` is the safety net: after the write lands it
+//     re-reads the current count, and if it's > limit it removes the
+//     most recently-added friend doc from both sides. The rule's
+//     soft cap means this is exceptionally rare; the safety net
+//     guarantees the invariant always converges to <= limit.
+//
+// `friendLimit` defaults to 8 and is stored on the user's `users/{uid}`
+// doc. Premium subscribers (or other elevated tiers) get a higher
+// limit by setting this field server-side via the Admin SDK.
+
+const DEFAULT_FRIEND_LIMIT = 8;
+
+exports.onFriendCreated = onDocumentCreated(
+  "users/{userId}/friends/{friendId}",
+  async (event) => {
+    const { userId, friendId } = event.params;
+    if (!userId || !friendId || userId === friendId) return;
+
+    const db = admin.firestore();
+    const userRef = db.collection("users").doc(userId);
+
+    // Increment first so the soft cap on the NEXT write sees the
+    // post-increment count.
+    try {
+      await userRef.set(
+        {
+          friendCount: admin.firestore.FieldValue.increment(1),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      console.error("onFriendCreated: friendCount increment failed:", err.message);
+      return;
+    }
+
+    // Hard cap check. Re-read the user doc and, if the count now
+    // exceeds the per-user limit, undo this specific friend doc on
+    // both sides. The race-loser is the friendship that lost the
+    // tie — last write to arrive. Acceptable UX for an edge case
+    // that should occur < 0.01% of the time.
+    try {
+      const snap = await userRef.get();
+      const data = snap.data() || {};
+      const count = typeof data.friendCount === "number" ? data.friendCount : 0;
+      const limit =
+        typeof data.friendLimit === "number" ? data.friendLimit : DEFAULT_FRIEND_LIMIT;
+      if (count <= limit) return;
+
+      console.log(
+        JSON.stringify({
+          event: "friend_cap_exceeded",
+          userId,
+          friendId,
+          count,
+          limit,
+        })
+      );
+
+      const batch = db.batch();
+      batch.delete(userRef.collection("friends").doc(friendId));
+      batch.delete(
+        db.collection("users").doc(friendId).collection("friends").doc(userId)
+      );
+      await batch.commit();
+      // The companion onFriendDeleted triggers will decrement both
+      // sides' friendCount back into range.
+    } catch (err) {
+      console.error("onFriendCreated: hard cap check failed:", err.message);
+    }
+  }
+);
+
+exports.onFriendDeleted = onDocumentDeleted(
+  "users/{userId}/friends/{friendId}",
+  async (event) => {
+    const { userId } = event.params;
+    if (!userId) return;
+    try {
+      await admin
+        .firestore()
+        .collection("users")
+        .doc(userId)
+        .set(
+          {
+            friendCount: admin.firestore.FieldValue.increment(-1),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+    } catch (err) {
+      console.error("onFriendDeleted: friendCount decrement failed:", err.message);
+    }
   }
 );
 
@@ -996,173 +1168,51 @@ const spotifyClientSecret = defineSecret("SPOTIFY_CLIENT_SECRET");
 
 const SPOTIFY_CLIENT_ID = "10ac0a719f3e4135a2d3fd857c67d0f6";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
-const REDIRECT_URI = "playme://spotify-callback";
 
-exports.swap = onRequest({ secrets: [spotifyClientSecret] }, async (req, res) => {
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed" });
-    return;
-  }
+// -------- Legacy Spotify OAuth endpoints (DEPRECATED) --------
+//
+// `swap`, `refresh`, `getTokens`, `auth` are leftover from an earlier
+// iteration where Spotify served as the primary OAuth identity provider.
+// The iOS client does NOT call these in the current shipping flow —
+// Spotify is server-resolved via `resolveSpotifyTrack` (Firebase
+// ID-token-auth'd) and Spotify-as-Firebase-identity isn't used at all.
+//
+// They are deliberately hard-disabled here rather than deleted to
+// avoid surprising any old TestFlight build still in the wild that
+// might call them. Restoring them requires re-introducing real
+// authentication + App Check.
+//
+// All four return 410 Gone with a clear message.
 
-  const code = req.body.code;
-  if (!code) {
-    res.status(400).json({ error: "Missing authorization code" });
-    return;
-  }
+function rejectDeprecatedSpotifyEndpoint(req, res, name) {
+  console.warn(
+    JSON.stringify({
+      event: "deprecated_spotify_endpoint_called",
+      endpoint: name,
+      ip: clientIPFor(req),
+    })
+  );
+  res.status(410).json({
+    error: "endpoint_disabled",
+    detail:
+      "This Spotify OAuth endpoint has been disabled. Use the in-app Spotify deep link or the resolveSpotifyTrack callable.",
+  });
+}
 
-  try {
-    const body = new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: REDIRECT_URI,
-      client_id: SPOTIFY_CLIENT_ID,
-      client_secret: spotifyClientSecret.value(),
-    });
-
-    const response = await fetchWithTimeout(SPOTIFY_TOKEN_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error("swap: Spotify token exchange failed", response.status, data?.error);
-      res.status(response.status).json({ error: "Token swap failed" });
-      return;
-    }
-
-    const codeHash = crypto.createHash("sha256").update(code).digest("hex");
-    await admin.firestore().collection("tokenCache").doc(codeHash).set({
-      access_token: data.access_token,
-      refresh_token: data.refresh_token,
-      expires_in: data.expires_in,
-      created_at: Date.now(),
-    });
-
-    res.json(data);
-  } catch (err) {
-    console.error("swap: failed:", err.message);
-    res.status(500).json({ error: "Token swap failed" });
-  }
+exports.swap = onRequest(async (req, res) => {
+  rejectDeprecatedSpotifyEndpoint(req, res, "swap");
 });
 
-exports.refresh = onRequest({ secrets: [spotifyClientSecret] }, async (req, res) => {
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed" });
-    return;
-  }
-
-  const refreshToken = req.body.refresh_token;
-  if (!refreshToken) {
-    res.status(400).json({ error: "Missing refresh token" });
-    return;
-  }
-
-  try {
-    const body = new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: SPOTIFY_CLIENT_ID,
-      client_secret: spotifyClientSecret.value(),
-    });
-
-    const response = await fetchWithTimeout(SPOTIFY_TOKEN_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error("refresh: Spotify token refresh failed", response.status, data?.error);
-      res.status(response.status).json({ error: "Token refresh failed" });
-      return;
-    }
-
-    res.json(data);
-  } catch (err) {
-    console.error("refresh: failed:", err.message);
-    res.status(500).json({ error: "Token refresh failed" });
-  }
+exports.refresh = onRequest(async (req, res) => {
+  rejectDeprecatedSpotifyEndpoint(req, res, "refresh");
 });
 
 exports.getTokens = onRequest(async (req, res) => {
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed" });
-    return;
-  }
-
-  const code = req.body.code;
-  if (!code) {
-    res.status(400).json({ error: "Missing code" });
-    return;
-  }
-
-  const codeHash = crypto.createHash("sha256").update(code).digest("hex");
-  const doc = await admin.firestore().collection("tokenCache").doc(codeHash).get();
-
-  if (!doc.exists) {
-    res.status(404).json({ error: "Tokens not found" });
-    return;
-  }
-
-  const tokens = doc.data();
-  await admin.firestore().collection("tokenCache").doc(codeHash).delete();
-  res.json({
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    expires_in: tokens.expires_in,
-  });
+  rejectDeprecatedSpotifyEndpoint(req, res, "getTokens");
 });
 
-exports.auth = onRequest({ secrets: [spotifyClientSecret] }, async (req, res) => {
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed" });
-    return;
-  }
-
-  const accessToken = req.body.access_token;
-  if (!accessToken) {
-    res.status(400).json({ error: "Missing access_token" });
-    return;
-  }
-
-  try {
-    const profileRes = await fetchWithTimeout("https://api.spotify.com/v1/me", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    if (!profileRes.ok) {
-      res.status(401).json({ error: "Invalid Spotify access token" });
-      return;
-    }
-
-    const profile = await profileRes.json();
-    const spotifyUserId = profile.id;
-    const uid = `spotify:${spotifyUserId}`;
-
-    try {
-      await admin.auth().getUser(uid);
-    } catch {
-      await admin.auth().createUser({
-        uid,
-        displayName: profile.display_name || spotifyUserId,
-      });
-    }
-
-    const firebaseToken = await admin.auth().createCustomToken(uid);
-
-    res.json({
-      firebase_token: firebaseToken,
-      spotify_uid: spotifyUserId,
-      display_name: profile.display_name || spotifyUserId,
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Auth failed", details: err.message });
-  }
+exports.auth = onRequest(async (req, res) => {
+  rejectDeprecatedSpotifyEndpoint(req, res, "auth");
 });
 
 // --------------- Spotify Track Resolution (Client Credentials) ---------------
@@ -1394,6 +1444,42 @@ exports.resolveSpotifyTrack = onRequest({ secrets: [spotifyClientSecret] }, asyn
   const matchedTitle = best.name || "";
   const matchedArtist = (best.artists || []).map((a) => a.name || "").join(", ");
 
+  // Persist into the global `spotifyResolutions` cache server-side so
+  // every other client that asks for the same song gets the answer
+  // without re-hitting Spotify. The collection is now admin-write-only
+  // (see firestore.rules) — this is the canonical writer. Failure to
+  // cache is logged but does not affect the response, since the
+  // resolution itself succeeded.
+  if (amURL) {
+    try {
+      const cacheKey = crypto
+        .createHash("sha256")
+        .update(amURL)
+        .digest("hex");
+      await admin
+        .firestore()
+        .collection("spotifyResolutions")
+        .doc(cacheKey)
+        .set(
+          {
+            trackId,
+            spotifyURL,
+            amURL,
+            matchedTitle,
+            matchedArtist,
+            resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+            source: "cloudfn",
+          },
+          { merge: true }
+        );
+    } catch (err) {
+      console.error(
+        "resolveSpotifyTrack: cache write failed:",
+        err && err.message ? err.message : err
+      );
+    }
+  }
+
   console.log(`resolveSpotifyTrack: ok title="${title}" artist="${artist}" → trackId=${trackId} matched="${matchedTitle}" by "${matchedArtist}"`);
   res.json({ trackId, spotifyURL, matchedTitle, matchedArtist });
 });
@@ -1541,6 +1627,27 @@ exports.validateInviteCode = onRequest(async (req, res) => {
     res.status(405).json({ valid: false, reason: "method_not_allowed" });
     return;
   }
+
+  // The onboarding gate is the one endpoint we can't strictly require
+  // a Firebase Bearer token on — the user hasn't signed in yet. We
+  // rate-limit by client IP instead: 20 checks per IP per 10 minutes
+  // is generous for legitimate "did I typo my code?" retries and
+  // brutal for brute force (each guess is upper-cased + has limited
+  // entropy, so 20/600s makes exhausting the code space economically
+  // infeasible).
+  const ip = clientIPFor(req);
+  const allowed = await consumeRateLimitToken("validateInviteCode", ip, {
+    max: 20,
+    windowSeconds: 600,
+  });
+  if (!allowed) {
+    console.warn(
+      JSON.stringify({ event: "validate_invite_rate_limited", ip })
+    );
+    res.status(429).json({ valid: false, reason: "rate_limited" });
+    return;
+  }
+
   const body = inviteRequestBody(req);
   const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
   if (!code) {
@@ -1575,6 +1682,44 @@ exports.validateInviteCode = onRequest(async (req, res) => {
     res.status(500).json({ valid: false, reason: "server_error" });
   }
 });
+
+// --------------- Scheduled cleanup: pushDedupe TTL ---------------
+//
+// `pushDedupe` docs are written by `shouldSendPush` with a 24h
+// `expiresAt`. Nothing reads them after their dedupe window passes,
+// but they accumulate indefinitely without a sweeper. This scheduled
+// job runs once a day and deletes anything whose `expiresAt` is in
+// the past. Bounded batch size keeps invocations short.
+exports.cleanupPushDedupe = onSchedule(
+  {
+    schedule: "every 24 hours",
+    timeZone: "Etc/UTC",
+    memory: "256MiB",
+  },
+  async () => {
+    const db = admin.firestore();
+    const now = admin.firestore.Timestamp.now();
+    let totalDeleted = 0;
+    // Page in chunks so we don't try to delete millions in one shot
+    // if the table is very stale on first deploy.
+    for (let i = 0; i < 20; i++) {
+      const snap = await db
+        .collection("pushDedupe")
+        .where("expiresAt", "<", now)
+        .limit(500)
+        .get();
+      if (snap.empty) break;
+      const batch = db.batch();
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+      totalDeleted += snap.size;
+      if (snap.size < 500) break;
+    }
+    if (totalDeleted > 0) {
+      console.log(`cleanupPushDedupe: deleted ${totalDeleted} expired entries`);
+    }
+  }
+);
 
 // `redeemInviteCode` (POST { code }) — atomic redeem called from the
 // client immediately after profile creation. Bumps `useCount` and stamps

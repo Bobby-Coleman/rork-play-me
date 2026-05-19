@@ -4,3 +4,10 @@ functions/scripts/service-account.json
 .env
 .expo
 .specstory
+
+# Runtime secrets — never commit. The CI build generates the
+# production `Config.plist` from a secret store; local devs copy
+# `Config.plist.template` to `Config.plist` and fill in their dev
+# values (ChottuLink API key, optional Songlink key).
+ios/PlayMe/Config.plist
+.DS_Store

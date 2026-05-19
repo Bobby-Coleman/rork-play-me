@@ -65,18 +65,41 @@ struct AddFriendsView: View {
                     VStack(alignment: .leading, spacing: 0) {
 
                         // MARK: - Header
-                        Text("\(appState.friends.count) friends")
+                        // Header now includes the friend cap so users always
+                        // know how many slots they have left. When the cap is
+                        // reached we also show a soft toast on accept attempts.
+                        let cap = appState.friendCap
+                        let countText: String = {
+                            if let cap {
+                                return "\(cap.count) of \(cap.limit) friends"
+                            }
+                            return "\(appState.friends.count) friends"
+                        }()
+                        Text(countText)
                             .font(.system(size: 24, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.top, 4)
                             .padding(.bottom, 2)
 
-                        Text("Add your friends")
+                        Text(cap?.isAtCap == true
+                             ? "You've reached your friend limit"
+                             : "Add your friends")
                             .font(.system(size: 14))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.white.opacity(cap?.isAtCap == true ? 0.7 : 0.5))
                             .frame(maxWidth: .infinity)
                             .padding(.bottom, 16)
+
+                        if let msg = appState.friendCapMessage {
+                            Text(msg)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Color.orange)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 12)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
 
                         // MARK: - Search bar (always visible, at the top)
                         // Moved above the friend requests / your friends
@@ -580,18 +603,24 @@ struct AddFriendsView: View {
             Spacer()
 
             HStack(spacing: 8) {
+                let atCap = appState.friendCap?.isAtCap == true
                 Button {
                     Task { await appState.acceptFriendRequest(user) }
                 } label: {
-                    Text("Accept")
+                    Text(atCap ? "Full" : "Accept")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                        .background(
+                            atCap
+                            ? Color.white.opacity(0.15)
+                            : Color(red: 0.76, green: 0.38, blue: 0.35)
+                        )
                         .clipShape(.capsule)
                 }
                 .buttonStyle(.plain)
+                .disabled(atCap)
 
                 Button {
                     Task { await appState.declineFriendRequest(user) }

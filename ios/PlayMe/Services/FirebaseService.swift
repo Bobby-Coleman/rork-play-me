@@ -125,6 +125,7 @@ class FirebaseService {
         try? Auth.auth().signOut()
         firebaseUID = nil
         verificationID = nil
+        clearClaimSession()
     }
 
     // MARK: - FCM Token
@@ -475,32 +476,29 @@ class FirebaseService {
         }
     }
 
-    /// Upserts a resolution into the global cache. Idempotent — calling
-    /// it twice for the same URL just overwrites the metadata (resolvedAt
-    /// / source) without changing the trackId. `source` is freeform ("spotify_api",
-    /// "songlink") and exists purely for debugging / analytics.
+    /// Client-side resolution writes are now NO-OPs. The
+    /// `spotifyResolutions` collection is admin-write-only as of the
+    /// security hardening pass (firestore.rules locks `create`/`update`),
+    /// because letting any signed-in client overwrite the global cache
+    /// is a cache-poisoning vector (one user could redirect every
+    /// other user's "Open in Spotify" click to a spam URL). The
+    /// authoritative writer is now the `resolveSpotifyTrack` Cloud
+    /// Function, which persists the result server-side after a
+    /// successful Spotify search. For the Songlink fallback path the
+    /// client just caches locally; the global cache fills naturally
+    /// as users hit the Cloud Function for the same songs.
+    ///
+    /// The signature is preserved so existing call sites compile
+    /// untouched.
     func writeSpotifyResolution(
         normalizedAmURL: String,
         trackId: String,
         spotifyURL: String,
         source: String
     ) async {
-        guard firebaseUID != nil else { return }
-        guard !trackId.isEmpty, !spotifyURL.isEmpty, !normalizedAmURL.isEmpty else { return }
-        let docId = Self.resolutionDocId(forNormalizedAmURL: normalizedAmURL)
-        let payload: [String: Any] = [
-            "trackId": trackId,
-            "spotifyURL": spotifyURL,
-            "resolvedAt": FieldValue.serverTimestamp(),
-            "source": source,
-            "amURL": normalizedAmURL
-        ]
-        do {
-            try await db.collection("spotifyResolutions").document(docId).setData(payload, merge: true)
-            print("FirebaseService: event=spotify_resolution_written docId=\(docId) source=\(source) trackId=\(trackId)")
-        } catch {
-            print("FirebaseService: event=spotify_resolution_write_failed docId=\(docId) error=\(error.localizedDescription)")
-        }
+        #if DEBUG
+        print("FirebaseService: event=spotify_resolution_skip_client_write source=\(source) trackId=\(trackId)")
+        #endif
     }
 
     func loadSentShares() async -> [SongShare] {
@@ -925,6 +923,37 @@ class FirebaseService {
 
     // MARK: - Friends
 
+    /// Snapshot of the current user's friend-cap state. `count` and `limit`
+    /// are both maintained server-side: count by the `onFriendCreated` /
+    /// `onFriendDeleted` Cloud Function triggers, limit by an admin
+    /// write (default 8, elevated per-account for premium tiers).
+    struct FriendCapStatus {
+        let count: Int
+        let limit: Int
+        var isAtCap: Bool { count >= limit }
+    }
+
+    /// Fast lookup of the current user's friend cap status from their
+    /// public profile doc. Returns `nil` when the user is not signed in
+    /// or the doc is missing. Falls back to `Config.DEFAULT_FRIEND_LIMIT`
+    /// when the per-user `friendLimit` field is absent (which is the
+    /// common case for accounts created before the cap landed).
+    func loadFriendCapStatus() async -> FriendCapStatus? {
+        guard let uid = firebaseUID else { return nil }
+        do {
+            let doc = try await db.collection("users").document(uid).getDocument()
+            guard let data = doc.data() else { return nil }
+            let count = (data["friendCount"] as? Int) ?? Int((data["friendCount"] as? Int64) ?? 0)
+            let limit = (data["friendLimit"] as? Int) ?? Int((data["friendLimit"] as? Int64) ?? Int64(Config.DEFAULT_FRIEND_LIMIT))
+            return FriendCapStatus(count: count, limit: limit)
+        } catch {
+            #if DEBUG
+            print("FirebaseService: load friend cap status failed: \(error.localizedDescription)")
+            #endif
+            return nil
+        }
+    }
+
     /// Remove a bidirectional friendship. Deletes both sides so neither user
     /// sees the other in their friends list anymore.
     func removeFriend(friendUID: String) async {
@@ -1044,8 +1073,59 @@ class FirebaseService {
         }
     }
 
+    /// Result of an accept attempt. The rules-level soft cap can reject
+    /// the write if the user is already at their per-account friend
+    /// limit, which we surface as `.atCap` so the UI can show a
+    /// friendly upsell instead of a generic "permission denied".
+    enum AcceptFriendResult: Equatable {
+        case success
+        case atCap(limit: Int)
+        case failed(String)
+    }
+
     /// Accept an incoming request by creating the bidirectional friendship
-    /// and deleting the request document.
+    /// and deleting the request document. Pre-flights the friend cap
+    /// (count < limit) before the batch so we can return a clean
+    /// `.atCap` result rather than a generic Firestore permission-denied.
+    func acceptFriendRequestChecked(from user: AppUser) async -> AcceptFriendResult {
+        guard let uid = firebaseUID else { return .failed("Not signed in.") }
+        if let cap = await loadFriendCapStatus(), cap.isAtCap {
+            return .atCap(limit: cap.limit)
+        }
+        do {
+            let batch = db.batch()
+            batch.setData([
+                "username": user.username,
+                "firstName": user.firstName,
+                "lastName": user.lastName,
+                "acceptedBy": uid,
+                "addedAt": FieldValue.serverTimestamp(),
+            ], forDocument: db.collection("users").document(uid).collection("friends").document(user.id))
+            batch.setData([
+                "username": UserDefaults.standard.string(forKey: "currentUserUsername") ?? "",
+                "firstName": UserDefaults.standard.string(forKey: "currentUserFirstName") ?? "",
+                "lastName": UserDefaults.standard.string(forKey: "currentUserLastName") ?? "",
+                "acceptedBy": uid,
+                "addedAt": FieldValue.serverTimestamp(),
+            ], forDocument: db.collection("users").document(user.id).collection("friends").document(uid))
+            batch.deleteDocument(
+                db.collection("users").document(uid)
+                    .collection("friendRequests").document(user.id)
+            )
+            batch.deleteDocument(
+                db.collection("users").document(user.id)
+                    .collection("outgoingFriendRequests").document(uid)
+            )
+            try await batch.commit()
+            return .success
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    /// Legacy accept variant. Preserved for older call sites; new code
+    /// should prefer `acceptFriendRequestChecked` so it can react to
+    /// the friend cap.
     func acceptFriendRequest(from user: AppUser) async {
         guard let uid = firebaseUID else { return }
         do {
@@ -1290,34 +1370,71 @@ class FirebaseService {
     /// Loads the set of UIDs the current user has blocked, along with the
     /// latest profile snapshot for each (for the "Blocked users" settings
     /// screen).
+    ///
+    /// The previous implementation issued one `fetchUserProfile` round
+    /// trip per blocked uid (classic N+1). For an early-adopter who
+    /// blocked dozens of accounts this added latency + Firestore reads
+    /// linear in the block-list size. This version fans the lookups
+    /// out concurrently with `withTaskGroup`, capping concurrency at
+    /// 25 to stay well under Firestore's connection limits while
+    /// finishing in ~one round-trip-worth of wall time.
     func loadBlockedUsers() async -> [AppUser] {
         guard let uid = firebaseUID else { return [] }
         do {
             let snapshot = try await db.collection("users").document(uid)
                 .collection("blocked").getDocuments()
-            var result: [AppUser] = []
-            for doc in snapshot.documents {
-                if let profile = await fetchUserProfile(uid: doc.documentID) {
-                    result.append(AppUser(
-                        id: doc.documentID,
-                        firstName: profile.firstName,
-                        lastName: profile.lastName,
-                        username: profile.username,
-                        phone: ""
-                    ))
-                } else {
-                    result.append(AppUser(
-                        id: doc.documentID,
-                        firstName: "User",
-                        lastName: "",
-                        username: "",
-                        phone: ""
-                    ))
+            let blockedIds = snapshot.documents.map { $0.documentID }
+            if blockedIds.isEmpty { return [] }
+
+            // Fan out the profile reads. We keyed by index so we can
+            // preserve the original block-list order in the result.
+            return await withTaskGroup(of: (Int, AppUser).self) { group in
+                let maxConcurrent = 25
+                var nextIndex = 0
+                let total = blockedIds.count
+
+                func enqueue(_ index: Int) {
+                    let id = blockedIds[index]
+                    group.addTask { [weak self] in
+                        if let profile = await self?.fetchUserProfile(uid: id) {
+                            return (index, AppUser(
+                                id: id,
+                                firstName: profile.firstName,
+                                lastName: profile.lastName,
+                                username: profile.username,
+                                phone: ""
+                            ))
+                        }
+                        return (index, AppUser(
+                            id: id,
+                            firstName: "User",
+                            lastName: "",
+                            username: "",
+                            phone: ""
+                        ))
+                    }
                 }
+
+                while nextIndex < total && nextIndex < maxConcurrent {
+                    enqueue(nextIndex)
+                    nextIndex += 1
+                }
+
+                var collected: [(Int, AppUser)] = []
+                collected.reserveCapacity(total)
+                for await pair in group {
+                    collected.append(pair)
+                    if nextIndex < total {
+                        enqueue(nextIndex)
+                        nextIndex += 1
+                    }
+                }
+                return collected.sorted { $0.0 < $1.0 }.map { $0.1 }
             }
-            return result
         } catch {
+            #if DEBUG
             print("FirebaseService: load blocked users failed: \(error.localizedDescription)")
+            #endif
             return []
         }
     }
@@ -1754,22 +1871,56 @@ class FirebaseService {
 
         do {
             try await ref.setData(data)
+            #if DEBUG
             print("FirebaseService: event=pending_share_queued phoneE164=\(phoneE164) senderId=\(uid) id=\(ref.documentID)")
+            #else
+            print("FirebaseService: event=pending_share_queued senderId=\(uid)")
+            #endif
             return .success(ref.documentID)
         } catch {
+            #if DEBUG
             print("FirebaseService: event=pending_share_queue_failed phoneE164=\(phoneE164) senderId=\(uid) error=\(error.localizedDescription)")
+            #else
+            print("FirebaseService: event=pending_share_queue_failed senderId=\(uid)")
+            #endif
             return .failure(.writeFailed(error.localizedDescription))
         }
+    }
+
+    /// Per-session latch tracking whether we've already successfully
+    /// claimed pending shares for the current user. The claim itself
+    /// is idempotent server-side, but the previous "fire on every
+    /// foreground / loadData" pattern wrote a `claimRequests/{id}`
+    /// doc on every app open even when the inbox was already empty
+    /// — burning Firestore writes + waking the trigger function for
+    /// no reason.
+    ///
+    /// Reset on sign-out via `clearClaimSession`.
+    private var hasCompletedInitialClaim = false
+
+    /// Clears the per-session claim latch. Called on sign-out so the
+    /// next account's first foreground does fire a claim.
+    func clearClaimSession() {
+        hasCompletedInitialClaim = false
     }
 
     /// Ask the server to run the pending-shares claim for the current user.
     /// Writes a `claimRequests/{id}` doc that triggers the `onClaimRequest`
     /// Cloud Function — clients never read `pendingShares` directly.
     ///
-    /// Safe to call on every app foreground / loadData: the trigger deletes
-    /// the request doc when done, and the claim itself is idempotent.
-    func requestPendingSharesClaim() async {
+    /// The first call per session always fires (we don't know whether
+    /// there are queued shares until the server checks). Subsequent
+    /// calls within the same session no-op unless `force == true`,
+    /// which is what onboarding hand-off uses to force a re-claim
+    /// after the user's profile creation lands.
+    func requestPendingSharesClaim(force: Bool = false) async {
         guard let uid = firebaseUID else { return }
+        if !force && hasCompletedInitialClaim {
+            #if DEBUG
+            print("FirebaseService: event=pending_share_claim_skipped reason=already_claimed_this_session uid=\(uid)")
+            #endif
+            return
+        }
 
         let reqId = "\(uid)_\(UUID().uuidString)"
         let ref = db.collection("claimRequests").document(reqId)
@@ -1778,9 +1929,14 @@ class FirebaseService {
                 "uid": uid,
                 "createdAt": FieldValue.serverTimestamp(),
             ])
+            hasCompletedInitialClaim = true
+            #if DEBUG
             print("FirebaseService: event=pending_share_claim_requested uid=\(uid) reqId=\(reqId)")
+            #endif
         } catch {
+            #if DEBUG
             print("FirebaseService: event=pending_share_claim_request_failed uid=\(uid) error=\(error.localizedDescription)")
+            #endif
         }
     }
 
@@ -1858,7 +2014,9 @@ class FirebaseService {
             return
         }
 
+        #if DEBUG
         print("FirebaseService: sendMessage convId=\(conversationId) text=\(text.prefix(30))")
+        #endif
         var msgData: [String: Any] = [
             "senderId": uid,
             "text": text,

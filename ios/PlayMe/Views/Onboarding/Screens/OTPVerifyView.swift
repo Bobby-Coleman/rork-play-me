@@ -17,6 +17,7 @@ struct OTPVerifyView: View {
     @State private var fieldIsFocused = false
     @State private var isResending = false
     @State private var resendCooldownRemaining = 0
+    @State private var resendCountThisSession = 0
     @State private var resendConfirmation: String?
 
     @Environment(\.riffTheme) private var theme
@@ -83,19 +84,31 @@ struct OTPVerifyView: View {
                                     ProgressView().tint(theme.fg.opacity(0.75)).scaleEffect(0.85)
                                     Text("Sending new code…")
                                 }
+                            } else if resendCountThisSession >= Config.OTP_RESEND_SESSION_MAX {
+                                Text("Too many attempts. Try again later.")
                             } else if resendCooldownRemaining > 0 {
-                                Text("Resend code in \(resendCooldownRemaining)s")
+                                Text("Resend code in \(formattedCountdown(resendCooldownRemaining))")
+                                    .monospacedDigit()
                             } else {
-                                Text("Didn't receive a code?")
+                                Text("Didn't receive a code? Resend")
                             }
                         }
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(theme.fg.opacity(resendCooldownRemaining > 0 || isResending ? 0.35 : 0.65))
+                        .foregroundStyle(theme.fg.opacity(
+                            resendCountThisSession >= Config.OTP_RESEND_SESSION_MAX
+                            || resendCooldownRemaining > 0
+                            || isResending ? 0.35 : 0.65
+                        ))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 20)
                     }
                     .buttonStyle(.plain)
-                    .disabled(isResending || resendCooldownRemaining > 0 || appState.phoneNumber.isEmpty)
+                    .disabled(
+                        isResending
+                        || resendCooldownRemaining > 0
+                        || appState.phoneNumber.isEmpty
+                        || resendCountThisSession >= Config.OTP_RESEND_SESSION_MAX
+                    )
 
                     Spacer(minLength: 0)
                 }
@@ -123,7 +136,9 @@ struct OTPVerifyView: View {
     }
 
     private func resendCode() async {
-        guard !isResending, resendCooldownRemaining == 0 else { return }
+        guard !isResending,
+              resendCooldownRemaining == 0,
+              resendCountThisSession < Config.OTP_RESEND_SESSION_MAX else { return }
         let phone = appState.phoneNumber
         guard !phone.isEmpty else { return }
 
@@ -139,8 +154,10 @@ struct OTPVerifyView: View {
             isResending = false
             if success {
                 codeText = ""
+                resendCountThisSession += 1
+                let cooldown = Config.otpResendCooldown(forAttempt: resendCountThisSession)
                 resendConfirmation = "We sent a new code."
-                resendCooldownRemaining = 60
+                resendCooldownRemaining = cooldown
                 Task { @MainActor in
                     try? await Task.sleep(for: .seconds(4))
                     if resendConfirmation == "We sent a new code." { resendConfirmation = nil }
@@ -155,5 +172,16 @@ struct OTPVerifyView: View {
                 errorMessage = appState.registrationError ?? "Could not resend. Try again later."
             }
         }
+    }
+
+    /// Render a countdown like "0:42" (mm:ss). Keeps the resend label
+    /// visually stable as the timer ticks, since fixed-width digits +
+    /// colon don't shift the surrounding text.
+    private func formattedCountdown(_ seconds: Int) -> String {
+        let s = max(0, seconds)
+        if s < 60 { return "\(s)s" }
+        let m = s / 60
+        let r = s % 60
+        return String(format: "%d:%02d", m, r)
     }
 }

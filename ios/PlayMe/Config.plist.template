@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Template for ios/PlayMe/Config.plist (which is gitignored).
+
+  Copy this file to `Config.plist` and fill in the values below for
+  local dev. CI generates the production file from a secret store.
+
+  Keys:
+    CHOTTU_LINK_API_KEY  — ChottuLink SDK key for deep-link resolution.
+                           Required for the friend-invite share link
+                           flow. Leave empty to disable deep-link
+                           resolution (the OS share path still works).
+    SPOTIFY_CLIENT_ID    — Spotify app public client id. Safe to share;
+                           the corresponding client secret lives only
+                           in Cloud Functions.
+    SONGLINK_API_KEY     — Optional Odesli API key. Empty → unauth
+                           tier (50 req/min).
+    RORK_API_BASE_URL    — Optional override for the API base URL.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CHOTTU_LINK_API_KEY</key>
+	<string></string>
+	<key>SPOTIFY_CLIENT_ID</key>
+	<string>10ac0a719f3e4135a2d3fd857c67d0f6</string>
+	<key>SONGLINK_API_KEY</key>
+	<string></string>
+	<key>RORK_API_BASE_URL</key>
+	<string></string>
+</dict>
+</plist>

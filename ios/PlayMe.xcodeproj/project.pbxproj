@@ -83,6 +83,7 @@
 		XXA1B2C3D4E5F6A7B8C9D0XX /* Exceptions for "PlayMe" folder in "PlayMe" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Config.plist.template,
 				Info.plist,
 			);
 			target = 105FC5792E9EAD3100EA8BCF /* PlayMe */;
@@ -617,7 +618,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PlayMe/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Riff";
+				INFOPLIST_KEY_CFBundleDisplayName = Riff;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -659,7 +660,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PlayMe/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Riff";
+				INFOPLIST_KEY_CFBundleDisplayName = Riff;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

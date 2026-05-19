@@ -26,9 +26,55 @@ service cloud.firestore {
           || request.resource.data.song.diff(resource.data.song).affectedKeys().hasOnly(['spotifyURI']));
     }
 
+    // -------- User profile field allowlist --------
+    //
+    // Fields the client may set/update on its own public `users/{uid}` doc.
+    // Reserved server-controlled fields (friendCount, friendLimit, invitedBy,
+    // fcmToken, subscriptionTier, etc.) are deliberately NOT in this list,
+    // so a compromised client can't grant itself extra friend slots, fake
+    // subscription state, or move FCM tokens into the public-readable doc.
+    function userDocClientWriteableFields() {
+      return [
+        'firstName', 'lastName', 'username',
+        'notificationsEnabled', 'preferredMusicService',
+        'avatarURL', 'avatarColor', 'theme',
+        'tasteGenres', 'tasteArtists',
+        'createdAt', 'updatedAt',
+        // Legacy fields the existing client still touches during
+        // profile creation; keep allow-listed so we don't break older
+        // installs, but their values are stamped server-side anyway.
+        'phone'
+      ];
+    }
+
+    // Per-user friend cap. Default 8 — can be elevated for a single
+    // account (e.g. premium subscription) by setting `friendLimit` on
+    // their `users/{uid}` doc via the Admin SDK / Cloud Function.
+    //
+    // Enforced as a soft cap: rules check the count BEFORE the write,
+    // and the `onFriendCreated` Cloud Function maintains `friendCount`
+    // on each side. Two near-simultaneous adds could land one over
+    // the cap (acceptable slop for a UX limit, not a security
+    // boundary). Hard cap can be added later by moving friend creation
+    // through a Cloud Function callable.
+    function isUnderFriendCap(userId) {
+      let userDoc = get(/databases/$(database)/documents/users/$(userId)).data;
+      return userDoc.get('friendCount', 0) < userDoc.get('friendLimit', 8);
+    }
+
     match /users/{userId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
+
+      // Create + update must use only client-writeable fields. Reserved
+      // server fields stay locked.
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(userDocClientWriteableFields());
+      allow update: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(userDocClientWriteableFields());
+      allow delete: if false;
 
       match /likes/{likeId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
@@ -41,17 +87,47 @@ service cloud.firestore {
       }
 
       match /friends/{friendId} {
-        // Owner has full access to their own list. Peers (the "other user"
-        // in the friendship) may CREATE and DELETE their own mirrored row —
-        // this is what makes bidirectional add/unfriend work from a single
-        // client — but cannot read each other's friend lists or overwrite
-        // arbitrary fields.
+        // Owner has full read/update/delete. The peer (the "other user"
+        // in the friendship) may CREATE and DELETE their own mirrored
+        // row — what makes bidirectional add/unfriend work from a single
+        // client — but cannot read each other's friend lists or
+        // overwrite arbitrary fields.
+        //
+        // CREATE now requires:
+        //   1. Evidence the friendship was actually requested by the
+        //      OTHER party (cross-doc exists() of the matching
+        //      friendRequests / outgoingFriendRequests doc). This shuts
+        //      down the forge-yourself-into-someone's-friends-list
+        //      vector that the previous open create rule allowed.
+        //   2. The OWNER (userId) is under their per-user friend cap.
+        //   3. The owner has not blocked the peer.
         allow read: if request.auth != null && request.auth.uid == userId;
-        allow write: if request.auth != null && request.auth.uid == userId;
+        allow update: if request.auth != null && request.auth.uid == userId;
+        allow delete: if request.auth != null
+          && (request.auth.uid == userId || request.auth.uid == friendId);
+
         allow create: if request.auth != null
-          && request.auth.uid == friendId
-          && !isBlockedBy(userId, request.auth.uid);
-        allow delete: if request.auth != null && request.auth.uid == friendId;
+          && isUnderFriendCap(userId)
+          && (
+            // Path A: the OWNER is creating their own friends/<friend>
+            // row, typically because they pressed "Accept". A pending
+            // request from `friendId` to `userId` (sender=friendId,
+            // recipient=userId) must exist as proof.
+            (
+              request.auth.uid == userId
+              && exists(/databases/$(database)/documents/users/$(userId)/friendRequests/$(friendId))
+            )
+            // Path B: the PEER is creating the mirror row on the other
+            // user's side. Their own outgoing-request mirror at
+            // /users/{userId}/outgoingFriendRequests/{peerUid} must
+            // exist, proving `userId` was the recipient of an
+            // outstanding request from the peer.
+            || (
+              request.auth.uid == friendId
+              && exists(/databases/$(database)/documents/users/$(userId)/outgoingFriendRequests/$(request.auth.uid))
+              && !isBlockedBy(userId, request.auth.uid)
+            )
+          );
       }
 
       // Only the owner can read or mutate their own blocked list.
@@ -158,31 +234,67 @@ service cloud.firestore {
       allow delete: if isShareParticipant();
     }
 
+    // -------- Conversation field allowlist --------
+    //
+    // Each participant may update a precise allowlist of fields. The
+    // legitimate cross-participant write is "sender bumps OTHER's
+    // unreadCount" — every other cross-write (e.g. spoofing the
+    // OTHER user's lastReadAt timestamp to fake a read receipt) is
+    // rejected here.
+    //
+    // `lastReadAt_<uid>` may only be written by `<uid>` themselves —
+    // it powers the iMessage-style "Read" indicator so faking it
+    // would let a sender display "Read" on their own bubble.
+    function conversationUpdateAllowedKeys(participants, me) {
+      let other = participants[0] == me ? participants[1] : participants[0];
+      return [
+        'lastMessageText',
+        'lastMessageTimestamp',
+        'lastMessageSenderId',
+        'songStreakCount',
+        'songStreakLastDay',
+        'songMessageCount',
+        'participantNames',
+        'updatedAt',
+        'lastReadAt_' + me,
+        'unreadCount_' + me,
+        'unreadCount_' + other
+      ];
+    }
+
     match /conversations/{convId} {
       // resource is null when the document does not exist.
       // Allow get on missing docs so clients can do get-then-create.
       allow read: if request.auth != null
         && (resource == null || request.auth.uid in resource.data.participants);
       allow create: if request.auth != null
-        && request.auth.uid in request.resource.data.participants;
-      // Update: any participant of a 2-person DM may write. The legitimate
-      // cross-participant write is `sendMessage`, which atomically bumps
-      // the OTHER participant's `unreadCount_<otherUid>` while updating
-      // `lastMessageText` / `lastMessageTimestamp` / `songStreakCount`
-      // and (now) the writer's own `lastReadAt_<myUid>` for read receipts.
-      // Constraining to "self-scoped fields only" would break that
-      // transaction, so we keep the participant-trust model and rely on
-      // the message-level rule below to prevent reaction spoofing.
+        && request.auth.uid in request.resource.data.participants
+        && request.resource.data.participants.size() == 2;
+
+      // Update: any participant of a 2-person DM may write, but only
+      // to the explicitly-allowed set of fields. See
+      // `conversationUpdateAllowedKeys` above.
       allow update: if request.auth != null
-        && request.auth.uid in resource.data.participants;
+        && request.auth.uid in resource.data.participants
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(conversationUpdateAllowedKeys(resource.data.participants, request.auth.uid));
 
       match /messages/{msgId} {
         allow read: if request.auth != null
           && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participants;
+
+        // Length cap on `text` enforced server-side as a safety net even
+        // though the client truncates. 2000 chars covers any reasonable
+        // human message and shuts down megabyte-payload abuse vectors.
         allow create: if request.auth != null
           && request.resource.data.senderId == request.auth.uid
           && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participants
-          && !isBlockedBy(otherParticipant(convId, request.auth.uid), request.auth.uid);
+          && !isBlockedBy(otherParticipant(convId, request.auth.uid), request.auth.uid)
+          && (
+            !('text' in request.resource.data.keys())
+            || (request.resource.data.text is string
+                && request.resource.data.text.size() <= 2000)
+          );
 
         // Self-scoped reaction edits. A participant may add, change, or
         // remove ONLY their own entry in the `reactions` map (keyed by
@@ -193,13 +305,23 @@ service cloud.firestore {
         // diff. The .get('reactions', {}) defaults make this work for
         // both freshly reacted-to messages (where `reactions` didn't
         // exist before) and follow-up edits (where it does).
+        //
+        // The emoji value is constrained to the iMessage-style set the
+        // client UI offers (six tapback options). Any other string is
+        // rejected to prevent reaction abuse (e.g. injecting a slur).
         allow update: if request.auth != null
           && request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participants
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
           && request.resource.data.get('reactions', {})
               .diff(resource.data.get('reactions', {}))
               .affectedKeys()
-              .hasOnly([request.auth.uid]);
+              .hasOnly([request.auth.uid])
+          && (
+            !(request.auth.uid in request.resource.data.get('reactions', {}))
+            || (request.resource.data.reactions[request.auth.uid] is string
+                && request.resource.data.reactions[request.auth.uid] in
+                  ['❤️', '👍', '👎', '😂', '‼️', '❓'])
+          );
       }
     }
 
@@ -266,17 +388,22 @@ service cloud.firestore {
 
     // Global Spotify resolution cache keyed by SHA-256 of the normalized
     // Apple Music song URL. One document per unique song, shared across
-    // the whole user base. Any authenticated user may read (cache check
-    // before a network call) and write (persist a successful resolution
-    // so every other user skips the upstream API on subsequent views).
-    // Deletes are admin-only; cache entries never need client eviction.
+    // the whole user base. Reads remain open to any signed-in client
+    // (cache hit before a network call). Writes are now ADMIN-ONLY: the
+    // `resolveSpotifyTrack` Cloud Function persists successful matches
+    // server-side, which closes the previous client-write cache-poisoning
+    // vector where any signed-in user could overwrite a song's resolution
+    // with a spam link.
     match /spotifyResolutions/{docId} {
       allow read: if request.auth != null;
-      allow create, update: if request.auth != null
-        && request.resource.data.keys().hasAll(['trackId', 'spotifyURL', 'resolvedAt'])
-        && request.resource.data.trackId is string
-        && request.resource.data.spotifyURL is string;
-      allow delete: if false;
+      allow create, update, delete: if false;
+    }
+
+    // Per-UID rate-limit / abuse counters maintained server-side. Clients
+    // cannot read or write — the values exist only to be evaluated by
+    // Cloud Functions and (eventually) by rules for enforcement.
+    match /usageCounters/{uid} {
+      allow read, write: if false;
     }
   }
 }
