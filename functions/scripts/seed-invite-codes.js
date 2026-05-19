@@ -164,7 +164,13 @@ async function rotate(db, oldCode) {
     kind: oldData.kind || "personal",
     maxUses: typeof oldData.maxUses === "number" ? oldData.maxUses : 1,
   };
-  if (oldData.createdByUid) carry.createdByUid = oldData.createdByUid;
+  // `--created-by` on rotate overrides the old code's uid (e.g. after
+  // deleting an orphan profile and signing up with a fresh Auth uid).
+  if (createdByArg) {
+    carry.createdByUid = createdByArg;
+  } else if (oldData.createdByUid) {
+    carry.createdByUid = oldData.createdByUid;
+  }
   if (oldData.campaign) carry.campaign = oldData.campaign;
 
   const newPayload = {
