@@ -57,6 +57,13 @@ struct ReactionMenuOverlay<BubbleContent: View>: View {
     /// etc.) without us having to maintain a parallel renderer.
     @ViewBuilder let bubbleContent: () -> BubbleContent
 
+    /// Source bubble's frame in window/global coordinates at the
+    /// moment of long-press. When non-nil, the lifted bubble animates
+    /// in from that frame (iMessage-style "lift from position") rather
+    /// than fading in centered. When nil, falls back to the simple
+    /// scale/opacity entrance.
+    var sourceFrame: CGRect? = nil
+
     @State private var animateIn: Bool = false
 
     /// Default reaction set — heart, thumbs up, thumbs down, ha-ha,
@@ -67,31 +74,60 @@ struct ReactionMenuOverlay<BubbleContent: View>: View {
     }
 
     var body: some View {
-        ZStack {
-            // Dimmed + blurred backdrop. The .contentShape ensures the
-            // tap target covers the whole screen so users can dismiss
-            // by tapping any non-tray pixel.
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .ignoresSafeArea()
-                .overlay(Color.black.opacity(0.35).ignoresSafeArea())
-                .contentShape(.rect)
-                .onTapGesture { dismiss() }
+        GeometryReader { geo in
+            ZStack {
+                // Dimmed + blurred backdrop. The .contentShape ensures
+                // the tap target covers the whole screen so users can
+                // dismiss by tapping any non-tray pixel. Fades in as the
+                // bubble lifts so the unblurred chat doesn't snap to
+                // blur on contact — matches iMessage's gradual dim.
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .ignoresSafeArea()
+                    .overlay(Color.black.opacity(0.35).ignoresSafeArea())
+                    .opacity(animateIn ? 1 : 0)
+                    .contentShape(.rect)
+                    .onTapGesture { dismiss() }
 
-            VStack(spacing: 14) {
-                trayRow
-                bubbleRow
-                actionPanelRow
+                VStack(spacing: 14) {
+                    trayRow
+                        .opacity(animateIn ? 1 : 0)
+                        .scaleEffect(animateIn ? 1 : 0.85, anchor: .bottom)
+                    bubbleRow
+                        // iMessage-style lift: when we have a source
+                        // frame, start the bubble at that y in window
+                        // coords and spring it to center. The HStack's
+                        // conditional Spacer keeps it aligned to the
+                        // sender's side so it visually "lifts" without
+                        // teleporting across the screen.
+                        .offset(y: liftYOffset(in: geo.size))
+                        .scaleEffect(animateIn ? 1 : 0.98, anchor: .center)
+                    actionPanelRow
+                        .opacity(animateIn ? 1 : 0)
+                        .scaleEffect(animateIn ? 1 : 0.85, anchor: .top)
+                }
+                .padding(.horizontal, 20)
             }
-            .padding(.horizontal, 20)
-            .opacity(animateIn ? 1 : 0)
-            .scaleEffect(animateIn ? 1 : 0.92)
         }
         .onAppear {
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
                 animateIn = true
             }
         }
+    }
+
+    /// Returns the vertical offset that places the bubble row at the
+    /// source frame's center initially, springing back to 0 (the
+    /// natural VStack-centered position) as `animateIn` toggles. When
+    /// `sourceFrame` is nil, no offset is applied and the bubble fades
+    /// in centered.
+    private func liftYOffset(in size: CGSize) -> CGFloat {
+        guard let source = sourceFrame, !animateIn else { return 0 }
+        // The geometry reader's coordinate space is the overlay's full
+        // area. We want the bubble's midY to start at the source frame
+        // midY, so the offset from center is sourceMidY - centerY.
+        let centerY = size.height / 2
+        return source.midY - centerY
     }
 
     // MARK: - Subviews

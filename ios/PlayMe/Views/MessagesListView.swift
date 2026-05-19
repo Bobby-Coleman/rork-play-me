@@ -105,7 +105,12 @@ struct MessagesListView: View {
 
                     Group {
                         if conversation.songStreakCount > 0 {
-                            streakBadge(for: conversation)
+                            Text("Streak \(conversation.songStreakCount)")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.88))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                                .accessibilityLabel("Streak \(conversation.songStreakCount)")
                         } else {
                             Text("start a streak")
                                 .font(.system(size: 10, weight: .medium))
@@ -159,62 +164,4 @@ struct MessagesListView: View {
         .padding(.vertical, 12)
     }
 
-    private func streakBadge(for conversation: Conversation) -> some View {
-        TimelineView(.periodic(from: .now, by: 60)) { timeline in
-            HStack(spacing: 5) {
-                StreakCountdownRing(progress: streakRemainingProgress(for: conversation, now: timeline.date))
-
-                Text("\(conversation.songStreakCount)")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.88))
-            }
-            .accessibilityLabel("Streak \(conversation.songStreakCount)")
-        }
-    }
-
-    private func streakRemainingProgress(for conversation: Conversation, now: Date) -> Double {
-        guard let deadline = streakResetDeadline(for: conversation),
-              let start = streakStartDate(for: conversation) else {
-            return 0
-        }
-        let total = deadline.timeIntervalSince(start)
-        guard total > 0 else { return 0 }
-        let remaining = deadline.timeIntervalSince(now)
-        return max(0, min(1, remaining / total))
-    }
-
-    private func streakResetDeadline(for conversation: Conversation) -> Date? {
-        guard let start = streakStartDate(for: conversation) else { return nil }
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = .current
-        return calendar.date(byAdding: .day, value: 2, to: start)
-    }
-
-    private func streakStartDate(for conversation: Conversation) -> Date? {
-        guard let lastDay = conversation.songStreakLastDay else { return nil }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: lastDay)
-    }
-}
-
-private struct StreakCountdownRing: View {
-    let progress: Double
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(Color.white.opacity(0.16), lineWidth: 1.4)
-            Circle()
-                .trim(from: 0, to: progress)
-                .stroke(
-                    Color.white.opacity(0.86),
-                    style: StrokeStyle(lineWidth: 1.4, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-        }
-        .frame(width: 14, height: 14)
-    }
 }

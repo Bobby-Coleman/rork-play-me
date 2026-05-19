@@ -4,8 +4,6 @@ import UserNotifications
 import UIKit
 
 struct ChatView: View {
-    private static let bottomAnchorID = "chat-bottom-anchor"
-
     let conversation: Conversation
     let appState: AppState
 
@@ -33,11 +31,21 @@ struct ChatView: View {
     /// doesn't accidentally re-trigger the bottom-anchor scroll.
     @State private var lastBottomMessageId: String?
 
+    /// Imperative scroll request handed to `ChatMessagesCollectionView`.
+    /// The bridge clears this back to nil after dispatching to the
+    /// underlying UIKit controller.
+    @State private var pendingScrollAction: ChatScrollAction?
+
     /// When non-nil, the iMessage-style reaction tray overlay is
     /// presented for this message. Set by long-press on any bubble;
     /// cleared by tapping outside the tray, choosing an action, or
     /// reacting (which writes to Firestore and dismisses).
     @State private var pendingReactionTarget: ChatMessage?
+
+    /// Captured frame of the long-pressed bubble in window coordinates.
+    /// Passed to `ReactionMenuOverlay` so the lifted bubble animates
+    /// from-position (iMessage-style) rather than fading in centered.
+    @State private var pendingReactionSourceFrame: CGRect?
 
     /// When non-nil, the composer is in "reply mode" — a quoted
     /// preview pill renders just above `inputBar` and the next
@@ -101,7 +109,7 @@ struct ChatView: View {
     private var streakText: String {
         let count = liveConversation.songStreakCount
         guard count > 0 else { return "start a streak" }
-        return count == 1 ? "1 day streak" : "\(count) day streak"
+        return "Streak \(count)"
     }
 
     /// The id of the most recent message I've sent that the friend has
@@ -126,97 +134,45 @@ struct ChatView: View {
             Color.black.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 8) {
-                            // Top sentinel: drives lazy-loading of earlier
-                            // pages. We only render it once we've received
-                            // the first tail snapshot (initialTailLoaded)
-                            // so brand-new short threads don't briefly
-                            // flash a "Loading earlier…" spinner.
-                            if hasMoreEarlier && initialTailLoaded {
-                                earlierPageLoader
-                                    .onAppear { triggerLoadEarlier(scrollProxy: proxy) }
-                            }
-                            ForEach(messages) { message in
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    messageBubble(message, scrollProxy: proxy)
-                                    if message.id == mostRecentReadMessageId {
-                                        // iMessage-style: a single "Read"
-                                        // line under the most recent
-                                        // message I've sent that the
-                                        // friend has opened. Right-aligned
-                                        // because my bubbles are right-
-                                        // aligned. Animated transition so
-                                        // the indicator slides as my
-                                        // newest-read message advances
-                                        // through the thread over time.
-                                        Text("Read")
-                                            .font(.system(size: 10, weight: .medium))
-                                            .foregroundStyle(.white.opacity(0.45))
-                                            .padding(.trailing, 4)
-                                            .frame(maxWidth: .infinity, alignment: .trailing)
-                                            .transition(.opacity.combined(with: .move(edge: .top)))
-                                    }
+                ChatMessagesCollectionView(
+                    messages: messages,
+                    currentUID: currentUID,
+                    friendName: friendName,
+                    mostRecentReadMessageId: mostRecentReadMessageId,
+                    highlightedMessageId: highlightedMessageId,
+                    showEarlierLoader: hasMoreEarlier && initialTailLoaded,
+                    isLoadingEarlier: isLoadingEarlier,
+                    onLongPressMessage: { message, frame in
+                        pendingReactionSourceFrame = frame
+                        pendingReactionTarget = message
+                    },
+                    onTapSong: { song in sheetSong = song },
+                    onTapArtist: { song in artistSong = song },
+                    onTapQuotedReply: { parentMessageId in
+                        scrollToParent(messageId: parentMessageId)
+                    },
+                    onReachedTop: { triggerLoadEarlier() },
+                    pendingScrollAction: $pendingScrollAction
+                )
+                // iMessage-style reply mode: when the user picks
+                // "Reply" from the reaction tray, the surrounding
+                // chat blurs out and an invisible hit layer
+                // overlays it so a single tap cancels reply mode.
+                // The selected parent message is rendered fresh
+                // below (between the list and the composer),
+                // so it stays sharp against the blurred backdrop.
+                .blur(radius: pendingReplyTo != nil ? 14 : 0)
+                .animation(.easeOut(duration: 0.2), value: pendingReplyTo?.id)
+                .overlay {
+                    if pendingReplyTo != nil {
+                        Color.black.opacity(0.001)
+                            .contentShape(.rect)
+                            .onTapGesture {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    pendingReplyTo = nil
                                 }
-                                .id(message.id)
-                                .animation(.easeInOut(duration: 0.25), value: mostRecentReadMessageId)
                             }
-                            Color.clear
-                                .frame(height: 1)
-                                .id(Self.bottomAnchorID)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                    }
-                    .onAppear {
-                        DispatchQueue.main.async {
-                            scrollToBottom(proxy, animated: false)
-                        }
-                    }
-                    .scrollIndicators(.hidden)
-                    // iMessage-style: dragging the message list dismisses
-                    // the keyboard interactively, with the keyboard
-                    // following the user's finger so it can be brought
-                    // back without a re-tap if they reverse direction.
-                    .scrollDismissesKeyboard(.interactively)
-                    .appKeyboardDismiss()
-                    .onChange(of: messages.last?.id) { _, newId in
-                        // Only auto-scroll when the most recent message
-                        // changes (new send/receive), not when older pages
-                        // are prepended — prepending preserves
-                        // `messages.last`, so this onChange stays quiet
-                        // and the user's reading position is preserved.
-                        guard let id = newId, id != lastBottomMessageId else { return }
-                        lastBottomMessageId = id
-                        scrollToBottom(proxy, animated: true)
-                    }
-                    .onChange(of: initialTailLoaded) { _, loaded in
-                        guard loaded else { return }
-                        DispatchQueue.main.async {
-                            scrollToBottom(proxy, animated: false)
-                        }
-                    }
-                    // iMessage-style reply mode: when the user picks
-                    // "Reply" from the reaction tray, the surrounding
-                    // chat blurs out and an invisible hit layer
-                    // overlays it so a single tap cancels reply mode.
-                    // The selected parent message is rendered fresh
-                    // below (between the ScrollView and the composer),
-                    // so it stays sharp against the blurred backdrop.
-                    .blur(radius: pendingReplyTo != nil ? 14 : 0)
-                    .animation(.easeOut(duration: 0.2), value: pendingReplyTo?.id)
-                    .overlay {
-                        if pendingReplyTo != nil {
-                            Color.black.opacity(0.001)
-                                .contentShape(.rect)
-                                .onTapGesture {
-                                    withAnimation(.easeOut(duration: 0.2)) {
-                                        pendingReplyTo = nil
-                                    }
-                                }
-                                .transition(.opacity)
-                        }
+                            .transition(.opacity)
                     }
                 }
 
@@ -294,14 +250,14 @@ struct ChatView: View {
                 }
             }
         }
-        .onChange(of: messages.last?.id) { _, _ in
-            // Every time a new message arrives at the bottom, mark the
-            // thread read. Filters by sender so my own outgoing sends
-            // don't bump my own lastReadAt unnecessarily — that's
-            // already handled by the background unreadCount=0 zeroing
-            // and would otherwise produce a no-op write per sent line.
-            guard let last = messages.last else { return }
-            if last.senderId != currentUID {
+        .onChange(of: messages.last?.id) { _, newId in
+            guard let id = newId, id != lastBottomMessageId else { return }
+            lastBottomMessageId = id
+            // The collection view already pins to bottom on append when
+            // the user is at-bottom; this onChange is also responsible
+            // for marking the thread read whenever a new incoming line
+            // lands while the chat is on screen.
+            if let last = messages.last, last.senderId != currentUID {
                 Task {
                     await FirebaseService.shared.markConversationRead(conversationId: conversation.id)
                 }
@@ -359,9 +315,10 @@ struct ChatView: View {
             // above the entire chat ZStack so it can dim the whole
             // screen with .ultraThinMaterial without blocking the
             // navigation bar layout. Re-renders the long-pressed
-            // bubble's content via the same `bubbleVisuals(for:isMe:)`
-            // helper used by the in-list rows so the lifted copy
-            // matches pixel-for-pixel.
+            // bubble's content via `ChatBubbleVisuals` so the lifted
+            // copy matches pixel-for-pixel, and animates from the
+            // source bubble's window-coord frame so the lift reads as
+            // the same message rising rather than a teleported copy.
             if let target = pendingReactionTarget {
                 ReactionMenuOverlay(
                     message: target,
@@ -370,10 +327,6 @@ struct ChatView: View {
                     onReact: { emoji in
                         let convId = conversation.id
                         let msgId = target.id
-                        // Refresh the in-overlay highlight by mutating
-                        // pendingReactionTarget so the tray's "active"
-                        // ring tracks the latest pick before we
-                        // dismiss; the server write happens async.
                         Task {
                             await FirebaseService.shared.setReaction(
                                 conversationId: convId,
@@ -381,7 +334,7 @@ struct ChatView: View {
                                 emoji: emoji
                             )
                         }
-                        pendingReactionTarget = nil
+                        dismissReactionOverlay()
                     },
                     onClearReaction: {
                         let convId = conversation.id
@@ -392,31 +345,39 @@ struct ChatView: View {
                                 messageId: msgId
                             )
                         }
-                        pendingReactionTarget = nil
+                        dismissReactionOverlay()
                     },
                     onReply: {
                         pendingReplyTo = target
-                        pendingReactionTarget = nil
-                        // Defer focus to the next runloop tick so the
-                        // keyboard pops up after the overlay's
-                        // dismissal animation has handed back input.
+                        dismissReactionOverlay()
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                             isComposerFocused = true
                         }
                     },
                     onCopy: {
-                        pendingReactionTarget = nil
+                        dismissReactionOverlay()
                     },
                     onDismiss: {
-                        pendingReactionTarget = nil
+                        dismissReactionOverlay()
                     },
                     bubbleContent: {
-                        bubbleVisuals(for: target, isMe: target.senderId == currentUID)
-                    }
+                        ChatBubbleVisuals(
+                            message: target,
+                            isMe: target.senderId == currentUID,
+                            currentUID: currentUID,
+                            friendName: friendName
+                        )
+                    },
+                    sourceFrame: pendingReactionSourceFrame
                 )
                 .transition(.opacity)
             }
         }
+    }
+
+    private func dismissReactionOverlay() {
+        pendingReactionTarget = nil
+        pendingReactionSourceFrame = nil
     }
 
     private var blockAlertBinding: Binding<Bool> {
@@ -426,168 +387,39 @@ struct ChatView: View {
         )
     }
 
-    private func messageBubble(_ message: ChatMessage, scrollProxy proxy: ScrollViewProxy) -> some View {
-        let isMe = message.senderId == currentUID
-        let isHighlighted = highlightedMessageId == message.id
-
-        return HStack {
-            if isMe { Spacer(minLength: 60) }
-
-            VStack(alignment: isMe ? .trailing : .leading, spacing: 4) {
-                bubbleVisuals(
-                    for: message,
-                    isMe: isMe,
-                    onTapQuotedReply: { parentId in
-                        scrollToParent(messageId: parentId, scrollProxy: proxy)
-                    }
-                )
-                    .scaleEffect(isHighlighted ? 1.04 : 1)
-                    .animation(.spring(response: 0.35, dampingFraction: 0.65), value: isHighlighted)
-                    .overlay(alignment: isMe ? .bottomLeading : .bottomTrailing) {
-                        // Reaction cluster floats slightly outside the
-                        // bubble's bottom corner — leading for me-bubbles
-                        // (right-aligned), trailing for them-bubbles
-                        // (left-aligned), so the cluster always sits in
-                        // the empty gutter rather than over the text.
-                        if !message.reactions.isEmpty {
-                            ReactionBadgeCluster(
-                                reactions: message.reactions,
-                                currentUserUID: currentUID
-                            )
-                            .offset(x: isMe ? -10 : 10, y: 10)
-                            .zIndex(1)
-                        }
-                    }
-                    .padding(.bottom, message.reactions.isEmpty ? 0 : 14)
-                    .onLongPressGesture(minimumDuration: 0.35) {
-                        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                        pendingReactionTarget = message
-                    }
-
-                Text(formattedTimestamp(message.timestamp))
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.2))
-            }
-
-            if !isMe { Spacer(minLength: 60) }
-        }
-    }
-
     /// iMessage-style "floating parent" rendered just above the
-    /// composer when the user is in reply mode. Uses the same
-    /// `bubbleVisuals` helper as the in-list bubble so the lifted
-    /// preview matches pixel-for-pixel — no timestamp, no reaction
-    /// cluster, no long-press hit target. Aligns to the original
-    /// sender's side (right for me, left for them) so it visually
-    /// reads as the same message that lives further up in the
-    /// (blurred) thread.
+    /// composer when the user is in reply mode. Uses `ChatBubbleVisuals`
+    /// so the lifted preview matches pixel-for-pixel with the in-list
+    /// row — no timestamp, no reaction cluster, no long-press hit
+    /// target. Aligns to the original sender's side (right for me,
+    /// left for them) so it visually reads as the same message that
+    /// lives further up in the (blurred) thread.
     @ViewBuilder
     private func floatingReplyParent(_ message: ChatMessage) -> some View {
         let isMe = message.senderId == currentUID
-        HStack {
+        HStack(spacing: 0) {
             if isMe { Spacer(minLength: 60) }
-            bubbleVisuals(for: message, isMe: isMe)
+            ChatBubbleVisuals(
+                message: message,
+                isMe: isMe,
+                currentUID: currentUID,
+                friendName: friendName
+            )
             if !isMe { Spacer(minLength: 60) }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
     }
 
-    /// Renders the bubble's visual content (quoted reply snippet, song
-    /// card, text bubble) without timestamp or reactions cluster.
-    /// Factored out so the reaction tray overlay can re-render the same
-    /// thing pixel-identically when "lifting" a bubble onto the dimmed
-    /// backdrop.
-    ///
-    /// - Parameter onTapQuotedReply: Optional callback fired when the
-    ///   user taps the quoted-reply chip. The in-list version wires
-    ///   this to `scrollToParent`; the overlay leaves it nil because
-    ///   tapping during a reaction gesture would be ambiguous.
-    @ViewBuilder
-    private func bubbleVisuals(
-        for message: ChatMessage,
-        isMe: Bool,
-        onTapQuotedReply: ((String) -> Void)? = nil
-    ) -> some View {
-        VStack(alignment: isMe ? .trailing : .leading, spacing: 4) {
-            if let preview = message.replyToPreview {
-                quotedReplySnippet(preview, isMe: isMe)
-                    .contentShape(.rect)
-                    .onTapGesture {
-                        onTapQuotedReply?(preview.messageId)
-                    }
-            }
-
-            if let song = message.song {
-                inlineSongCard(song)
-            }
-
-            if !message.text.isEmpty {
-                Text(message.text)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(isMe ? Color(red: 0.76, green: 0.38, blue: 0.35) : Color.white.opacity(0.1))
-                    .clipShape(.rect(cornerRadius: 18))
-                    .frame(maxWidth: 280, alignment: isMe ? .trailing : .leading)
-            }
-        }
-    }
-
-    /// Compact "quoted parent" chip rendered inside a reply bubble.
-    /// Matches the WhatsApp/Telegram pattern: vertical accent stripe,
-    /// sender name, and one line of the parent's text or song title.
-    /// Tapping is wired by the parent (`bubbleVisuals`) — this view
-    /// only handles its own visual rendering.
-    @ViewBuilder
-    private func quotedReplySnippet(_ preview: ReplyPreview, isMe: Bool) -> some View {
-        let displaySnippet: String = {
-            if let songTitle = preview.songTitle, !songTitle.isEmpty {
-                return "🎵 \(songTitle)"
-            }
-            return preview.textSnippet.isEmpty ? "Message" : preview.textSnippet
-        }()
-
-        let parentSenderName: String = preview.senderId == currentUID ? "You" : friendName
-
-        HStack(spacing: 8) {
-            Capsule()
-                .fill(Color.white.opacity(0.45))
-                .frame(width: 2)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(parentSenderName)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.65))
-                Text(displaySnippet)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .frame(maxWidth: 240, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-        )
-    }
-
     /// Smooth-scroll to the parent of a quoted reply and briefly
     /// highlight that bubble so it's easy to spot in a busy thread.
     /// If the parent isn't currently in `messages` (because it's older
-    /// than any earlier page that's been loaded yet), the scrollTo is
-    /// a no-op — the user still has the inline `replyToPreview`
-    /// snapshot for context, so the UX degrades gracefully.
-    private func scrollToParent(messageId: String, scrollProxy proxy: ScrollViewProxy) {
+    /// than any earlier page that's been loaded yet), the scroll is a
+    /// no-op — the user still has the inline `replyToPreview` snapshot
+    /// for context, so the UX degrades gracefully.
+    private func scrollToParent(messageId: String) {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(.easeInOut(duration: 0.4)) {
-            proxy.scrollTo(messageId, anchor: .center)
-        }
+        pendingScrollAction = .toMessage(id: messageId, animated: true)
         highlightedMessageId = messageId
         Task {
             try? await Task.sleep(for: .milliseconds(1200))
@@ -596,58 +428,6 @@ struct ChatView: View {
                     highlightedMessageId = nil
                 }
             }
-        }
-    }
-
-    private func inlineSongCard(_ song: Song) -> some View {
-        ZStack(alignment: .bottomLeading) {
-            AsyncImage(url: URL(string: song.albumArtURL)) { phase in
-                if let image = phase.image {
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } else {
-                    Color(.systemGray5)
-                }
-            }
-            .frame(width: 190, height: 190)
-            .clipped()
-
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.72)],
-                startPoint: .center,
-                endPoint: .bottom
-            )
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(song.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                if song.artistId != nil {
-                    Button {
-                        artistSong = song
-                    } label: {
-                        Text(song.artist)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.72))
-                            .lineLimit(1)
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    Text(song.artist)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .lineLimit(1)
-                }
-            }
-            .padding(12)
-        }
-        .frame(width: 190, height: 190)
-        .clipShape(.rect(cornerRadius: 14))
-        .contentShape(.rect)
-        .onTapGesture {
-            sheetSong = song
         }
     }
 
@@ -683,35 +463,6 @@ struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(Color.black)
-    }
-
-    private func formattedTimestamp(_ date: Date) -> String {
-        let cal = Calendar.current
-        let now = Date()
-
-        let timeFmt = DateFormatter()
-        timeFmt.dateFormat = "h:mm a"
-
-        if cal.isDateInToday(date) {
-            return timeFmt.string(from: date)
-        }
-        if cal.isDateInYesterday(date) {
-            return "Yesterday \(timeFmt.string(from: date))"
-        }
-        let daysAgo = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: now)).day ?? 7
-        if daysAgo < 7 {
-            let dayFmt = DateFormatter()
-            dayFmt.dateFormat = "EEE"
-            return "\(dayFmt.string(from: date)) \(timeFmt.string(from: date))"
-        }
-        if cal.component(.year, from: date) == cal.component(.year, from: now) {
-            let dateFmt = DateFormatter()
-            dateFmt.dateFormat = "MMM d"
-            return "\(dateFmt.string(from: date)), \(timeFmt.string(from: date))"
-        }
-        let fullFmt = DateFormatter()
-        fullFmt.dateFormat = "MMM d, yyyy"
-        return fullFmt.string(from: date)
     }
 
     private func sendMessage() {
@@ -765,18 +516,6 @@ struct ChatView: View {
         }
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
-        guard !messages.isEmpty else { return }
-        lastBottomMessageId = messages.last?.id
-        if animated {
-            withAnimation(.easeOut(duration: 0.2)) {
-                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
-            }
-        } else {
-            proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
-        }
-    }
-
     private func startListening() {
         listener = FirebaseService.shared.listenForMessageTail(
             conversationId: conversation.id,
@@ -813,32 +552,17 @@ struct ChatView: View {
         messages = byId.values.sorted { $0.timestamp < $1.timestamp }
     }
 
-    /// Top-of-list "Loading earlier…" sentinel. Renders a small spinner
-    /// while a fetch is in flight, otherwise an empty 28pt strip whose
-    /// `onAppear` is what actually triggers the next page.
-    private var earlierPageLoader: some View {
-        HStack {
-            Spacer()
-            if isLoadingEarlier {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(.white.opacity(0.4))
-            }
-            Spacer()
-        }
-        .frame(height: 28)
-    }
-
-    /// Fetch the next 50 messages strictly older than `messages.first`,
-    /// merge them into the visible array, and pin the previously-oldest
-    /// message to the top so the user's reading position doesn't jump.
+    /// Fetch the next 50 messages strictly older than `messages.first`
+    /// and merge them into the visible array. The UIKit collection view
+    /// preserves the user's reading position automatically by
+    /// re-anchoring the previously-topmost message to the top after the
+    /// snapshot applies, so no scroll-proxy plumbing is needed here.
     /// Guarded against re-entrancy (`isLoadingEarlier`) and end-of-
     /// history (`hasMoreEarlier`).
-    private func triggerLoadEarlier(scrollProxy proxy: ScrollViewProxy) {
+    private func triggerLoadEarlier() {
         guard hasMoreEarlier, !isLoadingEarlier else { return }
         guard let oldest = messages.first else { return }
         isLoadingEarlier = true
-        let pivotId = oldest.id
         Task {
             let earlier = await FirebaseService.shared.loadEarlierMessages(
                 conversationId: conversation.id,
@@ -853,10 +577,6 @@ struct ChatView: View {
                     if earlier.count < 50 {
                         hasMoreEarlier = false
                     }
-                    // Anchor the previously-oldest message at the top
-                    // so the new content appears above without yanking
-                    // the user's view downward.
-                    proxy.scrollTo(pivotId, anchor: .top)
                 }
                 isLoadingEarlier = false
             }
