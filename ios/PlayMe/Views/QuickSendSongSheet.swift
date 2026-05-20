@@ -2,6 +2,7 @@ import SwiftUI
 
 struct QuickSendSongSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
     let recipient: AppUser
     let appState: AppState
 
@@ -28,7 +29,7 @@ struct QuickSendSongSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                theme.bg.ignoresSafeArea()
 
                 if step == 0 {
                     songSearchView
@@ -53,9 +54,9 @@ struct QuickSendSongSheet: View {
                     } label: {
                         Image(systemName: step == 1 ? "chevron.left" : "xmark")
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(theme.fg.opacity(0.6))
                             .frame(width: 32, height: 32)
-                            .background(Color.white.opacity(0.1))
+                            .background(theme.fg.opacity(0.1))
                             .clipShape(Circle())
                             .contentTransition(.symbolEffect(.replace))
                     }
@@ -63,7 +64,7 @@ struct QuickSendSongSheet: View {
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .presentationBackground(.black)
+        .presentationBackground(theme.bg)
         .sheet(item: $detailArtist) { artist in
             ArtistView(artistId: artist.id, initialArtistName: artist.name, appState: appState)
                 .presentationDetents([.large])
@@ -87,7 +88,7 @@ struct QuickSendSongSheet: View {
                     onSent: { shareAlbum = nil }
                 )
             }
-            .presentationBackground(.black)
+            .presentationBackground(theme.bg)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
@@ -110,7 +111,7 @@ struct QuickSendSongSheet: View {
         VStack(spacing: 0) {
             Text("Send to \(recipient.firstName)")
                 .font(.system(size: 28, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
@@ -118,12 +119,12 @@ struct QuickSendSongSheet: View {
 
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(theme.fg.opacity(0.4))
                 AppTextField("Search songs or artists...", text: $searchText, submitLabel: .search) {
                     commitCurrentSearch()
                     isSearchFocused = false
                 }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .autocorrectionDisabled()
                     .focused($isSearchFocused)
                     .onChange(of: searchText) { _, newValue in
@@ -138,13 +139,13 @@ struct QuickSendSongSheet: View {
                         searchTask?.cancel()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(theme.fg.opacity(0.4))
                     }
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(Color.white.opacity(0.08))
+            .background(theme.fg.opacity(0.08))
             .clipShape(.rect(cornerRadius: 12))
             .padding(.horizontal, 20)
             .padding(.bottom, 8)
@@ -171,7 +172,7 @@ struct QuickSendSongSheet: View {
                 LazyVStack(spacing: 0) {
                     if appState.isSearchingSongs && appState.searchResults.isEmpty {
                         ProgressView()
-                            .tint(.white)
+                            .tint(theme.fg)
                             .padding(.top, 40)
                     } else if searchText.isEmpty {
                         hintView
@@ -204,7 +205,7 @@ struct QuickSendSongSheet: View {
             ArtistResultHeader()
             topHitRow(top)
                 .overlay(alignment: .bottom) {
-                    Color.white.opacity(0.05).frame(height: 0.5)
+                    theme.fg.opacity(0.05).frame(height: 0.5)
                 }
         }
 
@@ -224,7 +225,7 @@ struct QuickSendSongSheet: View {
                 }
                 .id(artist.id)
                 .overlay(alignment: .bottom) {
-                    Color.white.opacity(0.05).frame(height: 0.5)
+                    theme.fg.opacity(0.05).frame(height: 0.5)
                 }
             }
         }
@@ -266,7 +267,7 @@ struct QuickSendSongSheet: View {
                 )
                 .id(album.id)
                 .overlay(alignment: .bottom) {
-                    Color.white.opacity(0.05).frame(height: 0.5)
+                    theme.fg.opacity(0.05).frame(height: 0.5)
                 }
             }
         }
@@ -281,7 +282,7 @@ struct QuickSendSongSheet: View {
             }
             .id(artist.id)
             .overlay(alignment: .bottom) {
-                Color.white.opacity(0.05).frame(height: 0.5)
+                theme.fg.opacity(0.05).frame(height: 0.5)
             }
         }
     }
@@ -309,7 +310,7 @@ struct QuickSendSongSheet: View {
             )
             .id(album.id)
             .overlay(alignment: .bottom) {
-                Color.white.opacity(0.05).frame(height: 0.5)
+                theme.fg.opacity(0.05).frame(height: 0.5)
             }
         }
     }
@@ -362,12 +363,12 @@ struct QuickSendSongSheet: View {
 
             Text(song.title)
                 .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 20)
             Text(song.artist)
                 .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(theme.fg.opacity(0.5))
                 .padding(.bottom, 16)
 
             AppTextField(
@@ -378,17 +379,17 @@ struct QuickSendSongSheet: View {
                 onSubmit: { isNoteFocused = false }
             )
                 .font(.system(size: 15))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
                 .focused($isNoteFocused)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
                 .background(
-                    Color.white.opacity(0.10),
+                    theme.fg.opacity(0.10),
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.white.opacity(0.22), lineWidth: 0.5)
+                        .stroke(theme.fg.opacity(0.22), lineWidth: 0.5)
                 )
                 .shadow(color: .white.opacity(0.18), radius: 10, x: 0, y: 0)
                 .padding(.horizontal, 20)
@@ -399,10 +400,10 @@ struct QuickSendSongSheet: View {
             } label: {
                 Text(isSending ? "Sending…" : "Send to \(recipient.firstName)")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.accentOn)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                    .background(theme.accent)
                     .clipShape(.rect(cornerRadius: 14))
             }
             .disabled(isSending)
@@ -441,10 +442,10 @@ struct QuickSendSongSheet: View {
         VStack(spacing: 12) {
             Image(systemName: "music.magnifyingglass")
                 .font(.system(size: 36))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(theme.fg.opacity(0.15))
             Text("Search for any song")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -454,10 +455,10 @@ struct QuickSendSongSheet: View {
         VStack(spacing: 14) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 36))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(theme.fg.opacity(0.15))
             Text("No results for \"\(searchText)\"")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -524,12 +525,12 @@ struct QuickSendSongSheet: View {
 
                         if isLoading {
                             ProgressView()
-                                .tint(.white)
+                                .tint(theme.fg)
                                 .scaleEffect(0.6)
                         } else {
                             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(theme.fg)
                                 .contentTransition(.symbolEffect(.replace))
                         }
                     }
@@ -540,7 +541,7 @@ struct QuickSendSongSheet: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(song.title)
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .lineLimit(1)
                 if let artistId = song.artistId {
                     Button {
@@ -553,7 +554,7 @@ struct QuickSendSongSheet: View {
                     } label: {
                         Text(song.artist.uppercased())
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(theme.fg.opacity(0.4))
                             .tracking(0.5)
                             .lineLimit(1)
                     }
@@ -561,7 +562,7 @@ struct QuickSendSongSheet: View {
                 } else {
                     Text(song.artist.uppercased())
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(theme.fg.opacity(0.4))
                         .tracking(0.5)
                         .lineLimit(1)
                 }
@@ -576,16 +577,16 @@ struct QuickSendSongSheet: View {
             } label: {
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(theme.fg.opacity(0.85))
                     .frame(width: 36, height: 36)
-                    .background(Circle().fill(Color.white.opacity(0.08)))
+                    .background(Circle().fill(theme.fg.opacity(0.08)))
             }
             .buttonStyle(.plain)
             .sensoryFeedback(.impact(weight: .light), trigger: selectedSong?.id)
 
             Text(song.duration)
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
         }
         .padding(.vertical, 12)
         .contentShape(Rectangle())
@@ -598,7 +599,7 @@ struct QuickSendSongSheet: View {
             withAnimation(.spring(duration: 0.3)) { step = 1 }
         }
         .overlay(alignment: .bottom) {
-            Color.white.opacity(0.05)
+            theme.fg.opacity(0.05)
                 .frame(height: 0.5)
         }
     }

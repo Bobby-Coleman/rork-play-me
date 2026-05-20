@@ -18,6 +18,8 @@ struct AlbumResultRow: View {
     let onTap: () -> Void
     var onShareTap: (() -> Void)? = nil
 
+    @Environment(\.riffTheme) private var theme
+
     var body: some View {
         HStack(spacing: 8) {
             Button(action: onTap) {
@@ -26,11 +28,11 @@ struct AlbumResultRow: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(album.name)
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(theme.fg)
                             .lineLimit(1)
                         Text(subtitle)
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(theme.fg.opacity(0.5))
                             .lineLimit(1)
                     }
                     Spacer(minLength: 0)
@@ -43,9 +45,9 @@ struct AlbumResultRow: View {
                 Button(action: onShareTap) {
                     Image(systemName: "paperplane.fill")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(theme.fg.opacity(0.7))
                         .frame(width: 36, height: 36)
-                        .background(Circle().fill(Color.white.opacity(0.08)))
+                        .background(Circle().fill(theme.fg.opacity(0.08)))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Share album")
@@ -68,7 +70,7 @@ struct AlbumResultRow: View {
     private var artwork: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.white.opacity(0.08))
+                .fill(theme.fg.opacity(0.08))
 
             if let url = URL(string: album.artworkURL) {
                 AsyncImage(url: url) { phase in
@@ -79,7 +81,7 @@ struct AlbumResultRow: View {
                     } else {
                         Image(systemName: "square.stack")
                             .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(theme.fg.opacity(0.4))
                     }
                 }
                 .id(album.artworkURL)

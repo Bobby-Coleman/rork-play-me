@@ -8,6 +8,7 @@ struct MiniPlayerBar: View {
     let song: Song
     let onTap: () -> Void
 
+    @Environment(\.riffTheme) private var theme
     private let audioPlayer = AudioPlayerService.shared
 
     var body: some View {
@@ -19,7 +20,7 @@ struct MiniPlayerBar: View {
                         case .success(let image):
                             image.resizable().aspectRatio(contentMode: .fill)
                         default:
-                            Color.white.opacity(0.12)
+                            theme.fg.opacity(0.12)
                         }
                     }
                     .frame(width: 40, height: 40)
@@ -28,11 +29,11 @@ struct MiniPlayerBar: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(song.title)
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(theme.fg)
                             .lineLimit(1)
                         Text(song.artist)
                             .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(theme.fg.opacity(0.55))
                             .lineLimit(1)
                     }
 
@@ -51,7 +52,7 @@ struct MiniPlayerBar: View {
             } label: {
                 Image(systemName: audioPlayer.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
@@ -62,7 +63,7 @@ struct MiniPlayerBar: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(theme.fg.opacity(0.75))
                     .frame(width: 28, height: 28)
                     .contentShape(Rectangle())
             }
@@ -73,8 +74,8 @@ struct MiniPlayerBar: View {
         .background(.ultraThinMaterial, in: .rect(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                .stroke(theme.border, lineWidth: 0.5)
         )
-        .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 4)
+        .shadow(color: theme.bg.opacity(0.35), radius: 10, x: 0, y: 4)
     }
 }

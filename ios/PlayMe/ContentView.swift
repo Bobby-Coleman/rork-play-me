@@ -62,10 +62,29 @@ struct ContentView: View {
     @State private var sessionBeganAlreadyOnboarded = UserDefaults.standard.bool(forKey: "isOnboarded")
 
     init() {
-        // Hide tab titles globally so the bar stays icon-only even when iOS
-        // would otherwise fall back to showing a default label.
+        // Configure the tab-bar appearance once with the saved theme's
+        // backdrop. Hide tab titles globally so the bar stays icon-only
+        // even when iOS would otherwise fall back to showing a default
+        // label. Live theme swaps re-run `applyTabBarAppearance` in
+        // `.onChange(of: appTheme)`.
+        let theme = RiffTheme.byId(
+            UserDefaults.standard.string(forKey: "appTheme") ?? RiffTheme.black.id
+        )
+        Self.applyTabBarAppearance(theme: theme)
+    }
+
+    /// Build a `UITabBarAppearance` driven by the active RIFF theme and
+    /// apply it as the global standard + scroll-edge appearance. Called
+    /// from `init()` (cold start) and on `.onChange(of: appTheme)` so
+    /// the bar tints in real time when the user re-picks a theme.
+    private static func applyTabBarAppearance(theme: RiffTheme) {
         let appearance = UITabBarAppearance()
-        appearance.configureWithDefaultBackground()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = theme.bgUIColor
+        // Drop the default subtle separator on light themes so the bar
+        // reads as a continuation of the backdrop rather than a tray.
+        appearance.shadowColor = .clear
+
         let clearTitle: [NSAttributedString.Key: Any] = [.foregroundColor: UIColor.clear]
         appearance.stackedLayoutAppearance.normal.titleTextAttributes = clearTitle
         appearance.stackedLayoutAppearance.selected.titleTextAttributes = clearTitle
@@ -73,6 +92,21 @@ struct ContentView: View {
         appearance.inlineLayoutAppearance.selected.titleTextAttributes = clearTitle
         appearance.compactInlineLayoutAppearance.normal.titleTextAttributes = clearTitle
         appearance.compactInlineLayoutAppearance.selected.titleTextAttributes = clearTitle
+
+        // Tint the icons themselves. SwiftUI's `.tint()` modifier is
+        // applied per-TabView, but the unselected color comes from
+        // UIKit's appearance system on iOS 17+. We use the theme
+        // foreground for selected icons and a faded variant for the
+        // unselected state so the active tab remains obvious on any
+        // backdrop (especially the saturated red and forest themes).
+        let fgUIColor = UIColor(theme.fg)
+        appearance.stackedLayoutAppearance.normal.iconColor = fgUIColor.withAlphaComponent(0.35)
+        appearance.stackedLayoutAppearance.selected.iconColor = fgUIColor
+        appearance.inlineLayoutAppearance.normal.iconColor = fgUIColor.withAlphaComponent(0.35)
+        appearance.inlineLayoutAppearance.selected.iconColor = fgUIColor
+        appearance.compactInlineLayoutAppearance.normal.iconColor = fgUIColor.withAlphaComponent(0.35)
+        appearance.compactInlineLayoutAppearance.selected.iconColor = fgUIColor
+
         UITabBar.appearance().standardAppearance = appearance
         UITabBar.appearance().scrollEdgeAppearance = appearance
     }
@@ -82,8 +116,6 @@ struct ContentView: View {
             // Global background driven by the user's chosen RIFF theme.
             // Painting it behind the main UI gives every screen a tinted
             // backdrop without each surface re-implementing the swap.
-            // Foreground elements still render in their existing white-on-
-            // dark style; cross-screen accent recoloring is a follow-up.
             appState.appTheme.bg.ignoresSafeArea()
 
             Group {
@@ -111,9 +143,18 @@ struct ContentView: View {
                 }
             }
         }
+        .riffTheme(appState.appTheme)
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, appState.isOnboarded else { return }
             Task { await appState.refreshShares() }
+        }
+        .onChange(of: appState.appTheme) { _, newTheme in
+            // Re-tint the global tab-bar appearance when the user swaps
+            // themes mid-session (Settings → Appearance). SwiftUI's
+            // `.tint()` modifier handles the selected-icon color, but
+            // the bar background + unselected icons live on UIKit's
+            // `UITabBar.appearance()` and need an explicit refresh.
+            Self.applyTabBarAppearance(theme: newTheme)
         }
         .onOpenURL { url in
             handleIncomingURL(url)
@@ -295,8 +336,8 @@ struct ContentView: View {
                 Image(systemName: "rectangle.stack.fill")
             }
         }
-        .tint(.white)
-        .preferredColorScheme(.dark)
+        .tint(appState.appTheme.fg)
+        .preferredColorScheme(appState.appTheme.isLight ? .light : .dark)
         .simultaneousGesture(
             DragGesture(minimumDistance: 50)
                 .onEnded { value in

@@ -14,6 +14,8 @@ struct MixtapesSearchRow: View {
     let contextLabel: String
     let onTap: () -> Void
 
+    @Environment(\.riffTheme) private var theme
+
     private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
 
     private var isPlaying: Bool {
@@ -65,11 +67,11 @@ struct MixtapesSearchRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(song.title)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .lineLimit(1)
                 Text(contextLabel)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(theme.sub)
                     .lineLimit(1)
             }
 

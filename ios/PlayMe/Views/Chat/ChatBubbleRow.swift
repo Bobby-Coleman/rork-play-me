@@ -26,6 +26,7 @@ struct ChatBubbleRow: View {
     let onLongPress: (CGRect) -> Void
 
     @State private var capturedFrame: CGRect = .zero
+    @Environment(\.riffTheme) private var theme
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 2) {
@@ -78,7 +79,7 @@ struct ChatBubbleRow: View {
 
                     Text(ChatBubbleRow.formattedTimestamp(message.timestamp))
                         .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.2))
+                        .foregroundStyle(theme.fg.opacity(0.25))
                 }
 
                 if !isMe { Spacer(minLength: 60) }
@@ -87,7 +88,7 @@ struct ChatBubbleRow: View {
             if isMostRecentRead {
                 Text("Read")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .foregroundStyle(theme.fg.opacity(0.45))
                     .padding(.trailing, 4)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .transition(.opacity.combined(with: .move(edge: .top)))
@@ -155,6 +156,8 @@ struct ChatBubbleVisuals: View {
     var onTapArtist: ((Song) -> Void)? = nil
     var onTapQuotedReply: ((String) -> Void)? = nil
 
+    @Environment(\.riffTheme) private var theme
+
     var body: some View {
         VStack(alignment: isMe ? .trailing : .leading, spacing: 4) {
             if let preview = message.replyToPreview {
@@ -172,12 +175,12 @@ struct ChatBubbleVisuals: View {
             if !message.text.isEmpty {
                 Text(message.text)
                     .font(.system(size: 15))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(isMe ? theme.accentOn : theme.fg)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
-                    .background(isMe ? Color(red: 0.76, green: 0.38, blue: 0.35) : Color.white.opacity(0.1))
+                    .background(isMe ? theme.accent : theme.softBg)
                     .clipShape(.rect(cornerRadius: 18))
                     .frame(maxWidth: 280, alignment: isMe ? .trailing : .leading)
             }
@@ -196,15 +199,15 @@ struct ChatBubbleVisuals: View {
 
         HStack(spacing: 8) {
             Capsule()
-                .fill(Color.white.opacity(0.45))
+                .fill(theme.fg.opacity(0.45))
                 .frame(width: 2)
             VStack(alignment: .leading, spacing: 1) {
                 Text(parentSenderName)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(theme.fg.opacity(0.65))
                 Text(displaySnippet)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(theme.fg.opacity(0.55))
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -214,7 +217,7 @@ struct ChatBubbleVisuals: View {
         .frame(maxWidth: 240, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.06))
+                .fill(theme.softBg)
         )
     }
 

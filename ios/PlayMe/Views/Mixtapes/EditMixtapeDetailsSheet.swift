@@ -14,6 +14,7 @@ struct EditMixtapeDetailsSheet: View {
     let mixtape: Mixtape
     let appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
 
     @State private var name: String = ""
     @State private var details: String = ""
@@ -31,7 +32,7 @@ struct EditMixtapeDetailsSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                theme.bg.ignoresSafeArea()
 
                 AppScrollView {
                     VStack(alignment: .leading, spacing: 20) {
@@ -48,7 +49,7 @@ struct EditMixtapeDetailsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(theme.fg.opacity(0.7))
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { commit() }
@@ -56,11 +57,11 @@ struct EditMixtapeDetailsSheet: View {
                         .disabled(!canSave)
                 }
             }
-            .toolbarBackground(.black, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarBackground(theme.bg, for: .navigationBar)
+            .toolbarColorScheme(theme.toolbarColorScheme, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
-        .presentationBackground(.black)
+        .preferredColorScheme(theme.isLight ? .light : .dark)
+        .presentationBackground(theme.bg)
         .onAppear {
             name = mixtape.name
             details = mixtape.description ?? ""
@@ -77,7 +78,7 @@ struct EditMixtapeDetailsSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Name")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(theme.fg.opacity(0.5))
             AppTextField(
                 "",
                 text: $name,
@@ -86,11 +87,11 @@ struct EditMixtapeDetailsSheet: View {
             )
             .focused($nameFocused)
             .font(.system(size: 17, weight: .semibold))
-            .foregroundStyle(.white)
-            .tint(.white)
+            .foregroundStyle(theme.fg)
+            .tint(theme.fg)
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(Color.white.opacity(0.08))
+            .background(theme.softBg)
             .clipShape(.rect(cornerRadius: 10))
         }
     }
@@ -100,11 +101,11 @@ struct EditMixtapeDetailsSheet: View {
             HStack {
                 Text("Description")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(theme.fg.opacity(0.5))
                 Spacer()
                 Text("\(details.count)/\(descriptionLimit)")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(details.count >= descriptionLimit ? 0.7 : 0.3))
+                    .foregroundStyle(theme.fg.opacity(details.count >= descriptionLimit ? 0.7 : 0.3))
             }
             AppTextField(
                 "",
@@ -115,11 +116,11 @@ struct EditMixtapeDetailsSheet: View {
             )
             .lineLimit(3...8)
             .font(.system(size: 15))
-            .foregroundStyle(.white)
-            .tint(.white)
+            .foregroundStyle(theme.fg)
+            .tint(theme.fg)
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(Color.white.opacity(0.08))
+            .background(theme.softBg)
             .clipShape(.rect(cornerRadius: 10))
             .onChange(of: details) { _, newValue in
                 if newValue.count > descriptionLimit {

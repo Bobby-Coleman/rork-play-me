@@ -40,6 +40,7 @@ struct SongFullScreenFeedView: View {
 
     @State private var coordinator = FullScreenFeedPlaybackCoordinator()
     @State private var visibleSongId: String?
+    @Environment(\.riffTheme) private var theme
     /// Horizontal-drag offset for edge-initiated swipe-right-to-dismiss.
     /// Driven by the `.simultaneousGesture` below; on release we either
     /// animate it back to 0 (cancel) or out to screen-width (commit dismiss)
@@ -96,7 +97,7 @@ struct SongFullScreenFeedView: View {
             let topInset = pageGeo.safeAreaInsets.top
 
             ZStack(alignment: .topLeading) {
-                Color.black
+                theme.bg
 
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) {
@@ -183,7 +184,7 @@ struct SongFullScreenFeedView: View {
             )
         }
         .ignoresSafeArea()
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(theme.isLight ? .light : .dark)
         .onDisappear {
             // Don't yank `AudioPlayerService.stop()` here unconditionally:
             // doing so kills the mini-player on every dismiss. Only stop
@@ -220,7 +221,7 @@ struct SongFullScreenFeedView: View {
             // 36pt circle still looks centered after the swap.
             Image(systemName: "chevron.left")
                 .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(theme.fg.opacity(0.85))
                 .padding(.leading, -1)
                 .frame(width: 36, height: 36)
                 .background(.ultraThinMaterial)

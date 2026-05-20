@@ -23,6 +23,7 @@ struct SongActionSheet: View {
     var share: SongShare? = nil
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
 
     var body: some View {
         NavigationStack {
@@ -40,15 +41,15 @@ struct SongActionSheet: View {
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(theme.fg.opacity(0.6))
                             .frame(width: 32, height: 32)
-                            .background(Color.white.opacity(0.1))
+                            .background(theme.softBg)
                             .clipShape(Circle())
                     }
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .presentationBackground(.black)
+        .presentationBackground(theme.bg)
     }
 }

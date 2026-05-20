@@ -15,6 +15,7 @@ struct SaveToMixtapeSheet: View {
     let appState: AppState
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
     @State private var showCreate: Bool = false
     @State private var mixtapePendingRemoval: Mixtape?
 
@@ -33,7 +34,7 @@ struct SaveToMixtapeSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                theme.bg.ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 0) {
@@ -57,7 +58,7 @@ struct SaveToMixtapeSheet: View {
 
                         if userMixtapes.isEmpty && !store.hasLoaded {
                             ProgressView()
-                                .tint(.white)
+                                .tint(theme.fg)
                                 .padding(.vertical, 24)
                         } else if userMixtapes.isEmpty {
                             emptyHint
@@ -72,13 +73,13 @@ struct SaveToMixtapeSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .presentationBackground(.black)
-        .preferredColorScheme(.dark)
+        .presentationBackground(theme.bg)
+        .preferredColorScheme(theme.isLight ? .light : .dark)
         .sheet(isPresented: $showCreate) {
             CreateMixtapeView(seedSong: song, appState: appState)
                 .presentationDetents([.large])
@@ -110,11 +111,11 @@ struct SaveToMixtapeSheet: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(song.title)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .lineLimit(1)
                 Text(song.artist)
                     .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(theme.sub)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -130,16 +131,16 @@ struct SaveToMixtapeSheet: View {
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.white.opacity(0.08))
+                        .fill(theme.softBg)
                     Image(systemName: "plus")
                         .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                 }
                 .frame(width: 56, height: 56)
 
                 Text("Create new mixtape")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
 
                 Spacer()
             }
@@ -170,11 +171,11 @@ struct SaveToMixtapeSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(mixtape.name)
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                         .lineLimit(1)
                     Text(songCountLabel(for: mixtape))
                         .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(theme.sub)
                 }
 
                 Spacer()
@@ -182,11 +183,11 @@ struct SaveToMixtapeSheet: View {
                 if isReadOnly {
                     Text("Like the song")
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(theme.faint)
                 } else {
                     Image(systemName: isMember ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 22))
-                        .foregroundStyle(isMember ? .white : .white.opacity(0.3))
+                        .foregroundStyle(isMember ? theme.accent : theme.fg.opacity(0.3))
                 }
             }
             .contentShape(Rectangle())
@@ -205,7 +206,7 @@ struct SaveToMixtapeSheet: View {
     private var emptyHint: some View {
         Text("You don't have any mixtapes yet. Create one to start saving.")
             .font(.system(size: 13))
-            .foregroundStyle(.white.opacity(0.45))
+            .foregroundStyle(theme.fg.opacity(0.45))
             .multilineTextAlignment(.center)
     }
 }

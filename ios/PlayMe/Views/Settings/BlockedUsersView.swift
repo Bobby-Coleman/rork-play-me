@@ -2,6 +2,7 @@ import SwiftUI
 
 struct BlockedUsersView: View {
     @Bindable var appState: AppState
+    @Environment(\.riffTheme) private var theme
 
     @State private var blocked: [AppUser] = []
     @State private var isLoading: Bool = true
@@ -10,9 +11,9 @@ struct BlockedUsersView: View {
         Group {
             if isLoading {
                 ProgressView()
-                    .tint(.white)
+                    .tint(theme.fg)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black)
+                    .background(theme.bg)
             } else if blocked.isEmpty {
                 emptyState
             } else {
@@ -21,19 +22,19 @@ struct BlockedUsersView: View {
                         HStack(spacing: 14) {
                             Text(user.initials)
                                 .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(theme.fg)
                                 .frame(width: 38, height: 38)
-                                .background(Color.white.opacity(0.12))
+                                .background(theme.fg.opacity(0.12))
                                 .clipShape(Circle())
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(user.firstName.isEmpty ? "User" : user.firstName)
                                     .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(theme.fg)
                                 if !user.username.isEmpty {
                                     Text("@\(user.username)")
                                         .font(.system(size: 12))
-                                        .foregroundStyle(.white.opacity(0.4))
+                                        .foregroundStyle(theme.fg.opacity(0.4))
                                 }
                             }
 
@@ -43,24 +44,24 @@ struct BlockedUsersView: View {
                                 Task { await unblock(user) }
                             }
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(theme.fg)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.15))
+                            .background(theme.fg.opacity(0.15))
                             .clipShape(.capsule)
                         }
-                        .listRowBackground(Color.white.opacity(0.04))
+                        .listRowBackground(theme.fg.opacity(0.04))
                     }
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
-                .background(Color.black)
+                .background(theme.bg)
             }
         }
-        .background(Color.black.ignoresSafeArea())
+        .background(theme.bg.ignoresSafeArea())
         .navigationTitle("Blocked")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(theme.toolbarColorScheme, for: .navigationBar)
         .task { await loadBlocked() }
     }
 
@@ -68,18 +69,18 @@ struct BlockedUsersView: View {
         VStack(spacing: 10) {
             Image(systemName: "hand.raised")
                 .font(.system(size: 32))
-                .foregroundStyle(.white.opacity(0.2))
+                .foregroundStyle(theme.fg.opacity(0.2))
             Text("No blocked users")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(theme.fg.opacity(0.5))
             Text("You can block someone from their profile, a song they sent you, or a message thread.")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(theme.bg)
     }
 
     private func loadBlocked() async {

@@ -11,6 +11,7 @@ struct ReceivedMixtapeDetailView: View {
     let appState: AppState
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
     @State private var fullscreenSeed: FullscreenSeed?
     @State private var descriptionExpanded: Bool = false
     @State private var saveSong: Song?
@@ -29,7 +30,7 @@ struct ReceivedMixtapeDetailView: View {
                     spacing: spacing
                 )
                 ZStack {
-                    Color.black.ignoresSafeArea()
+                    theme.bg.ignoresSafeArea()
                     ScrollView {
                         VStack(spacing: 0) {
                             header
@@ -83,12 +84,12 @@ struct ReceivedMixtapeDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(theme.isLight ? .light : .dark)
         .fullScreenCover(item: $fullscreenSeed) { seed in
             SongFullScreenFeedView(
                 songs: seed.songs,
@@ -111,11 +112,11 @@ struct ReceivedMixtapeDetailView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(mixtape.name)
                         .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                         .lineLimit(2)
                     Text("\(mixtape.songCount) song\(mixtape.songCount == 1 ? "" : "s") · from @\(share.sender.username.isEmpty ? share.sender.firstName : share.sender.username)")
                         .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(theme.fg.opacity(0.5))
                         .lineLimit(1)
                 }
                 Spacer()
@@ -133,11 +134,11 @@ struct ReceivedMixtapeDetailView: View {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "quote.bubble.fill")
                         .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(theme.fg.opacity(0.5))
                         .padding(.top, 1)
                     Text(note)
                         .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(theme.fg.opacity(0.7))
                 }
             }
         }
@@ -147,7 +148,7 @@ struct ReceivedMixtapeDetailView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(text)
                 .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(theme.fg.opacity(0.7))
                 .lineLimit(descriptionExpanded ? nil : 3)
                 .fixedSize(horizontal: false, vertical: true)
             if text.count > 120 {
@@ -158,7 +159,7 @@ struct ReceivedMixtapeDetailView: View {
                 } label: {
                     Text(descriptionExpanded ? "less" : "more")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(theme.fg.opacity(0.55))
                 }
                 .buttonStyle(.plain)
             }
@@ -169,10 +170,10 @@ struct ReceivedMixtapeDetailView: View {
         VStack(spacing: 8) {
             Image(systemName: "music.note")
                 .font(.system(size: 28))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(theme.fg.opacity(0.15))
             Text("This mixtape was empty when shared.")
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }

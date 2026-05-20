@@ -19,6 +19,8 @@ struct MixtapeCoverView: View {
     var cornerRadius: CGFloat = 16
     var showsShadow: Bool = true
 
+    @Environment(\.riffTheme) private var theme
+
     var body: some View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
@@ -60,7 +62,7 @@ struct MixtapeCoverView: View {
                 }
             }
             .clipShape(.rect(cornerRadius: cornerRadius))
-            .shadow(color: showsShadow ? .white.opacity(0.05) : .clear, radius: 20, y: 10)
+            .shadow(color: showsShadow ? theme.fg.opacity(0.05) : .clear, radius: 20, y: 10)
     }
 
     @ViewBuilder
@@ -88,7 +90,7 @@ struct MixtapeCoverView: View {
             )
             Text(String(mixtape.name.prefix(1)).uppercased())
                 .font(.system(size: 36, weight: .bold))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(theme.fg.opacity(0.7))
         }
     }
 }

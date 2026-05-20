@@ -23,6 +23,8 @@ struct AlbumArtSquare: View {
     /// pipeline downsamples rather than decoding a 1200x1200 jpeg.
     var targetDecodeSide: CGFloat? = nil
 
+    @Environment(\.riffTheme) private var theme
+
     var body: some View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
@@ -39,7 +41,7 @@ struct AlbumArtSquare: View {
                             Color(.systemGray6)
                                 .overlay {
                                     if showsPlaceholderProgress {
-                                        ProgressView().tint(.white)
+                                        ProgressView().tint(theme.fg)
                                     }
                                 }
                         }
@@ -52,7 +54,7 @@ struct AlbumArtSquare: View {
                 }
             }
             .clipShape(.rect(cornerRadius: cornerRadius))
-            .shadow(color: showsShadow ? .white.opacity(0.05) : .clear, radius: 20, y: 10)
+            .shadow(color: showsShadow ? theme.fg.opacity(0.05) : .clear, radius: 20, y: 10)
     }
 
     private func imageRequest(for url: URL) -> ImageRequest {

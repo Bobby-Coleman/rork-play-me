@@ -12,6 +12,7 @@ struct SearchFilterBar: View {
     var onSelectionChange: ((SearchFilter) -> Void)? = nil
 
     @Namespace private var underline
+    @Environment(\.riffTheme) private var theme
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -39,16 +40,16 @@ struct SearchFilterBar: View {
         } label: {
             Text(filter.displayLabel)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(isActive ? Color.black : .white)
+                .foregroundStyle(isActive ? theme.bg : theme.fg)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
                 .background(
                     Capsule()
-                        .fill(isActive ? Color.white : Color.white.opacity(0.12))
+                        .fill(isActive ? theme.fg : theme.fg.opacity(0.12))
                 )
                 .overlay(
                     Capsule()
-                        .stroke(Color.white.opacity(isActive ? 0 : 0.18), lineWidth: 1)
+                        .stroke(theme.fg.opacity(isActive ? 0 : 0.18), lineWidth: 1)
                 )
         }
         .buttonStyle(.plain)

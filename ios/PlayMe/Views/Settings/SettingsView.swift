@@ -7,6 +7,7 @@ import UIKit
 struct SettingsView: View {
     @Bindable var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
 
     @State private var showDeleteConfirm: Bool = false
     @State private var showNotificationsDeniedAlert: Bool = false
@@ -21,6 +22,14 @@ struct SettingsView: View {
                 accountRow(label: "Name", value: displayName)
                 accountRow(label: "Username", value: "@\(appState.currentUser?.username ?? "")")
                 accountRow(label: "Phone", value: appState.currentUser?.phone ?? "—")
+            }
+
+            Section("Appearance") {
+                NavigationLink {
+                    ThemePickerSettingsView(appState: appState)
+                } label: {
+                    labelRow(icon: "paintpalette.fill", title: "Theme", tint: theme.accent)
+                }
             }
 
             Section("Notifications") {
@@ -79,14 +88,14 @@ struct SettingsView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(Color.black.ignoresSafeArea())
+        .background(theme.bg.ignoresSafeArea())
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(theme.toolbarColorScheme, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Done") { dismiss() }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
             }
         }
         .sheet(isPresented: $showDeleteConfirm) {
@@ -134,10 +143,10 @@ struct SettingsView: View {
     private func accountRow(label: String, value: String) -> some View {
         HStack {
             Text(label)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(theme.fg.opacity(0.7))
             Spacer()
             Text(value)
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(theme.fg.opacity(0.4))
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
@@ -152,7 +161,7 @@ struct SettingsView: View {
                 .background(tint)
                 .clipShape(.rect(cornerRadius: 6))
             Text(title)
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
         }
     }
 
@@ -160,16 +169,16 @@ struct SettingsView: View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
                 .frame(width: 28, height: 28)
-                .background(Color.white.opacity(0.15))
+                .background(theme.fg.opacity(0.15))
                 .clipShape(.rect(cornerRadius: 6))
             Text(title)
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
             Spacer()
             Image(systemName: "arrow.up.right")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
         }
     }
 }

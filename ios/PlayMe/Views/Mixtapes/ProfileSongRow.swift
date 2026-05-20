@@ -18,6 +18,8 @@ struct ProfileSongRow: View {
     let onToggleLike: () -> Void
     let onTap: () -> Void
 
+    @Environment(\.riffTheme) private var theme
+
     private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
 
     private var isPlaying: Bool {
@@ -74,20 +76,20 @@ struct ProfileSongRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(share.song.title)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .lineLimit(1)
                 Text(personLabel)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(theme.sub)
                     .lineLimit(1)
                 if let trimmedNote {
                     HStack(spacing: 5) {
                         Image(systemName: "quote.opening")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.35))
+                            .foregroundStyle(theme.fg.opacity(0.35))
                         Text(trimmedNote)
                             .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.62))
+                            .foregroundStyle(theme.fg.opacity(0.62))
                             .lineLimit(2)
                     }
                     .padding(.top, 1)
@@ -101,13 +103,13 @@ struct ProfileSongRow: View {
             } label: {
                 Image(systemName: isLiked ? "heart.fill" : "heart")
                     .font(.system(size: 16))
-                    .foregroundStyle(isLiked ? .pink : .white.opacity(0.25))
+                    .foregroundStyle(isLiked ? .pink : theme.fg.opacity(0.25))
             }
             .sensoryFeedback(.impact(weight: .light), trigger: isLiked)
 
             Text(share.timestamp.formatted(.relative(presentation: .named)))
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.25))
+                .foregroundStyle(theme.fg.opacity(0.25))
                 .frame(width: 70, alignment: .trailing)
         }
         .padding(.horizontal, 20)

@@ -24,13 +24,14 @@ struct DiscoverySearchCTA: View {
 
     @State private var isPressed: Bool = false
     @State private var isShazamPressed: Bool = false
+    @Environment(\.riffTheme) private var theme
 
     var body: some View {
         VStack(spacing: 14) {
             Text("search a song")
                 .font(.system(size: 22, weight: .medium, design: .rounded))
-                .foregroundStyle(.white.opacity(0.9))
-                .shadow(color: .black.opacity(0.5), radius: 10, y: 2)
+                .foregroundStyle(theme.fg.opacity(0.9))
+                .shadow(color: theme.bg.opacity(0.5), radius: 10, y: 2)
                 .allowsHitTesting(false)
 
             // Keep the magnifier centered in the hero width; pin Shazam to the
@@ -42,16 +43,16 @@ struct DiscoverySearchCTA: View {
                         ZStack {
                             if isShazamActive {
                                 Circle()
-                                    .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                                    .stroke(theme.fg.opacity(0.35), lineWidth: 1)
                                     .frame(width: 48, height: 48)
                                     .scaleEffect(1.08)
                             }
                             Image(systemName: "shazam.logo")
                                 .symbolRenderingMode(.monochrome)
                                 .font(.system(size: 30, weight: .semibold))
-                                .foregroundStyle(.white.opacity(isShazamActive ? 1 : 0.82))
-                                .shadow(color: .white.opacity(0.22), radius: 12)
-                                .shadow(color: .black.opacity(0.55), radius: 14, y: 3)
+                                .foregroundStyle(theme.fg.opacity(isShazamActive ? 1 : 0.82))
+                                .shadow(color: theme.fg.opacity(0.22), radius: 12)
+                                .shadow(color: theme.bg.opacity(0.55), radius: 14, y: 3)
                         }
                         .frame(width: 52, height: 52)
                         .scaleEffect(isShazamPressed ? 0.92 : 1.0)
@@ -70,9 +71,9 @@ struct DiscoverySearchCTA: View {
                 Button(action: action) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 62, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .shadow(color: .white.opacity(0.35), radius: 18)
-                        .shadow(color: .black.opacity(0.55), radius: 18, y: 4)
+                        .foregroundStyle(theme.fg)
+                        .shadow(color: theme.fg.opacity(0.35), radius: 18)
+                        .shadow(color: theme.bg.opacity(0.55), radius: 18, y: 4)
                         .scaleEffect(isPressed ? 0.94 : 1.0)
                 }
                 .buttonStyle(.plain)
@@ -90,7 +91,7 @@ struct DiscoverySearchCTA: View {
             if let shazamHint {
                 Text(shazamHint)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.62))
+                    .foregroundStyle(theme.fg.opacity(0.62))
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 260)
                     .transition(.opacity)
@@ -103,19 +104,21 @@ struct DiscoverySearchCTA: View {
 /// history/feed. Rendered as a standalone view so the parent can anchor it
 /// to the bottom of the hero.
 struct DiscoveryHistoryHint: View {
+    @Environment(\.riffTheme) private var theme
+
     var body: some View {
         HStack(spacing: 8) {
             Text("history")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(theme.fg.opacity(0.9))
             Image(systemName: "chevron.down")
                 .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(theme.fg.opacity(0.8))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial, in: Capsule())
-        .shadow(color: .black.opacity(0.4), radius: 10, y: 2)
+        .shadow(color: theme.bg.opacity(0.4), radius: 10, y: 2)
     }
 }
 
@@ -135,6 +138,7 @@ struct HistoryAlbumPreview: View {
     let side: CGFloat
 
     @State private var index: Int = 0
+    @Environment(\.riffTheme) private var theme
 
     var body: some View {
         ZStack {
@@ -154,9 +158,9 @@ struct HistoryAlbumPreview: View {
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
+                .strokeBorder(theme.border, lineWidth: 0.5)
         )
-        .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
+        .shadow(color: theme.bg.opacity(0.35), radius: 6, y: 2)
         .onReceive(Timer.publish(every: 2.2, on: .main, in: .common).autoconnect()) { _ in
             guard shares.count > 1 else { return }
             withAnimation(.easeInOut(duration: 0.45)) {

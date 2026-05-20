@@ -34,6 +34,7 @@ struct DiscoveryView: View {
     @State private var keyboardHeight: CGFloat = 0
     @State private var listenerListItem: SentSongHistoryItem?
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.riffTheme) private var theme
 
     private static let heroId = "__discovery_hero__"
     private let restingBottom: CGFloat = 14
@@ -104,7 +105,7 @@ struct DiscoveryView: View {
             let safeInsets = pageGeo.safeAreaInsets
 
             ZStack(alignment: .top) {
-                Color.black
+                theme.bg
 
                 VStack(spacing: 0) {
                     ScrollViewReader { proxy in
@@ -208,7 +209,7 @@ struct DiscoveryView: View {
                 addFriendsOverlay()
 
                 if isReplyFocused {
-                    Color.black.opacity(0.38)
+                    theme.bg.opacity(0.55)
                         .ignoresSafeArea()
                         .contentShape(Rectangle())
                         .onTapGesture { isReplyFocused = false }
@@ -349,7 +350,7 @@ struct DiscoveryView: View {
             .frame(width: pageSize.width, alignment: .top)
         }
         .frame(width: pageSize.width, height: pageSize.height)
-        .background(Color.black)
+        .background(theme.bg)
     }
 
     /// Single tappable surface on the hero combining the existing
@@ -389,7 +390,7 @@ struct DiscoveryView: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity)
-            .background(Color.black)
+            .background(theme.bg)
 
             Spacer(minLength: 0)
         }
@@ -427,7 +428,7 @@ struct DiscoveryView: View {
                         .foregroundStyle(.green)
                     Text("Sent!")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(theme.fg.opacity(0.85))
                 }
                 .transition(.opacity)
             } else {
@@ -435,14 +436,14 @@ struct DiscoveryView: View {
                     AppTextField(
                         "",
                         text: $replyText,
-                        prompt: Text(replyPlaceholder).foregroundColor(.white.opacity(0.9)),
+                        prompt: Text(replyPlaceholder).foregroundColor(theme.fg.opacity(0.9)),
                         axis: .vertical,
                         submitLabel: .send
                     )
                     .lineLimit(1...5)
                     .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(.white)
-                    .tint(.white)
+                    .foregroundStyle(theme.fg)
+                    .tint(theme.fg)
                     .focused($isReplyFocused)
                     .onChange(of: replyText) { _, newValue in
                         guard newValue.contains("\n") else { return }
@@ -460,7 +461,7 @@ struct DiscoveryView: View {
                         Button { isReplyFocused = false } label: {
                             Text("Done")
                                 .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.65))
+                                .foregroundStyle(theme.sub)
                         }
                     }
 
@@ -468,16 +469,21 @@ struct DiscoveryView: View {
                         Button {
                             sendReply()
                         } label: {
-                            Image(systemName: "arrow.up.circle.fill")
-                                .font(.system(size: 30))
-                                .foregroundStyle(.white)
+                            ZStack {
+                                Circle()
+                                    .fill(theme.accent)
+                                    .frame(width: 30, height: 30)
+                                Image(systemName: "arrow.up")
+                                    .font(.system(size: 15, weight: .bold))
+                                    .foregroundStyle(theme.accentOn)
+                            }
                         }
                         .disabled(isSendingReply)
                     }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
-                .background(Color(white: 0.16).opacity(0.94))
+                .background(theme.elevatedBg)
                 .clipShape(.rect(cornerRadius: 28, style: .continuous))
             }
         }
@@ -512,17 +518,17 @@ struct DiscoveryView: View {
                 }
                 Text(summary)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(listeners.isEmpty ? .white.opacity(0.42) : .white.opacity(0.82))
+                    .foregroundStyle(listeners.isEmpty ? theme.faint : theme.fg.opacity(0.82))
                     .lineLimit(1)
                 if listeners.count > 1 {
                     Image(systemName: "chevron.up")
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(theme.fg.opacity(0.45))
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(Color.white.opacity(0.08), in: Capsule())
+            .background(theme.softBg, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -648,21 +654,21 @@ struct DiscoveryView: View {
                 Text("Add Friends")
                     .font(.system(size: 13, weight: .semibold))
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(theme.fg)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(.ultraThinMaterial.opacity(0.8))
-            .background(Color.white.opacity(0.1))
+            .background(theme.softBg)
             .clipShape(.capsule)
         }
         .overlay(alignment: .topTrailing) {
             if appState.incomingRequests.count > 0 {
                 Text("\(appState.incomingRequests.count)")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.accentOn)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color.red, in: Capsule())
+                    .background(theme.accent, in: Capsule())
                     .offset(x: 6, y: -6)
             }
         }

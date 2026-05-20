@@ -10,6 +10,7 @@ struct ReceivedAlbumDetailView: View {
     let appState: AppState
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
     @State private var fullscreenSeed: FullscreenSeed?
     @State private var saveSong: Song?
 
@@ -28,7 +29,7 @@ struct ReceivedAlbumDetailView: View {
                     spacing: spacing
                 )
                 ZStack {
-                    Color.black.ignoresSafeArea()
+                    theme.bg.ignoresSafeArea()
                     ScrollView {
                         VStack(spacing: 0) {
                             header
@@ -82,12 +83,12 @@ struct ReceivedAlbumDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(theme.isLight ? .light : .dark)
         .fullScreenCover(item: $fullscreenSeed) { seed in
             SongFullScreenFeedView(
                 songs: seed.songs,
@@ -106,7 +107,7 @@ struct ReceivedAlbumDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.08))
+                    RoundedRectangle(cornerRadius: 12).fill(theme.softBg)
                     AsyncImage(url: URL(string: album.artworkURL)) { phase in
                         if let image = phase.image {
                             image.resizable().aspectRatio(contentMode: .fill)
@@ -119,17 +120,17 @@ struct ReceivedAlbumDetailView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(album.name)
                         .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                         .lineLimit(2)
                     if let artist = album.artistName, !artist.isEmpty {
                         Text(artist)
                             .font(.system(size: 13))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(theme.fg.opacity(0.6))
                             .lineLimit(1)
                     }
                     Text("Album · from @\(share.sender.username.isEmpty ? share.sender.firstName : share.sender.username)")
                         .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(theme.fg.opacity(0.45))
                         .lineLimit(1)
                 }
                 Spacer()
@@ -139,11 +140,11 @@ struct ReceivedAlbumDetailView: View {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "quote.bubble.fill")
                         .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(theme.fg.opacity(0.5))
                         .padding(.top, 1)
                     Text(note)
                         .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(theme.fg.opacity(0.7))
                 }
             }
         }
@@ -153,10 +154,10 @@ struct ReceivedAlbumDetailView: View {
         VStack(spacing: 8) {
             Image(systemName: "music.note")
                 .font(.system(size: 28))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(theme.fg.opacity(0.15))
             Text("This album shipped without any tracks.")
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }

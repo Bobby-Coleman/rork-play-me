@@ -15,6 +15,7 @@ struct CreateMixtapeView: View {
     var onCreated: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
     @State private var isCreating: Bool = false
     @State private var showCoverPicker: Bool = false
     @State private var uploadProgress: Double?
@@ -55,7 +56,7 @@ struct CreateMixtapeView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                theme.bg.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScrollView {
@@ -67,10 +68,10 @@ struct CreateMixtapeView: View {
                                 VStack(spacing: 6) {
                                     Text("New mixtape")
                                         .font(.system(size: 22, weight: .bold))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(theme.fg)
                                     Text("Save \(seedSong.title) to a new collection.")
                                         .font(.system(size: 14))
-                                        .foregroundStyle(.white.opacity(0.6))
+                                        .foregroundStyle(theme.fg.opacity(0.6))
                                         .multilineTextAlignment(.center)
                                         .lineLimit(2)
                                 }
@@ -78,14 +79,14 @@ struct CreateMixtapeView: View {
                             } else {
                             Text("New mixtape")
                                 .font(.system(size: 22, weight: .bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(theme.fg)
                             }
 
                             VStack(spacing: 12) {
                                 AppTextField(
                                     "",
                                     text: nameBinding,
-                                    prompt: Text("Mixtape name").foregroundColor(.white.opacity(0.4)),
+                                    prompt: Text("Mixtape name").foregroundColor(theme.fg.opacity(0.4)),
                                     submitLabel: .done,
                                     onSubmit: {
                                         focusedField = nil
@@ -94,28 +95,28 @@ struct CreateMixtapeView: View {
                                 )
                                 .focused($focusedField, equals: .name)
                                 .font(.system(size: 17, weight: .medium))
-                                .foregroundStyle(.white)
-                                .tint(.white)
+                                .foregroundStyle(theme.fg)
+                                .tint(theme.fg)
                                 .padding(.horizontal, 18)
                                 .padding(.vertical, 14)
-                                .background(Color.white.opacity(0.08))
+                                .background(theme.softBg)
                                 .clipShape(.rect(cornerRadius: 14))
 
                                 AppTextField(
                                     "",
                                     text: detailsBinding,
-                                    prompt: Text("Description (optional)").foregroundColor(.white.opacity(0.4)),
+                                    prompt: Text("Description (optional)").foregroundColor(theme.fg.opacity(0.4)),
                                     axis: .vertical,
                                     submitLabel: .done
                                 )
                                 .lineLimit(2...4)
                                 .focused($focusedField, equals: .details)
                                 .font(.system(size: 15))
-                                .foregroundStyle(.white)
-                                .tint(.white)
+                                .foregroundStyle(theme.fg)
+                                .tint(theme.fg)
                                 .padding(.horizontal, 18)
                                 .padding(.vertical, 12)
-                                .background(Color.white.opacity(0.08))
+                                .background(theme.softBg)
                                 .clipShape(.rect(cornerRadius: 14))
                                 .onChange(of: appState.createMixtapeDraft.details) { _, newValue in
                                     if newValue.contains("\n") {
@@ -149,10 +150,10 @@ struct CreateMixtapeView: View {
                             if isCreating {
                                 if let uploadProgress {
                                     ProgressView(value: uploadProgress)
-                                        .tint(.black)
+                                        .tint(theme.accentOn)
                                         .frame(width: 48)
                                 } else {
-                                    ProgressView().tint(.black)
+                                    ProgressView().tint(theme.accentOn)
                                 }
                             } else {
                                 Text("Create & Save")
@@ -160,9 +161,9 @@ struct CreateMixtapeView: View {
                             }
                             Spacer()
                         }
-                        .foregroundStyle(.black)
+                        .foregroundStyle(theme.accentOn)
                         .padding(.vertical, 14)
-                        .background(canCreate ? Color.white : Color.white.opacity(0.4))
+                        .background(canCreate ? theme.accent : theme.accent.opacity(0.4))
                         .clipShape(.capsule)
                     }
                     .disabled(!canCreate)
@@ -177,14 +178,14 @@ struct CreateMixtapeView: View {
                         appState.createMixtapeDraft.clear()
                         dismiss()
                     }
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(theme.fg.opacity(0.85))
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .presentationBackground(.black)
+        .presentationBackground(theme.bg)
         .interactiveDismissDisabled(true)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(theme.isLight ? .light : .dark)
         .fullScreenCover(isPresented: $showCoverPicker) {
             MixtapeCoverImagePicker { image in
                 appState.createMixtapeDraft.coverImage = image
@@ -203,7 +204,7 @@ struct CreateMixtapeView: View {
             } label: {
                 ZStack {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
+                        .fill(theme.softBg)
                         .frame(width: 160, height: 160)
 
                     if let pickedImage = appState.createMixtapeDraft.coverImage {
@@ -215,10 +216,10 @@ struct CreateMixtapeView: View {
                             .overlay(alignment: .topTrailing) {
                                 Text("Change")
                                     .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(theme.fg)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
-                                    .background(.black.opacity(0.55))
+                                    .background(theme.bg.opacity(0.55))
                                     .clipShape(.capsule)
                                     .padding(8)
                             }
@@ -226,17 +227,17 @@ struct CreateMixtapeView: View {
                         VStack(spacing: 8) {
                             Image(systemName: "photo.on.rectangle.angled")
                                 .font(.system(size: 32))
-                                .foregroundStyle(.white.opacity(0.45))
+                                .foregroundStyle(theme.fg.opacity(0.45))
                             Text("Add cover")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.75))
+                                .foregroundStyle(theme.fg.opacity(0.75))
                         }
                     }
 
                     if isCreating {
-                        Color.black.opacity(0.45)
+                        theme.bg.opacity(0.45)
                         ProgressView()
-                            .tint(.white)
+                            .tint(theme.fg)
                     }
                 }
             }
@@ -245,7 +246,7 @@ struct CreateMixtapeView: View {
 
             Text("Cover is required")
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(theme.fg.opacity(0.35))
         }
     }
 

@@ -7,6 +7,8 @@ struct SongCardView: View {
     let appState: AppState
     let onToggleLike: () -> Void
 
+    @Environment(\.riffTheme) private var theme
+
     private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
     @State private var resolvedSpotifyURL: String?
     @State private var showShareFlow: Bool = false
@@ -73,7 +75,7 @@ struct SongCardView: View {
             let artFrame = FeedLayout.discoveryArtFrame(forPageSize: proxy.size)
 
             ZStack(alignment: .top) {
-                Color.black
+                theme.bg
 
                 // Keep the artwork in the same frame on every card. Text,
                 // listener state, and controls can vary around it without
@@ -142,7 +144,7 @@ struct SongCardView: View {
                         onSent: { showShareFlow = false }
                     )
                 }
-                .presentationBackground(.black)
+                .presentationBackground(theme.bg)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
@@ -161,7 +163,7 @@ struct SongCardView: View {
                 NavigationStack {
                     ChatView(conversation: conv, appState: appState)
                 }
-                .presentationBackground(.black)
+                .presentationBackground(theme.bg)
                 .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showDetailSheet) {
@@ -185,10 +187,10 @@ struct SongCardView: View {
                 if showReportedToast {
                     Text("Report submitted. Thanks.")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(.black.opacity(0.9))
+                        .background(theme.bg.opacity(0.9))
                         .clipShape(.capsule)
                         .padding(.top, 40)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -222,7 +224,7 @@ struct SongCardView: View {
             Text(headerLabel)
                 .font(.system(size: 12, weight: .bold))
                 .tracking(1.5)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(theme.fg.opacity(0.5))
                 .lineLimit(1)
 
             HStack(spacing: 0) {
@@ -231,18 +233,18 @@ struct SongCardView: View {
                 } label: {
                     Text(share.song.title)
                         .fontWeight(.bold)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                 }
                 .buttonStyle(.plain)
 
                 Text("  \u{00B7}  ")
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(theme.fg.opacity(0.4))
 
                 Button {
                     openArtistPage()
                 } label: {
                     Text(share.song.artist)
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(theme.fg.opacity(0.9))
                 }
                 .buttonStyle(.plain)
                 .disabled(isResolvingArtist)
@@ -269,7 +271,7 @@ struct SongCardView: View {
                 } label: {
                     Image(systemName: isLiked ? "heart.fill" : "heart")
                         .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(isLiked ? .pink : .white.opacity(0.8))
+                        .foregroundStyle(isLiked ? .pink : theme.fg.opacity(0.8))
                         .padding(10)
                         .background(.ultraThinMaterial)
                         .clipShape(Circle())
@@ -293,7 +295,7 @@ struct SongCardView: View {
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.85))
+                            .foregroundStyle(theme.fg.opacity(0.85))
                             .padding(10)
                             .background(.ultraThinMaterial)
                             .clipShape(Circle())
@@ -305,7 +307,7 @@ struct SongCardView: View {
                 if let note = share.note, !note.isEmpty {
                     Text(note)
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                         .multilineTextAlignment(.center)
                         .lineLimit(isNoteExpanded ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -321,7 +323,7 @@ struct SongCardView: View {
                         }
                 }
             }
-            .shadow(color: .white.opacity(0.05), radius: 20, y: 10)
+            .shadow(color: theme.fg.opacity(0.05), radius: 20, y: 10)
     }
 
     // MARK: - Sender row (tap to open chat)
@@ -337,17 +339,17 @@ struct SongCardView: View {
                 // dim caption text.
                 Text(sentHistory == nil && !viewerIsSender ? senderFullName : "You")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.95))
+                    .foregroundStyle(theme.fg.opacity(0.95))
                 Text("\u{00B7}")
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(theme.fg.opacity(0.5))
                 if let sentHistory {
                     Text(sentRecipientSummary(sentHistory.recipients))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(theme.fg.opacity(0.5))
                     Text("\u{00B7}")
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(theme.fg.opacity(0.5))
                 }
                 Text(share.timestamp, format: .dateTime.month(.abbreviated).day())
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(theme.fg.opacity(0.5))
             }
             .font(.system(size: 13))
             .contentShape(Rectangle())
@@ -416,7 +418,7 @@ struct SongCardView: View {
                     ZStack {
                         if isCurrentSong && audioPlayer.isLoading {
                             ProgressView()
-                                .tint(.black)
+                                .tint(theme.accentOn)
                                 .scaleEffect(0.8)
                         } else {
                             Image(systemName: isPlayingThis ? "pause.fill" : "play.fill")
@@ -424,9 +426,9 @@ struct SongCardView: View {
                                 .contentTransition(.symbolEffect(.replace))
                         }
                     }
-                    .foregroundStyle(.black)
+                    .foregroundStyle(theme.accentOn)
                     .frame(width: 52, height: 40)
-                    .background(.white)
+                    .background(theme.accent)
                     .clipShape(.capsule)
                 }
                 .sensoryFeedback(.impact(weight: .light), trigger: isPlayingThis)
@@ -446,9 +448,9 @@ struct SongCardView: View {
                 } label: {
                     Image(systemName: appState.saveService.isSaved(songId: share.song.id) ? "bookmark.fill" : "bookmark")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white.opacity(appState.saveService.isSaved(songId: share.song.id) ? 0.9 : 0.6))
+                        .foregroundStyle(theme.fg.opacity(appState.saveService.isSaved(songId: share.song.id) ? 0.9 : 0.6))
                         .frame(width: 40, height: 40)
-                        .background(Color.white.opacity(0.08))
+                        .background(theme.fg.opacity(0.08))
                         .clipShape(.capsule)
                 }
                 .sensoryFeedback(.selection, trigger: appState.saveService.isSaved(songId: share.song.id))
@@ -458,9 +460,9 @@ struct SongCardView: View {
                 } label: {
                     Image(systemName: "paperplane.fill")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(theme.fg.opacity(0.6))
                         .frame(width: 40, height: 40)
-                        .background(Color.white.opacity(0.08))
+                        .background(theme.fg.opacity(0.08))
                         .clipShape(.capsule)
                 }
             }
@@ -469,7 +471,7 @@ struct SongCardView: View {
                audioPlayer.currentSongId == nil || audioPlayer.currentSongId == share.song.id {
                 Text(error)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(theme.fg.opacity(0.4))
                     .padding(.top, 4)
             }
         }
@@ -497,19 +499,20 @@ struct SongCardView: View {
 
 struct ListenerAvatarStack: View {
     let listeners: [SentSongListener]
+    @Environment(\.riffTheme) private var theme
 
     var body: some View {
         HStack(spacing: -8) {
             if listeners.isEmpty {
                 Image(systemName: "eye")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.38))
+                    .foregroundStyle(theme.fg.opacity(0.38))
                     .frame(width: 28, height: 28)
-                    .background(Color.white.opacity(0.08), in: Circle())
+                    .background(theme.fg.opacity(0.08), in: Circle())
             } else {
                 ForEach(Array(listeners.prefix(3))) { listener in
                     InitialsAvatar(user: listener.user, size: 28)
-                        .overlay(Circle().stroke(Color.black, lineWidth: 2))
+                        .overlay(Circle().stroke(theme.bg, lineWidth: 2))
                 }
             }
         }
@@ -519,19 +522,21 @@ struct ListenerAvatarStack: View {
 private struct InitialsAvatar: View {
     let user: AppUser
     let size: CGFloat
+    @Environment(\.riffTheme) private var theme
 
     var body: some View {
         Text(user.initials.isEmpty ? "?" : user.initials)
             .font(.system(size: size * 0.36, weight: .bold))
-            .foregroundStyle(.white)
+            .foregroundStyle(theme.fg)
             .frame(width: size, height: size)
-            .background(Color.white.opacity(0.16), in: Circle())
+            .background(theme.fg.opacity(0.16), in: Circle())
     }
 }
 
 struct ShareListenerListSheet: View {
     let listeners: [SentSongListener]
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
 
     var body: some View {
         NavigationStack {
@@ -544,10 +549,10 @@ struct ShareListenerListSheet: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(fullName(listener.user))
                                     .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(theme.fg)
                                 Text("@\(listener.user.username)")
                                     .font(.system(size: 13))
-                                    .foregroundStyle(.white.opacity(0.52))
+                                    .foregroundStyle(theme.fg.opacity(0.52))
                             }
 
                             Spacer()
@@ -555,35 +560,35 @@ struct ShareListenerListSheet: View {
                             VStack(alignment: .trailing, spacing: 3) {
                                 Text(listener.listenedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
                                     .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.58))
+                                    .foregroundStyle(theme.fg.opacity(0.58))
                                 Text(sourceLabel(listener.sources))
                                     .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.42))
+                                    .foregroundStyle(theme.fg.opacity(0.42))
                             }
                         }
                         .padding(.horizontal, 20)
                         .padding(.vertical, 14)
 
                         Divider()
-                            .overlay(Color.white.opacity(0.08))
+                            .overlay(theme.fg.opacity(0.08))
                             .padding(.leading, 74)
                     }
                 }
                 .padding(.top, 8)
             }
-            .background(Color.black)
+            .background(theme.bg)
             .navigationTitle("Listened by")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(theme.fg.opacity(0.8))
                 }
             }
-            .toolbarBackground(.black, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarBackground(theme.bg, for: .navigationBar)
+            .toolbarColorScheme(theme.toolbarColorScheme, for: .navigationBar)
         }
-        .presentationBackground(.black)
+        .presentationBackground(theme.bg)
     }
 
     private func fullName(_ user: AppUser) -> String {
@@ -608,6 +613,8 @@ struct ScrubBarView: View {
     let songId: String
     let fallbackDuration: String
 
+    @Environment(\.riffTheme) private var theme
+
     private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
     private var progressModel: PlayerProgressModel { AudioPlayerService.shared.progressModel }
     @State private var isScrubbing: Bool = false
@@ -625,15 +632,15 @@ struct ScrubBarView: View {
 
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color.white.opacity(0.15))
+                        .fill(theme.fg.opacity(0.15))
                         .frame(height: 4)
 
                     Capsule()
-                        .fill(Color.white.opacity(0.9))
+                        .fill(theme.fg.opacity(0.9))
                         .frame(width: max(0, width * progressValue), height: 4)
 
                     Circle()
-                        .fill(.white)
+                        .fill(theme.fg)
                         .frame(width: isScrubbing ? 14 : 10, height: isScrubbing ? 14 : 10)
                         .offset(x: max(0, min(width * progressValue - (isScrubbing ? 7 : 5), width - (isScrubbing ? 14 : 10))))
                         .animation(.spring(duration: 0.2), value: isScrubbing)
@@ -667,7 +674,7 @@ struct ScrubBarView: View {
                     .monospacedDigit()
             }
             .font(.system(size: 11))
-            .foregroundStyle(.white.opacity(0.4))
+            .foregroundStyle(theme.fg.opacity(0.4))
         }
     }
 }

@@ -6,23 +6,24 @@ struct MessagesListView: View {
 
     @State private var quickSendRecipient: AppUser?
     @State private var navigationPath = NavigationPath()
+    @Environment(\.riffTheme) private var theme
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
             ZStack {
-                Color.black.ignoresSafeArea()
+                theme.bg.ignoresSafeArea()
 
                 if appState.conversations.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "bubble.left.and.bubble.right")
                             .font(.system(size: 40))
-                            .foregroundStyle(.white.opacity(0.15))
+                            .foregroundStyle(theme.fg.opacity(0.18))
                         Text("No messages yet")
                             .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(theme.fg.opacity(0.45))
                         Text("Reply to a song to start a conversation")
                             .font(.system(size: 14))
-                            .foregroundStyle(.white.opacity(0.25))
+                            .foregroundStyle(theme.faint)
                     }
                 } else {
                     ScrollView {
@@ -32,7 +33,7 @@ struct MessagesListView: View {
 
                                 if conversation.id != appState.conversations.last?.id {
                                     Divider()
-                                        .background(Color.white.opacity(0.06))
+                                        .background(theme.border.opacity(0.4))
                                         .padding(.horizontal, 20)
                                 }
                             }
@@ -43,7 +44,9 @@ struct MessagesListView: View {
             }
             .navigationTitle("Messages")
             .navigationBarTitleDisplayMode(.large)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.toolbarColorScheme, for: .navigationBar)
+            .toolbarBackground(theme.bg, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .navigationDestination(for: Conversation.self) { conversation in
                 ChatView(conversation: conversation, appState: appState)
             }
@@ -83,22 +86,22 @@ struct MessagesListView: View {
                 HStack(spacing: 12) {
                     Text(String(friendName.prefix(1)).uppercased())
                         .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                         .frame(width: 44, height: 44)
-                        .background(Color.white.opacity(0.1))
+                        .background(theme.softBg)
                         .clipShape(Circle())
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text(friendName)
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(theme.fg)
                             .lineLimit(1)
                             .truncationMode(.tail)
                             .minimumScaleFactor(0.8)
 
                         Text(conversation.lastMessageText)
                             .font(.system(size: 13))
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(theme.sub)
                             .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -107,14 +110,14 @@ struct MessagesListView: View {
                         if conversation.songStreakCount > 0 {
                             Text("Streak \(conversation.songStreakCount)")
                                 .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.88))
+                                .foregroundStyle(theme.fg.opacity(0.88))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.85)
                                 .accessibilityLabel("Streak \(conversation.songStreakCount)")
                         } else {
                             Text("start a streak")
                                 .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.32))
+                                .foregroundStyle(theme.faint)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.85)
                         }
@@ -124,15 +127,15 @@ struct MessagesListView: View {
                     VStack(alignment: .trailing, spacing: 4) {
                         Text(conversation.lastMessageTimestamp, format: .relative(presentation: .named))
                             .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.25))
+                            .foregroundStyle(theme.faint)
 
                         if conversation.unreadCount > 0 {
                             Text("\(conversation.unreadCount)")
                                 .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(theme.accentOn)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                                .background(theme.accent)
                                 .clipShape(.capsule)
                         }
                     }
@@ -152,9 +155,9 @@ struct MessagesListView: View {
                 // `music.note.list`).
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Color(red: 0.76, green: 0.38, blue: 0.35))
+                    .foregroundStyle(theme.accentOn)
                     .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.1))
+                    .background(theme.accent)
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)

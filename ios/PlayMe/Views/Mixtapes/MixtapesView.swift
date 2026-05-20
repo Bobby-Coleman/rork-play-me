@@ -31,6 +31,8 @@ enum MixtapesViewMode: String { case grid, list }
 struct MixtapesView: View {
     @Bindable var appState: AppState
 
+    @Environment(\.riffTheme) private var theme
+
     @State private var selectedSegment: MixtapesSegment = .mixtapes
     @State private var searchText: String = ""
     @State private var showSettings: Bool = false
@@ -62,7 +64,7 @@ struct MixtapesView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                theme.bg.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     searchBar
@@ -99,9 +101,9 @@ struct MixtapesView: View {
                     } label: {
                         Text(user?.initials ?? "?")
                             .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(theme.fg)
                             .frame(width: 30, height: 30)
-                            .background(Color.white.opacity(0.15))
+                            .background(theme.fg.opacity(0.15))
                             .clipShape(Circle())
                     }
                     .accessibilityLabel("Profile")
@@ -112,25 +114,25 @@ struct MixtapesView: View {
                     } label: {
                         Image(systemName: "gearshape.fill")
                             .font(.system(size: 17))
-                            .foregroundStyle(.white.opacity(0.8))
+                            .foregroundStyle(theme.fg.opacity(0.8))
                     }
                     .accessibilityLabel("Settings")
                 }
             }
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarColorScheme(theme.toolbarColorScheme, for: .navigationBar)
+            .toolbarBackground(theme.bg, for: .navigationBar)
         }
         .sheet(isPresented: $showSettings) {
             NavigationStack {
                 SettingsView(appState: appState)
             }
-            .presentationBackground(.black)
+            .presentationBackground(theme.bg)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showProfileDetails) {
             ProfileDetailsView(appState: appState)
-                .presentationBackground(.black)
+                .presentationBackground(theme.bg)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
@@ -144,19 +146,19 @@ struct MixtapesView: View {
         }
         .sheet(item: $detailMixtape) { mixtape in
             MixtapeDetailView(mixtape: mixtape, appState: appState)
-                .presentationBackground(.black)
+                .presentationBackground(theme.bg)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $detailReceivedMixtape) { share in
             ReceivedMixtapeDetailView(share: share, appState: appState)
-                .presentationBackground(.black)
+                .presentationBackground(theme.bg)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $detailReceivedAlbum) { share in
             ReceivedAlbumDetailView(share: share, appState: appState)
-                .presentationBackground(.black)
+                .presentationBackground(theme.bg)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
@@ -168,31 +170,31 @@ struct MixtapesView: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(theme.fg.opacity(0.45))
 
             AppTextField(
                 "",
                 text: $searchText,
-                prompt: Text("Search your songs").foregroundColor(.white.opacity(0.4)),
+                prompt: Text("Search your songs").foregroundColor(theme.fg.opacity(0.4)),
                 submitLabel: .search,
                 onSubmit: { isSearchFocused = false }
             )
             .font(.system(size: 14))
-            .foregroundStyle(.white)
-            .tint(.white)
+            .foregroundStyle(theme.fg)
+            .tint(theme.fg)
             .focused($isSearchFocused)
 
             if !searchText.isEmpty {
                 Button { searchText = "" } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 14))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(theme.fg.opacity(0.4))
                 }
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Color.white.opacity(0.08))
+        .background(theme.fg.opacity(0.08))
         .clipShape(.capsule)
     }
 
@@ -214,10 +216,10 @@ struct MixtapesView: View {
                         VStack(spacing: 6) {
                             Text(seg.rawValue)
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(selectedSegment == seg ? .white : .white.opacity(0.35))
+                                .foregroundStyle(selectedSegment == seg ? theme.fg : theme.fg.opacity(0.35))
 
                             Rectangle()
-                                .fill(selectedSegment == seg ? Color.white : Color.clear)
+                                .fill(selectedSegment == seg ? theme.fg : Color.clear)
                                 .frame(height: 2)
                         }
                         .padding(.horizontal, 16)
@@ -240,7 +242,7 @@ struct MixtapesView: View {
             HStack(spacing: 8) {
                 Text(sectionTitle)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(theme.fg.opacity(0.55))
                     .textCase(.uppercase)
                     .tracking(0.5)
 
@@ -272,7 +274,7 @@ struct MixtapesView: View {
             modeButton(target: .list, icon: "list.bullet")
         }
         .padding(2)
-        .background(Color.white.opacity(0.06), in: Capsule())
+        .background(theme.fg.opacity(0.06), in: Capsule())
     }
 
     private func modeButton(target: MixtapesViewMode, icon: String) -> some View {
@@ -282,9 +284,9 @@ struct MixtapesView: View {
         } label: {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(active ? .black : .white.opacity(0.6))
+                .foregroundStyle(active ? theme.bg : theme.fg.opacity(0.6))
                 .frame(width: 28, height: 24)
-                .background(active ? Color.white : Color.clear, in: Capsule())
+                .background(active ? theme.fg : Color.clear, in: Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(target == .grid ? "Grid view" : "List view")
@@ -484,7 +486,7 @@ struct MixtapesView: View {
                         )
                         if share.id != shares.last?.id {
                             Divider()
-                                .background(Color.white.opacity(0.06))
+                                .background(theme.fg.opacity(0.06))
                                 .padding(.horizontal, 20)
                         }
                     }
@@ -616,7 +618,7 @@ struct MixtapesView: View {
                         }
                         if item.id != items.last?.id {
                             Divider()
-                                .background(Color.white.opacity(0.06))
+                                .background(theme.fg.opacity(0.06))
                                 .padding(.horizontal, 20)
                         }
                     }
@@ -649,11 +651,11 @@ struct MixtapesView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(share.mixtape.name)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .lineLimit(1)
                 Text("\(prefix) @\(counterpart.username.isEmpty ? counterpart.firstName : counterpart.username) · \(songCount) song\(songCount == 1 ? "" : "s")")
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(theme.fg.opacity(0.4))
                     .lineLimit(1)
             }
 
@@ -661,7 +663,7 @@ struct MixtapesView: View {
 
             Text(share.timestamp.formatted(.relative(presentation: .named)))
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.25))
+                .foregroundStyle(theme.fg.opacity(0.25))
                 .frame(width: 70, alignment: .trailing)
         }
         .padding(.horizontal, 20)
@@ -689,7 +691,7 @@ struct MixtapesView: View {
         let count = share.songs.count
         return HStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08))
+                RoundedRectangle(cornerRadius: 8).fill(theme.fg.opacity(0.08))
                 AsyncImage(url: URL(string: share.album.artworkURL)) { phase in
                     if let image = phase.image {
                         image.resizable().aspectRatio(contentMode: .fill)
@@ -702,11 +704,11 @@ struct MixtapesView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(share.album.name)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .lineLimit(1)
                 Text("\(prefix) @\(counterpart.username.isEmpty ? counterpart.firstName : counterpart.username) · \(count) song\(count == 1 ? "" : "s")")
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(theme.fg.opacity(0.4))
                     .lineLimit(1)
             }
 
@@ -714,7 +716,7 @@ struct MixtapesView: View {
 
             Text(share.timestamp.formatted(.relative(presentation: .named)))
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.25))
+                .foregroundStyle(theme.fg.opacity(0.25))
                 .frame(width: 70, alignment: .trailing)
         }
         .padding(.horizontal, 20)
@@ -729,10 +731,10 @@ struct MixtapesView: View {
         VStack(spacing: 8) {
             Image(systemName: "music.note")
                 .font(.system(size: 28))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(theme.fg.opacity(0.15))
             Text(searchText.isEmpty ? "Nothing here yet" : "No matches")
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 48)
@@ -873,7 +875,7 @@ struct MixtapesView: View {
                         }
                         if idx != results.count - 1 {
                             Divider()
-                                .background(Color.white.opacity(0.06))
+                                .background(theme.fg.opacity(0.06))
                                 .padding(.horizontal, 20)
                         }
                     }
@@ -896,6 +898,8 @@ private struct SongsGridView: View {
     let appState: AppState
     let searchText: String
     let onTap: (_ songs: [Song], _ index: Int) -> Void
+
+    @Environment(\.riffTheme) private var theme
 
     private let horizontalPadding: CGFloat = 12
     private let spacing: CGFloat = 10
@@ -981,10 +985,10 @@ private struct SongsGridView: View {
         VStack(spacing: 8) {
             Image(systemName: "square.grid.2x2")
                 .font(.system(size: 28))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(theme.fg.opacity(0.15))
             Text(searchText.isEmpty ? "No songs yet — like or save some" : "No matches")
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }
@@ -998,6 +1002,8 @@ private struct MixtapesGridView: View {
     let appState: AppState
     let searchText: String
     let onTap: (Mixtape) -> Void
+
+    @Environment(\.riffTheme) private var theme
 
     private let horizontalPadding: CGFloat = 12
     private let spacing: CGFloat = 10
@@ -1041,11 +1047,11 @@ private struct MixtapesGridView: View {
                                     VStack(alignment: .leading, spacing: 1) {
                                         Text(mixtape.name)
                                             .font(.system(size: 12, weight: .semibold))
-                                            .foregroundStyle(.white)
+                                            .foregroundStyle(theme.fg)
                                             .lineLimit(1)
                                         Text("\(mixtape.songCount) song\(mixtape.songCount == 1 ? "" : "s")")
                                             .font(.system(size: 11))
-                                            .foregroundStyle(.white.opacity(0.45))
+                                            .foregroundStyle(theme.fg.opacity(0.45))
                                             .lineLimit(1)
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1076,10 +1082,10 @@ private struct MixtapesGridView: View {
         VStack(spacing: 8) {
             Image(systemName: "rectangle.stack")
                 .font(.system(size: 28))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(theme.fg.opacity(0.15))
             Text(searchText.isEmpty ? "No mixtapes yet" : "No matches")
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
     }
@@ -1094,6 +1100,8 @@ private struct MixtapesGridView: View {
 private struct SongsListView: View {
     let appState: AppState
     let onTap: (_ songs: [Song], _ index: Int) -> Void
+
+    @Environment(\.riffTheme) private var theme
 
     private var aggregated: [Song] {
         var seen = Set<String>()
@@ -1120,7 +1128,7 @@ private struct SongsListView: View {
                         SongListRow(song: song, onTap: { onTap(aggregated, idx) })
                         if idx != aggregated.count - 1 {
                             Divider()
-                                .background(Color.white.opacity(0.06))
+                                .background(theme.fg.opacity(0.06))
                                 .padding(.horizontal, 20)
                         }
                     }
@@ -1136,10 +1144,10 @@ private struct SongsListView: View {
         VStack(spacing: 8) {
             Image(systemName: "music.note.list")
                 .font(.system(size: 28))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(theme.fg.opacity(0.15))
             Text("No songs yet — like or save some")
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }
@@ -1154,6 +1162,8 @@ private struct SongsListView: View {
 private struct SongListRow: View {
     let song: Song
     let onTap: () -> Void
+
+    @Environment(\.riffTheme) private var theme
 
     private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
     private var isPlaying: Bool { audioPlayer.currentSongId == song.id && audioPlayer.isPlaying }
@@ -1181,7 +1191,7 @@ private struct SongListRow: View {
                             .frame(width: 28, height: 28)
                         Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(theme.fg)
                             .contentTransition(.symbolEffect(.replace))
                     }
                 }
@@ -1191,18 +1201,18 @@ private struct SongListRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(song.title)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .lineLimit(1)
                 Text(song.artist)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(theme.fg.opacity(0.4))
                     .lineLimit(1)
             }
             Spacer()
             if !song.duration.isEmpty {
                 Text(song.duration)
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.25))
+                    .foregroundStyle(theme.fg.opacity(0.25))
             }
         }
         .padding(.horizontal, 20)
@@ -1221,6 +1231,8 @@ private struct MixtapesListView: View {
     let appState: AppState
     let onTap: (Mixtape) -> Void
 
+    @Environment(\.riffTheme) private var theme
+
     private var mixtapes: [Mixtape] { appState.mixtapeStore.allMixtapes }
 
     var body: some View {
@@ -1233,7 +1245,7 @@ private struct MixtapesListView: View {
                         MixtapeListRow(mixtape: mix, onTap: { onTap(mix) })
                         if idx != mixtapes.count - 1 {
                             Divider()
-                                .background(Color.white.opacity(0.06))
+                                .background(theme.fg.opacity(0.06))
                                 .padding(.horizontal, 20)
                         }
                     }
@@ -1252,10 +1264,10 @@ private struct MixtapesListView: View {
         VStack(spacing: 8) {
             Image(systemName: "rectangle.stack")
                 .font(.system(size: 28))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(theme.fg.opacity(0.15))
             Text("No mixtapes yet")
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
     }
@@ -1268,6 +1280,8 @@ private struct MixtapeListRow: View {
     let mixtape: Mixtape
     let onTap: () -> Void
 
+    @Environment(\.riffTheme) private var theme
+
     var body: some View {
         HStack(spacing: 12) {
             MixtapeCoverView(mixtape: mixtape, cornerRadius: 8, showsShadow: false)
@@ -1275,17 +1289,17 @@ private struct MixtapeListRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(mixtape.name)
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .lineLimit(1)
                 Text("\(mixtape.songCount) song\(mixtape.songCount == 1 ? "" : "s")")
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .foregroundStyle(theme.fg.opacity(0.45))
                     .lineLimit(1)
             }
             Spacer()
             Image(systemName: "chevron.right")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.25))
+                .foregroundStyle(theme.fg.opacity(0.25))
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
@@ -1305,6 +1319,7 @@ struct MixtapeDetailView: View {
     let appState: AppState
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
     @State private var fullscreenSeed: FullscreenSeed?
     @State private var showEditDetails: Bool = false
     @State private var showShareSheet: Bool = false
@@ -1352,7 +1367,7 @@ struct MixtapeDetailView: View {
                     spacing: spacing
                 )
                 ZStack {
-                    Color.black.ignoresSafeArea()
+                    theme.bg.ignoresSafeArea()
 
                     ScrollView {
                         VStack(spacing: 0) {
@@ -1362,12 +1377,12 @@ struct MixtapeDetailView: View {
                                 if liveMixtape.isSystemLiked {
                                     Text("Auto-built from your liked songs")
                                         .font(.system(size: 13))
-                                        .foregroundStyle(.white.opacity(0.45))
+                                        .foregroundStyle(theme.fg.opacity(0.45))
                                         .padding(.top, 14)
                                 } else {
                                     Text("\(liveMixtape.songCount) song\(liveMixtape.songCount == 1 ? "" : "s")")
                                         .font(.system(size: 14))
-                                        .foregroundStyle(.white.opacity(0.5))
+                                        .foregroundStyle(theme.fg.opacity(0.5))
                                         .padding(.top, 14)
                                 }
 
@@ -1427,7 +1442,7 @@ struct MixtapeDetailView: View {
                                             }
                                             if song.id != liveMixtape.songs.last?.id {
                                                 Divider()
-                                                    .background(Color.white.opacity(0.05))
+                                                    .background(theme.fg.opacity(0.05))
                                                     .padding(.leading, 80)
                                             }
                                         }
@@ -1446,7 +1461,7 @@ struct MixtapeDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                 }
                 if isOwner {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -1455,7 +1470,7 @@ struct MixtapeDetailView: View {
                         } label: {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.system(size: 17))
-                                .foregroundStyle(.white.opacity(0.85))
+                                .foregroundStyle(theme.fg.opacity(0.85))
                         }
                         .accessibilityLabel("Share mixtape")
                     }
@@ -1477,7 +1492,7 @@ struct MixtapeDetailView: View {
                         } label: {
                             Image(systemName: "ellipsis")
                                 .font(.system(size: 17))
-                                .foregroundStyle(.white.opacity(0.85))
+                                .foregroundStyle(theme.fg.opacity(0.85))
                         }
                     }
                 }
@@ -1512,7 +1527,7 @@ struct MixtapeDetailView: View {
                     onSent: { showShareSheet = false }
                 )
             }
-            .presentationBackground(.black)
+            .presentationBackground(theme.bg)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
@@ -1558,7 +1573,7 @@ struct MixtapeDetailView: View {
 
             Text(liveMixtape.name)
                 .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
                 .lineLimit(2)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
@@ -1575,7 +1590,7 @@ struct MixtapeDetailView: View {
         HStack(spacing: 8) {
             Text("Songs")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(theme.fg.opacity(0.55))
                 .textCase(.uppercase)
                 .tracking(0.5)
             Spacer()
@@ -1584,7 +1599,7 @@ struct MixtapeDetailView: View {
                 detailModeButton(target: .list, icon: "list.bullet")
             }
             .padding(2)
-            .background(Color.white.opacity(0.06), in: Capsule())
+            .background(theme.fg.opacity(0.06), in: Capsule())
         }
     }
 
@@ -1595,9 +1610,9 @@ struct MixtapeDetailView: View {
         } label: {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(active ? .black : .white.opacity(0.6))
+                .foregroundStyle(active ? theme.bg : theme.fg.opacity(0.6))
                 .frame(width: 28, height: 24)
-                .background(active ? Color.white : Color.clear, in: Capsule())
+                .background(active ? theme.fg : Color.clear, in: Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(target == .grid ? "Grid view" : "List view")
@@ -1610,21 +1625,21 @@ struct MixtapeDetailView: View {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .foregroundStyle(theme.fg.opacity(0.45))
                 Text("add more songs")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.58))
+                    .foregroundStyle(theme.fg.opacity(0.58))
                 Spacer(minLength: 0)
                 Image(systemName: "plus.circle.fill")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(theme.fg.opacity(0.7))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(theme.fg.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                    .stroke(theme.fg.opacity(0.08), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)
@@ -1638,7 +1653,7 @@ struct MixtapeDetailView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(text)
                 .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(theme.fg.opacity(0.7))
                 .lineLimit(descriptionExpanded ? nil : 3)
                 .fixedSize(horizontal: false, vertical: true)
             // Heuristic disclosure trigger: only surface "more" when
@@ -1653,7 +1668,7 @@ struct MixtapeDetailView: View {
                 } label: {
                     Text(descriptionExpanded ? "less" : "more")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(theme.fg.opacity(0.55))
                 }
                 .buttonStyle(.plain)
             }
@@ -1664,10 +1679,10 @@ struct MixtapeDetailView: View {
         VStack(spacing: 8) {
             Image(systemName: "music.note")
                 .font(.system(size: 28))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(theme.fg.opacity(0.15))
             Text(liveMixtape.isSystemLiked ? "Like a song to start filling this in" : "No songs in this mixtape yet")
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
     }
@@ -1683,6 +1698,7 @@ private struct AddSongsToMixtapeSheet: View {
     let appState: AppState
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
     @State private var searchText: String = ""
     @State private var searchTask: Task<Void, Never>?
     @State private var detailArtist: ArtistSummary?
@@ -1700,7 +1716,7 @@ private struct AddSongsToMixtapeSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                theme.bg.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     header
@@ -1718,7 +1734,7 @@ private struct AddSongsToMixtapeSheet: View {
                         LazyVStack(spacing: 0) {
                             if appState.isSearchingSongs && appState.searchResults.isEmpty {
                                 ProgressView()
-                                    .tint(.white)
+                                    .tint(theme.fg)
                                     .padding(.top, 40)
                             } else if searchText.isEmpty {
                                 hintView
@@ -1735,7 +1751,7 @@ private struct AddSongsToMixtapeSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
@@ -1747,7 +1763,7 @@ private struct AddSongsToMixtapeSheet: View {
                 searchTask?.cancel()
             }
         }
-        .presentationBackground(.black)
+        .presentationBackground(theme.bg)
         .preferredColorScheme(.dark)
         .sheet(item: $detailArtist) { artist in
             ArtistView(artistId: artist.id, initialArtistName: artist.name, appState: appState)
@@ -1775,10 +1791,10 @@ private struct AddSongsToMixtapeSheet: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("add more songs")
                 .font(.system(size: 28, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
             Text(liveMixtape.name)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(theme.fg.opacity(0.45))
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1790,12 +1806,12 @@ private struct AddSongsToMixtapeSheet: View {
     private var searchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(theme.fg.opacity(0.4))
             AppTextField("Search songs or artists...", text: $searchText, submitLabel: .search) {
                 isSearchFocused = false
             }
-                .foregroundStyle(.white)
-                .tint(.white)
+                .foregroundStyle(theme.fg)
+                .tint(theme.fg)
                 .autocorrectionDisabled()
                 .focused($isSearchFocused)
                 .onChange(of: searchText) { _, newValue in
@@ -1810,13 +1826,13 @@ private struct AddSongsToMixtapeSheet: View {
                     searchTask?.cancel()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(theme.fg.opacity(0.4))
                 }
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(Color.white.opacity(0.08))
+        .background(theme.fg.opacity(0.08))
         .clipShape(.rect(cornerRadius: 12))
         .padding(.horizontal, 20)
         .padding(.bottom, 8)
@@ -1840,7 +1856,7 @@ private struct AddSongsToMixtapeSheet: View {
             ArtistResultHeader()
             topHitRow(top)
                 .overlay(alignment: .bottom) {
-                    Color.white.opacity(0.05).frame(height: 0.5)
+                    theme.fg.opacity(0.05).frame(height: 0.5)
                 }
         }
 
@@ -1859,7 +1875,7 @@ private struct AddSongsToMixtapeSheet: View {
                 }
                 .id(artist.id)
                 .overlay(alignment: .bottom) {
-                    Color.white.opacity(0.05).frame(height: 0.5)
+                    theme.fg.opacity(0.05).frame(height: 0.5)
                 }
             }
         }
@@ -1891,7 +1907,7 @@ private struct AddSongsToMixtapeSheet: View {
                 AlbumResultRow(album: album, onTap: { detailAlbum = album })
                     .id(album.id)
                     .overlay(alignment: .bottom) {
-                        Color.white.opacity(0.05).frame(height: 0.5)
+                        theme.fg.opacity(0.05).frame(height: 0.5)
                     }
             }
         }
@@ -1905,7 +1921,7 @@ private struct AddSongsToMixtapeSheet: View {
             }
             .id(artist.id)
             .overlay(alignment: .bottom) {
-                Color.white.opacity(0.05).frame(height: 0.5)
+                theme.fg.opacity(0.05).frame(height: 0.5)
             }
         }
     }
@@ -1923,7 +1939,7 @@ private struct AddSongsToMixtapeSheet: View {
             AlbumResultRow(album: album, onTap: { detailAlbum = album })
                 .id(album.id)
                 .overlay(alignment: .bottom) {
-                    Color.white.opacity(0.05).frame(height: 0.5)
+                    theme.fg.opacity(0.05).frame(height: 0.5)
                 }
         }
     }
@@ -1948,10 +1964,10 @@ private struct AddSongsToMixtapeSheet: View {
         VStack(spacing: 12) {
             Image(systemName: "music.magnifyingglass")
                 .font(.system(size: 36))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(theme.fg.opacity(0.15))
             Text("Search for songs to add")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -1961,10 +1977,10 @@ private struct AddSongsToMixtapeSheet: View {
         VStack(spacing: 14) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 36))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(theme.fg.opacity(0.15))
             Text("No results for \"\(searchText)\"")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -2016,12 +2032,12 @@ private struct AddSongsToMixtapeSheet: View {
 
                         if isLoading {
                             ProgressView()
-                                .tint(.white)
+                                .tint(theme.fg)
                                 .scaleEffect(0.6)
                         } else {
                             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(theme.fg)
                                 .contentTransition(.symbolEffect(.replace))
                         }
                     }
@@ -2032,7 +2048,7 @@ private struct AddSongsToMixtapeSheet: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(song.title)
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .lineLimit(1)
                 if let artistId = song.artistId {
                     Button {
@@ -2044,7 +2060,7 @@ private struct AddSongsToMixtapeSheet: View {
                     } label: {
                         Text(song.artist.uppercased())
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(theme.fg.opacity(0.4))
                             .tracking(0.5)
                             .lineLimit(1)
                     }
@@ -2052,7 +2068,7 @@ private struct AddSongsToMixtapeSheet: View {
                 } else {
                     Text(song.artist.uppercased())
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(theme.fg.opacity(0.4))
                         .tracking(0.5)
                         .lineLimit(1)
                 }
@@ -2064,7 +2080,7 @@ private struct AddSongsToMixtapeSheet: View {
         }
         .padding(.vertical, 12)
         .overlay(alignment: .bottom) {
-            Color.white.opacity(0.05)
+            theme.fg.opacity(0.05)
                 .frame(height: 0.5)
         }
     }
@@ -2091,7 +2107,7 @@ private struct AddSongsToMixtapeSheet: View {
             HStack(spacing: 5) {
                 if isSaving {
                     ProgressView()
-                        .tint(.white)
+                        .tint(theme.fg)
                         .scaleEffect(0.65)
                 } else {
                     Image(systemName: isSaved ? "checkmark" : "plus")
@@ -2101,9 +2117,9 @@ private struct AddSongsToMixtapeSheet: View {
                 Text(isSaved ? "Added" : "Add")
                     .font(.system(size: 12, weight: .bold))
             }
-            .foregroundStyle(isSaved ? .black : .white)
+            .foregroundStyle(isSaved ? theme.bg : theme.fg)
             .frame(minWidth: 66, minHeight: 34)
-            .background(isSaved ? Color.white : Color.white.opacity(0.1), in: Capsule())
+            .background(isSaved ? theme.fg : theme.fg.opacity(0.1), in: Capsule())
             .scaleEffect(isSaved ? 1.04 : 1.0)
         }
         .buttonStyle(.plain)
@@ -2129,29 +2145,30 @@ private struct AddSongsToMixtapeSheet: View {
 struct ProfileDetailsView: View {
     let appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
 
     private var user: AppUser? { appState.currentUser }
 
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                theme.bg.ignoresSafeArea()
                 VStack(spacing: 16) {
                     Text(user?.initials ?? "?")
                         .font(.system(size: 32, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                         .frame(width: 96, height: 96)
-                        .background(Color.white.opacity(0.12))
+                        .background(theme.fg.opacity(0.12))
                         .clipShape(Circle())
                         .padding(.top, 32)
 
                     Text(user?.firstName ?? "")
                         .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
 
                     Text("@\(user?.username ?? "")")
                         .font(.system(size: 15))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(theme.fg.opacity(0.45))
 
                     HStack(spacing: 6) {
                         Image(systemName: "music.note.circle.fill")
@@ -2159,7 +2176,7 @@ struct ProfileDetailsView: View {
                             .foregroundStyle(appState.preferredMusicService == .spotify ? .green : .pink)
                         Text(appState.preferredMusicService == .spotify ? "Spotify listener" : "Apple Music listener")
                             .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(theme.fg.opacity(0.5))
                     }
                     .padding(.top, 4)
 
@@ -2169,7 +2186,7 @@ struct ProfileDetailsView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)

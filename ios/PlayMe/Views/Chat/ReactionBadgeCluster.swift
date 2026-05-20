@@ -37,6 +37,8 @@ struct ReactionBadgeCluster: View {
 
     private var currentUserEmoji: String? { reactions[currentUserUID] }
 
+    @Environment(\.riffTheme) private var theme
+
     var body: some View {
         if reactions.isEmpty {
             EmptyView()
@@ -48,7 +50,7 @@ struct ReactionBadgeCluster: View {
                         .overlay {
                             if emoji == currentUserEmoji {
                                 Circle()
-                                    .stroke(Color(red: 0.76, green: 0.38, blue: 0.35), lineWidth: 1.5)
+                                    .stroke(theme.accent, lineWidth: 1.5)
                                     .padding(-2)
                             }
                         }
@@ -56,7 +58,7 @@ struct ReactionBadgeCluster: View {
                 if totalCount > 1 {
                     Text("\(totalCount)")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(theme.fg.opacity(0.7))
                         .padding(.leading, 2)
                 }
             }
@@ -64,13 +66,14 @@ struct ReactionBadgeCluster: View {
             .padding(.vertical, 4)
             .background(
                 Capsule()
-                    .fill(Color.black.opacity(0.85))
+                    .fill(theme.elevatedBg.opacity(0.95))
+                    .background(.ultraThinMaterial, in: Capsule())
                     .overlay(
                         Capsule()
-                            .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+                            .stroke(theme.border, lineWidth: 0.5)
                     )
             )
-            .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+            .shadow(color: theme.bg.opacity(0.3), radius: 4, x: 0, y: 2)
         }
     }
 }

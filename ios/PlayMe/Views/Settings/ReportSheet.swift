@@ -41,6 +41,7 @@ struct ReportSheet: View {
     let onSubmitted: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
     @State private var selectedReason: String = reportReasons[0]
     @State private var note: String = ""
     @State private var isSubmitting: Bool = false
@@ -52,11 +53,11 @@ struct ReportSheet: View {
                 VStack(alignment: .leading, spacing: 18) {
                     Text("Report \(target.targetName)")
                         .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
 
                     Text("Your report is anonymous. Our team reviews reports within 24 hours.")
                         .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(theme.fg.opacity(0.5))
 
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(reportReasons, id: \.self) { reason in
@@ -66,34 +67,34 @@ struct ReportSheet: View {
                                 HStack(spacing: 12) {
                                     Image(systemName: selectedReason == reason ? "largecircle.fill.circle" : "circle")
                                         .font(.system(size: 18))
-                                        .foregroundStyle(selectedReason == reason ? Color(red: 0.76, green: 0.38, blue: 0.35) : .white.opacity(0.3))
+                                        .foregroundStyle(selectedReason == reason ? theme.accent : theme.fg.opacity(0.3))
                                     Text(reason)
                                         .font(.system(size: 15))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(theme.fg)
                                     Spacer()
                                 }
                                 .padding(.vertical, 10)
                             }
                             .buttonStyle(.plain)
                             if reason != reportReasons.last {
-                                Divider().background(Color.white.opacity(0.06))
+                                Divider().background(theme.fg.opacity(0.06))
                             }
                         }
                     }
                     .padding(.horizontal, 14)
-                    .background(Color.white.opacity(0.04))
+                    .background(theme.softBg)
                     .clipShape(.rect(cornerRadius: 12))
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Add details (optional)")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(theme.fg.opacity(0.5))
                         AppTextField("", text: $note, axis: .vertical)
                             .lineLimit(3...6)
                             .font(.system(size: 14))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(theme.fg)
                             .padding(12)
-                            .background(Color.white.opacity(0.06))
+                            .background(theme.softBg)
                             .clipShape(.rect(cornerRadius: 10))
                     }
 
@@ -107,32 +108,32 @@ struct ReportSheet: View {
                         Task { await submit() }
                     } label: {
                         HStack {
-                            if isSubmitting { ProgressView().tint(.white) }
+                            if isSubmitting { ProgressView().tint(theme.accentOn) }
                             Text(isSubmitting ? "Sending..." : "Submit report")
                                 .font(.system(size: 15, weight: .semibold))
                         }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.accentOn)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                        .background(theme.accent)
                         .clipShape(.rect(cornerRadius: 12))
                     }
                     .disabled(isSubmitting)
                 }
                 .padding(20)
             }
-            .background(Color.black)
+            .background(theme.bg)
             .navigationTitle("Report")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Cancel") { dismiss() }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                 }
             }
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(theme.toolbarColorScheme, for: .navigationBar)
         }
-        .presentationBackground(.black)
+        .presentationBackground(theme.bg)
     }
 
     private func submit() async {

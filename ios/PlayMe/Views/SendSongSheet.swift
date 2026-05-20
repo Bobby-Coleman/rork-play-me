@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SendSongSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
     let appState: AppState
     /// Extra invited (pending-signup) contacts to offer as recipients alongside
     /// real friends. Defaults to empty, so main-app call sites keep their
@@ -52,7 +53,7 @@ struct SendSongSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                theme.bg.ignoresSafeArea()
 
                 if step == 0 {
                     songSearchView
@@ -89,9 +90,9 @@ struct SendSongSheet: View {
                     } label: {
                         Image(systemName: step == 1 ? "chevron.left" : "xmark")
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(theme.fg.opacity(0.6))
                             .frame(width: 32, height: 32)
-                            .background(Color.white.opacity(0.1))
+                            .background(theme.fg.opacity(0.1))
                             .clipShape(Circle())
                             .contentTransition(.symbolEffect(.replace))
                     }
@@ -111,7 +112,7 @@ struct SendSongSheet: View {
                 }
             }
         }
-        .presentationBackground(.black)
+        .presentationBackground(theme.bg)
         .sheet(item: $detailArtist) { artist in
             ArtistView(artistId: artist.id, initialArtistName: artist.name, appState: appState)
                 .presentationDetents([.large])
@@ -136,7 +137,7 @@ struct SendSongSheet: View {
                     onSent: { shareAlbum = nil }
                 )
             }
-            .presentationBackground(.black)
+            .presentationBackground(theme.bg)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
@@ -146,7 +147,7 @@ struct SendSongSheet: View {
         VStack(spacing: 0) {
             Text("search a song")
                 .font(.system(size: 28, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
@@ -154,13 +155,13 @@ struct SendSongSheet: View {
 
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(theme.fg.opacity(0.4))
                 AppTextField("Search songs or artists...", text: $searchText, submitLabel: .search) {
                     commitCurrentSearch()
                     isSearchFocused = false
                 }
-                    .foregroundStyle(.white)
-                    .tint(.white)
+                    .foregroundStyle(theme.fg)
+                    .tint(theme.fg)
                     .autocorrectionDisabled()
                     .focused($isSearchFocused)
                     .onChange(of: searchText) { _, newValue in
@@ -175,13 +176,13 @@ struct SendSongSheet: View {
                         searchTask?.cancel()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(theme.fg.opacity(0.4))
                     }
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(Color.white.opacity(0.08))
+            .background(theme.fg.opacity(0.08))
             .clipShape(.rect(cornerRadius: 12))
             .padding(.horizontal, 20)
             .padding(.bottom, 8)
@@ -211,7 +212,7 @@ struct SendSongSheet: View {
                 LazyVStack(spacing: 0) {
                     if appState.isSearchingSongs && appState.searchResults.isEmpty {
                         ProgressView()
-                            .tint(.white)
+                            .tint(theme.fg)
                             .padding(.top, 40)
                     } else if searchText.isEmpty {
                         hintView
@@ -247,7 +248,7 @@ struct SendSongSheet: View {
             ArtistResultHeader()
             topHitRow(top)
                 .overlay(alignment: .bottom) {
-                    Color.white.opacity(0.05).frame(height: 0.5)
+                    theme.fg.opacity(0.05).frame(height: 0.5)
                 }
         }
 
@@ -269,7 +270,7 @@ struct SendSongSheet: View {
                 }
                 .id(artist.id)
                 .overlay(alignment: .bottom) {
-                    Color.white.opacity(0.05).frame(height: 0.5)
+                    theme.fg.opacity(0.05).frame(height: 0.5)
                 }
             }
         }
@@ -311,7 +312,7 @@ struct SendSongSheet: View {
                 )
                 .id(album.id)
                 .overlay(alignment: .bottom) {
-                    Color.white.opacity(0.05).frame(height: 0.5)
+                    theme.fg.opacity(0.05).frame(height: 0.5)
                 }
             }
         }
@@ -326,7 +327,7 @@ struct SendSongSheet: View {
             }
             .id(artist.id)
             .overlay(alignment: .bottom) {
-                Color.white.opacity(0.05).frame(height: 0.5)
+                theme.fg.opacity(0.05).frame(height: 0.5)
             }
         }
     }
@@ -354,7 +355,7 @@ struct SendSongSheet: View {
             )
             .id(album.id)
             .overlay(alignment: .bottom) {
-                Color.white.opacity(0.05).frame(height: 0.5)
+                theme.fg.opacity(0.05).frame(height: 0.5)
             }
         }
     }
@@ -394,10 +395,10 @@ struct SendSongSheet: View {
         VStack(spacing: 12) {
             Image(systemName: "music.magnifyingglass")
                 .font(.system(size: 36))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(theme.fg.opacity(0.15))
             Text("Search for any song")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -407,10 +408,10 @@ struct SendSongSheet: View {
         VStack(spacing: 14) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 36))
-                .foregroundStyle(.white.opacity(0.15))
+                .foregroundStyle(theme.fg.opacity(0.15))
             Text("No results for \"\(searchText)\"")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -477,12 +478,12 @@ struct SendSongSheet: View {
 
                         if isLoading {
                             ProgressView()
-                                .tint(.white)
+                                .tint(theme.fg)
                                 .scaleEffect(0.6)
                         } else {
                             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(theme.fg)
                                 .contentTransition(.symbolEffect(.replace))
                         }
                     }
@@ -493,7 +494,7 @@ struct SendSongSheet: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(song.title)
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .lineLimit(1)
                 // Tappable artist byline — routes to `ArtistView` when we
                 // have a stable iTunes artistId. Legacy/shared songs
@@ -510,7 +511,7 @@ struct SendSongSheet: View {
                     } label: {
                         Text(song.artist.uppercased())
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(theme.fg.opacity(0.4))
                             .tracking(0.5)
                             .lineLimit(1)
                     }
@@ -518,7 +519,7 @@ struct SendSongSheet: View {
                 } else {
                     Text(song.artist.uppercased())
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(theme.fg.opacity(0.4))
                         .tracking(0.5)
                         .lineLimit(1)
                 }
@@ -533,16 +534,16 @@ struct SendSongSheet: View {
             } label: {
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(theme.fg.opacity(0.85))
                     .frame(width: 36, height: 36)
-                    .background(Circle().fill(Color.white.opacity(0.08)))
+                    .background(Circle().fill(theme.fg.opacity(0.08)))
             }
             .buttonStyle(.plain)
             .sensoryFeedback(.impact(weight: .light), trigger: selectedSong?.id)
 
             Text(song.duration)
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
         }
         .padding(.vertical, 12)
         .contentShape(Rectangle())
@@ -556,7 +557,7 @@ struct SendSongSheet: View {
             withAnimation(.spring(duration: 0.3)) { step = 1 }
         }
         .overlay(alignment: .bottom) {
-            Color.white.opacity(0.05)
+            theme.fg.opacity(0.05)
                 .frame(height: 0.5)
         }
     }
@@ -602,6 +603,8 @@ struct RecentSongSearchList: View {
     let onSelect: (String) -> Void
     let onRemove: (String) -> Void
 
+    @Environment(\.riffTheme) private var theme
+
     var body: some View {
         if !searches.isEmpty {
             VStack(spacing: 0) {
@@ -613,10 +616,10 @@ struct RecentSongSearchList: View {
                             HStack(spacing: 10) {
                                 Image(systemName: "clock.arrow.circlepath")
                                     .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.35))
+                                    .foregroundStyle(theme.fg.opacity(0.35))
                                 Text(query)
                                     .font(.system(size: 14, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.75))
+                                    .foregroundStyle(theme.fg.opacity(0.75))
                                     .lineLimit(1)
                                 Spacer()
                             }
@@ -629,7 +632,7 @@ struct RecentSongSearchList: View {
                         } label: {
                             Image(systemName: "xmark")
                                 .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.45))
+                                .foregroundStyle(theme.fg.opacity(0.45))
                                 .frame(width: 28, height: 28)
                         }
                         .buttonStyle(.plain)
@@ -638,7 +641,7 @@ struct RecentSongSearchList: View {
                     .padding(.vertical, 9)
 
                     if query != searches.last {
-                        Divider().background(Color.white.opacity(0.06))
+                        Divider().background(theme.fg.opacity(0.06))
                     }
                 }
             }

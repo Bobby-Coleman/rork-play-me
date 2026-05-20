@@ -11,6 +11,7 @@ struct ArtistView: View {
     let appState: AppState
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
 
     @State private var details: ArtistDetails?
     @State private var isLoading: Bool = true
@@ -27,7 +28,7 @@ struct ArtistView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                theme.bg.ignoresSafeArea()
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -50,16 +51,16 @@ struct ArtistView: View {
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(theme.fg.opacity(0.6))
                             .frame(width: 32, height: 32)
-                            .background(Color.white.opacity(0.1))
+                            .background(theme.fg.opacity(0.1))
                             .clipShape(Circle())
                     }
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .presentationBackground(.black)
+        .presentationBackground(theme.bg)
         .task(id: artistId) {
             await load()
         }
@@ -115,7 +116,7 @@ struct ArtistView: View {
             .clipped()
 
             LinearGradient(
-                colors: [.clear, .black.opacity(0.35), .black],
+                colors: [.clear, theme.bg.opacity(0.35), theme.bg],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -126,13 +127,13 @@ struct ArtistView: View {
                 Text("ARTIST")
                     .font(.system(size: 11, weight: .bold))
                     .tracking(1.5)
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(theme.fg.opacity(0.75))
                 Text(displayName)
                     .font(.system(size: 32, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                    .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 2)
+                    .shadow(color: theme.bg.opacity(0.35), radius: 6, x: 0, y: 2)
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 20)
@@ -151,7 +152,7 @@ struct ArtistView: View {
             )
             Text(initials.isEmpty ? "?" : initials)
                 .font(.system(size: 96, weight: .heavy))
-                .foregroundStyle(.white.opacity(0.2))
+                .foregroundStyle(theme.fg.opacity(0.2))
         }
     }
 
@@ -186,7 +187,7 @@ struct ArtistView: View {
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 20, weight: .bold))
-            .foregroundStyle(.white)
+            .foregroundStyle(theme.fg)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 24)
             .padding(.bottom, 12)
@@ -196,7 +197,7 @@ struct ArtistView: View {
         HStack(spacing: 14) {
             Text("\(index)")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(theme.fg.opacity(0.4))
                 .frame(width: 22, alignment: .leading)
 
             AsyncImage(url: URL(string: song.albumArtURL)) { phase in
@@ -212,11 +213,11 @@ struct ArtistView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(song.title)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .lineLimit(1)
                 Text(song.artist)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(theme.fg.opacity(0.5))
                     .lineLimit(1)
             }
 
@@ -227,9 +228,9 @@ struct ArtistView: View {
             } label: {
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(theme.fg.opacity(0.6))
                     .frame(width: 36, height: 36)
-                    .background(Color.white.opacity(0.08))
+                    .background(theme.fg.opacity(0.08))
                     .clipShape(.capsule)
             }
             .buttonStyle(.plain)
@@ -259,13 +260,13 @@ struct ArtistView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(album.name)
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     if let year = album.releaseYear {
                         Text(year)
                             .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(theme.fg.opacity(0.5))
                     }
                 }
             }
@@ -280,7 +281,7 @@ struct ArtistView: View {
             VStack(spacing: 10) {
                 ForEach(0..<3) { _ in
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.white.opacity(0.06))
+                        .fill(theme.fg.opacity(0.06))
                         .frame(height: 44)
                 }
             }
@@ -289,7 +290,7 @@ struct ArtistView: View {
             LazyVGrid(columns: columns, spacing: 18) {
                 ForEach(0..<4) { _ in
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.white.opacity(0.06))
+                        .fill(theme.fg.opacity(0.06))
                         .aspectRatio(1, contentMode: .fit)
                 }
             }
@@ -302,19 +303,19 @@ struct ArtistView: View {
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.circle")
                 .font(.system(size: 36))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
             Text("We couldn't pull this artist's catalog")
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(theme.fg.opacity(0.55))
                 .multilineTextAlignment(.center)
             Button("Try again") {
                 Task { await load(forceRefresh: true) }
             }
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(theme.fg)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(0.1))
+            .background(theme.fg.opacity(0.1))
             .clipShape(.capsule)
         }
         .frame(maxWidth: .infinity)

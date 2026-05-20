@@ -20,25 +20,45 @@ func openInServiceButton(
     shareId: String? = nil,
     onOpened: (() -> Void)? = nil
 ) -> some View {
-    Button {
-        Task {
-            let opened = await openInService(song: song, service: service, resolvedSpotifyURL: resolvedSpotifyURL, shareId: shareId)
-            if opened {
-                onOpened?()
+    OpenInServiceButtonView(
+        song: song,
+        service: service,
+        resolvedSpotifyURL: resolvedSpotifyURL,
+        shareId: shareId,
+        onOpened: onOpened
+    )
+}
+
+private struct OpenInServiceButtonView: View {
+    let song: Song
+    let service: MusicService
+    let resolvedSpotifyURL: String?
+    let shareId: String?
+    let onOpened: (() -> Void)?
+
+    @Environment(\.riffTheme) private var theme
+
+    var body: some View {
+        Button {
+            Task {
+                let opened = await openInService(song: song, service: service, resolvedSpotifyURL: resolvedSpotifyURL, shareId: shareId)
+                if opened {
+                    onOpened?()
+                }
             }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(service == .spotify ? "Open in Spotify" : "Open in Apple Music")
+                    .font(.system(size: 13, weight: .medium))
+            }
+            .foregroundStyle(theme.fg.opacity(0.6))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(theme.fg.opacity(0.08))
+            .clipShape(.capsule)
         }
-    } label: {
-        HStack(spacing: 6) {
-            Image(systemName: "arrow.up.right")
-                .font(.system(size: 11, weight: .semibold))
-            Text(service == .spotify ? "Open in Spotify" : "Open in Apple Music")
-                .font(.system(size: 13, weight: .medium))
-        }
-        .foregroundStyle(.white.opacity(0.6))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Color.white.opacity(0.08))
-        .clipShape(.capsule)
     }
 }
 

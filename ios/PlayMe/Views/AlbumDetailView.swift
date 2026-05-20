@@ -7,6 +7,7 @@ struct AlbumDetailView: View {
     let appState: AppState
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
 
     @State private var tracks: [Song] = []
     @State private var isLoading: Bool = true
@@ -16,7 +17,7 @@ struct AlbumDetailView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                theme.bg.ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 0) {
@@ -39,16 +40,16 @@ struct AlbumDetailView: View {
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(theme.fg.opacity(0.6))
                             .frame(width: 32, height: 32)
-                            .background(Color.white.opacity(0.1))
+                            .background(theme.fg.opacity(0.1))
                             .clipShape(Circle())
                     }
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .presentationBackground(.black)
+        .presentationBackground(theme.bg)
         .task(id: album.id) {
             await load()
         }
@@ -70,18 +71,18 @@ struct AlbumDetailView: View {
             }
             .frame(width: 200, height: 200)
             .clipShape(.rect(cornerRadius: 12))
-            .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
+            .shadow(color: theme.bg.opacity(0.4), radius: 16, y: 8)
 
             VStack(spacing: 6) {
                 Text(album.name)
                     .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .multilineTextAlignment(.center)
 
                 if let year = album.releaseYear {
                     Text(year)
                         .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(theme.fg.opacity(0.5))
                 }
             }
             .padding(.horizontal, 24)
@@ -105,17 +106,17 @@ struct AlbumDetailView: View {
         HStack(spacing: 14) {
             Text("\(index)")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(theme.fg.opacity(0.4))
                 .frame(width: 22, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(song.title)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .lineLimit(1)
                 Text(song.artist)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(theme.fg.opacity(0.5))
                     .lineLimit(1)
             }
 
@@ -123,16 +124,16 @@ struct AlbumDetailView: View {
 
             Text(song.duration)
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(theme.fg.opacity(0.35))
 
             Button {
                 actionSong = song
             } label: {
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(theme.fg.opacity(0.6))
                     .frame(width: 32, height: 32)
-                    .background(Color.white.opacity(0.08))
+                    .background(theme.fg.opacity(0.08))
                     .clipShape(.capsule)
             }
             .buttonStyle(.plain)
@@ -143,7 +144,7 @@ struct AlbumDetailView: View {
             actionSong = song
         }
         .overlay(alignment: .bottom) {
-            Color.white.opacity(0.05).frame(height: 0.5)
+            theme.fg.opacity(0.05).frame(height: 0.5)
         }
     }
 
@@ -151,7 +152,7 @@ struct AlbumDetailView: View {
         VStack(spacing: 10) {
             ForEach(0..<6) { _ in
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(theme.fg.opacity(0.06))
                     .frame(height: 40)
             }
         }
@@ -163,19 +164,19 @@ struct AlbumDetailView: View {
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.circle")
                 .font(.system(size: 36))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(theme.fg.opacity(0.3))
             Text("We couldn't load this album")
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(theme.fg.opacity(0.55))
                 .multilineTextAlignment(.center)
             Button("Try again") {
                 Task { await load(forceRefresh: true) }
             }
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(theme.fg)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(0.1))
+            .background(theme.fg.opacity(0.1))
             .clipShape(.capsule)
         }
         .frame(maxWidth: .infinity)

@@ -49,6 +49,7 @@ struct AlbumArtGridBackgroundView: View {
     var dimOpacity: CGFloat = 0.35
 
     @State private var prefetcher: ImagePrefetcher? = nil
+    @Environment(\.riffTheme) private var theme
 
     private var columnCount: Int { 3 }
 
@@ -78,7 +79,7 @@ struct AlbumArtGridBackgroundView: View {
 
     var body: some View {
         ZStack {
-            Color.black
+            theme.bg
 
             TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: false)) { timeline in
                 let elapsed = timeline.date.timeIntervalSinceReferenceDate
@@ -98,7 +99,7 @@ struct AlbumArtGridBackgroundView: View {
                 }
             }
 
-            Color.black.opacity(dimOpacity)
+            theme.bg.opacity(dimOpacity)
                 .allowsHitTesting(false)
         }
         .frame(width: side, height: renderHeight)

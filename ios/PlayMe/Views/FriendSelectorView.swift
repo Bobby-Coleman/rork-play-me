@@ -36,6 +36,8 @@ struct FriendSelectorView: View {
     let onBack: () -> Void
     let onSent: () -> Void
 
+    @Environment(\.riffTheme) private var theme
+
     private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
     private var song: Song? { item.song }
     private var isCurrentSong: Bool {
@@ -98,7 +100,7 @@ struct FriendSelectorView: View {
 
     var body: some View {
         ZStack {
-            Color.black
+            theme.bg
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { isNoteFocused = false }
@@ -121,7 +123,7 @@ struct FriendSelectorView: View {
             }
 
             if showSentAnimation {
-                Color.black.opacity(0.85)
+                theme.bg.opacity(0.85)
                     .ignoresSafeArea()
                     .overlay {
                         VStack(spacing: 16) {
@@ -131,7 +133,7 @@ struct FriendSelectorView: View {
                                 .symbolEffect(.bounce, value: showSentAnimation)
                             Text("Sent!")
                                 .font(.system(size: 24, weight: .bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(theme.fg)
                         }
                     }
                     .transition(.opacity)
@@ -218,7 +220,7 @@ struct FriendSelectorView: View {
         .aspectRatio(1, contentMode: .fit)
         .frame(maxWidth: 280)
         .clipShape(.rect(cornerRadius: 20))
-        .shadow(color: .black.opacity(0.4), radius: 16, x: 0, y: 8)
+        .shadow(color: theme.bg.opacity(0.4), radius: 16, x: 0, y: 8)
         .overlay(alignment: .bottom) {
             notePill
                 .padding(.horizontal, 16)
@@ -250,15 +252,15 @@ struct FriendSelectorView: View {
         AppTextField(
             "",
             text: $note,
-            prompt: Text("Add a message").foregroundColor(.white.opacity(0.78)),
+            prompt: Text("Add a message").foregroundColor(theme.fg.opacity(0.78)),
             axis: .vertical,
             submitLabel: .done,
             onSubmit: { isNoteFocused = false }
         )
         .lineLimit(1...3)
         .font(.system(size: 14, weight: .semibold))
-        .foregroundStyle(.white)
-        .tint(.white)
+        .foregroundStyle(theme.fg)
+        .tint(theme.fg)
         .multilineTextAlignment(.center)
         .focused($isNoteFocused)
         .submitLabel(.done)
@@ -267,9 +269,9 @@ struct FriendSelectorView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
         .background(.ultraThinMaterial, in: Capsule())
-        .background(Color.white.opacity(0.06), in: Capsule())
-        .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 0.5))
-        .shadow(color: .white.opacity(0.18), radius: 10, x: 0, y: 0)
+        .background(theme.fg.opacity(0.06), in: Capsule())
+        .overlay(Capsule().stroke(theme.border, lineWidth: 0.5))
+        .shadow(color: theme.fg.opacity(0.18), radius: 10, x: 0, y: 0)
         .onChange(of: note) { _, newValue in
             // `axis: .vertical` TextFields swallow `onSubmit` on Return
             // and insert a newline instead. Strip newlines as they
@@ -288,12 +290,12 @@ struct FriendSelectorView: View {
         VStack(spacing: 4) {
             Text(item.title)
                 .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
                 .lineLimit(1)
             if !item.subtitle.isEmpty {
                 Text(item.subtitle)
                     .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(theme.sub)
                     .lineLimit(1)
             }
         }
@@ -317,7 +319,7 @@ struct FriendSelectorView: View {
                         ZStack {
                             if isCurrentSong && audioPlayer.isLoading {
                                 ProgressView()
-                                    .tint(.black)
+                                    .tint(theme.bg)
                                     .scaleEffect(0.8)
                             } else {
                                 Image(systemName: isPlayingThis ? "pause.fill" : "play.fill")
@@ -325,9 +327,9 @@ struct FriendSelectorView: View {
                                     .contentTransition(.symbolEffect(.replace))
                             }
                         }
-                        .foregroundStyle(.black)
+                        .foregroundStyle(theme.bg)
                         .frame(width: 52, height: 40)
-                        .background(.white)
+                        .background(theme.fg)
                         .clipShape(.capsule)
                     }
                     .sensoryFeedback(.impact(weight: .light), trigger: isPlayingThis)
@@ -358,16 +360,16 @@ struct FriendSelectorView: View {
             } label: {
                 ZStack {
                     Circle()
-                        .fill(canSend && !isCheckingDuplicateSends ? Color(red: 0.76, green: 0.38, blue: 0.35) : Color.white.opacity(0.1))
+                        .fill(canSend && !isCheckingDuplicateSends ? theme.accent : theme.fg.opacity(0.1))
                         .frame(width: 72, height: 72)
 
                     if isCheckingDuplicateSends {
                         ProgressView()
-                            .tint(.white)
+                            .tint(theme.accentOn)
                     } else {
                         Image(systemName: "paperplane.fill")
                             .font(.system(size: 26, weight: .semibold))
-                            .foregroundStyle(canSend ? .white : .white.opacity(0.3))
+                            .foregroundStyle(canSend ? theme.accentOn : theme.fg.opacity(0.3))
                             .offset(x: -2)
                     }
                 }
@@ -399,12 +401,12 @@ struct FriendSelectorView: View {
         } label: {
             ZStack {
                 Circle()
-                    .fill(Color.white.opacity(0.1))
+                    .fill(theme.fg.opacity(0.1))
                     .frame(width: 44, height: 44)
 
                 Image(systemName: "bookmark")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(theme.fg.opacity(0.85))
             }
         }
         .accessibilityLabel(item.kind == .album ? "Save album to mixtape" : "Save to mixtape")
@@ -534,7 +536,7 @@ struct FriendSelectorView: View {
             chipLayout(label: "All", selected: allSelected) {
                 Image(systemName: "person.2.fill")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
             }
         }
         .buttonStyle(.plain)
@@ -553,7 +555,7 @@ struct FriendSelectorView: View {
             chipLayout(label: friend.firstName, status: status, selected: isSelected) {
                 Text(friend.initials)
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
             }
         }
         .buttonStyle(.plain)
@@ -576,7 +578,7 @@ struct FriendSelectorView: View {
             chipLayout(label: label, status: "Invited", selected: isSelected) {
                 Text(contact.initials.isEmpty ? "?" : contact.initials)
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
             }
         }
         .buttonStyle(.plain)
@@ -590,16 +592,16 @@ struct FriendSelectorView: View {
                 ZStack {
                     Circle()
                         .strokeBorder(style: StrokeStyle(lineWidth: 1.2, dash: [4, 3]))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .foregroundStyle(theme.fg.opacity(0.35))
                         .frame(width: 56, height: 56)
 
                     Image(systemName: "plus")
                         .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(theme.fg.opacity(0.7))
                 }
                 Text("Add friends")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(theme.sub)
                     .lineLimit(1)
             }
             .frame(width: 64)
@@ -614,7 +616,7 @@ struct FriendSelectorView: View {
                 Spacer()
                 Text(message)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.white)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
@@ -642,33 +644,33 @@ struct FriendSelectorView: View {
         VStack(spacing: 6) {
             ZStack {
                 Circle()
-                    .fill(Color.white.opacity(0.14))
+                    .fill(theme.fg.opacity(0.14))
                     .frame(width: 56, height: 56)
 
                 content()
 
                 if selected {
                     Circle()
-                        .stroke(Color(red: 0.76, green: 0.38, blue: 0.35), lineWidth: 2.5)
+                        .stroke(theme.accent, lineWidth: 2.5)
                         .frame(width: 56, height: 56)
 
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 20))
-                        .foregroundStyle(.white, Color(red: 0.76, green: 0.38, blue: 0.35))
-                        .background(Circle().fill(Color.black).frame(width: 18, height: 18))
+                        .foregroundStyle(theme.accentOn, theme.accent)
+                        .background(Circle().fill(theme.bg).frame(width: 18, height: 18))
                         .offset(x: 20, y: 20)
                 }
             }
             Text(label)
                 .font(.system(size: 12, weight: selected ? .semibold : .medium))
-                .foregroundStyle(selected ? .white : .white.opacity(0.65))
+                .foregroundStyle(selected ? theme.fg : theme.fg.opacity(0.65))
                 .lineLimit(1)
                 .truncationMode(.tail)
 
             if let status {
                 Text(status)
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(selected ? .white.opacity(0.82) : .white.opacity(0.5))
+                    .foregroundStyle(selected ? theme.fg.opacity(0.82) : theme.fg.opacity(0.5))
                     .lineLimit(1)
             }
         }

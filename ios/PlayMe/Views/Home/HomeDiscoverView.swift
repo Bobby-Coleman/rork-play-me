@@ -5,6 +5,7 @@ import SwiftUI
 /// feed seeded with this curated order.
 struct HomeDiscoverView: View {
     let appState: AppState
+    @Environment(\.riffTheme) private var theme
 
     @State private var provider: any DiscoverSongFeedProvider = FirestoreDiscoverSongFeedProvider()
     @State private var items: [Song] = []
@@ -24,13 +25,13 @@ struct HomeDiscoverView: View {
             )
 
             ZStack {
-                Color.black.ignoresSafeArea()
+                theme.bg.ignoresSafeArea()
 
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         Text("For You")
                             .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(theme.fg)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, horizontalPadding)
                             .padding(.top, 12)
@@ -38,7 +39,7 @@ struct HomeDiscoverView: View {
 
                         if items.isEmpty && isLoading {
                             ProgressView()
-                                .tint(.white)
+                                .tint(theme.fg)
                                 .padding(.top, 80)
                         } else if items.isEmpty {
                             emptyState
@@ -83,10 +84,10 @@ struct HomeDiscoverView: View {
         VStack(spacing: 8) {
             Text("Discover")
                 .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
             Text(errorMessage ?? "Pull to refresh. Add documents to `featured_songs` in Firebase.")
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(theme.fg.opacity(0.55))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }

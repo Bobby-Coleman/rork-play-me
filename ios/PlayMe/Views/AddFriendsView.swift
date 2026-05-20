@@ -6,6 +6,7 @@ import UserNotifications
 struct AddFriendsView: View {
     let appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
 
     @State private var searchText = ""
     @State private var searchResults: [AppUser] = []
@@ -68,7 +69,7 @@ struct AddFriendsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                theme.bg.ignoresSafeArea()
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -86,7 +87,7 @@ struct AddFriendsView: View {
                         }()
                         Text(countText)
                             .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(theme.fg)
                             .frame(maxWidth: .infinity)
                             .padding(.top, 4)
                             .padding(.bottom, 2)
@@ -95,7 +96,7 @@ struct AddFriendsView: View {
                              ? "You've reached your friend limit"
                              : "Add your friends")
                             .font(.system(size: 14))
-                            .foregroundStyle(.white.opacity(cap?.isAtCap == true ? 0.7 : 0.5))
+                            .foregroundStyle(theme.fg.opacity(cap?.isAtCap == true ? 0.7 : 0.5))
                             .frame(maxWidth: .infinity)
                             .padding(.bottom, 16)
 
@@ -117,11 +118,11 @@ struct AddFriendsView: View {
                         // handle flows (Instagram, Snapchat).
                         HStack(spacing: 10) {
                             Image(systemName: "magnifyingglass")
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(theme.fg.opacity(0.4))
                             AppTextField("Search by username or name", text: $searchText, submitLabel: .search) {
                                 searchFocused = false
                             }
-                                .foregroundStyle(.white)
+                                .foregroundStyle(theme.fg)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
                                 .focused($searchFocused)
@@ -136,12 +137,12 @@ struct AddFriendsView: View {
                                     searchFocused = false
                                 }
                                 .font(.system(size: 15))
-                                .foregroundStyle(.white.opacity(0.6))
+                                .foregroundStyle(theme.fg.opacity(0.6))
                             }
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.08))
+                        .background(theme.fg.opacity(0.08))
                         .clipShape(.rect(cornerRadius: 10))
                         .padding(.horizontal, 20)
                         .padding(.bottom, 16)
@@ -173,11 +174,12 @@ struct AddFriendsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                 }
             }
-            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarBackground(theme.bg, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(theme.toolbarColorScheme, for: .navigationBar)
         }
         .task {
             // Mint the invite code lazily so we don't burn a code every
@@ -237,7 +239,7 @@ struct AddFriendsView: View {
             if showReportedToast {
                 Text("Report submitted. Thanks for keeping RIFF safe.")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(.black.opacity(0.9))
@@ -284,7 +286,7 @@ struct AddFriendsView: View {
             if isSearching {
                 sectionHeader("Add by username", icon: "at")
                 ProgressView()
-                    .tint(.white)
+                    .tint(theme.fg)
                     .frame(maxWidth: .infinity)
                     .padding(.top, 12)
             } else if !searchResults.isEmpty {
@@ -300,7 +302,7 @@ struct AddFriendsView: View {
 
             if !searchResults.isEmpty && !filteredContacts.isEmpty {
                 Divider()
-                    .background(Color.white.opacity(0.06))
+                    .background(theme.fg.opacity(0.06))
                     .padding(.vertical, 12)
             }
 
@@ -318,13 +320,13 @@ struct AddFriendsView: View {
             if !isSearching && filteredContacts.isEmpty && searchResults.isEmpty {
                 Text("No results found")
                     .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(theme.fg.opacity(0.3))
                     .frame(maxWidth: .infinity)
                     .padding(.top, 20)
             }
 
             Divider()
-                .background(Color.white.opacity(0.06))
+                .background(theme.fg.opacity(0.06))
                 .padding(.vertical, 12)
 
             shareLinkSection
@@ -339,7 +341,7 @@ struct AddFriendsView: View {
             shareLinkSection
 
             Divider()
-                .background(Color.white.opacity(0.06))
+                .background(theme.fg.opacity(0.06))
                 .padding(.vertical, 12)
 
             // Contacts
@@ -349,7 +351,7 @@ struct AddFriendsView: View {
                 if allContacts.isEmpty {
                     Text("No contacts with phone numbers found")
                         .font(.system(size: 14))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .foregroundStyle(theme.fg.opacity(0.3))
                         .frame(maxWidth: .infinity)
                         .padding(.top, 12)
                 } else {
@@ -366,10 +368,10 @@ struct AddFriendsView: View {
                         } label: {
                             Text("Show more")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.6))
+                                .foregroundStyle(theme.fg.opacity(0.6))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
-                                .background(Color.white.opacity(0.06))
+                                .background(theme.fg.opacity(0.06))
                                 .clipShape(.rect(cornerRadius: 10))
                         }
                         .padding(.horizontal, 20)
@@ -391,10 +393,10 @@ struct AddFriendsView: View {
                         Text("Allow contacts access")
                     }
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(Color.white.opacity(0.08))
+                    .background(theme.fg.opacity(0.08))
                     .clipShape(.rect(cornerRadius: 10))
                 }
                 .padding(.horizontal, 20)
@@ -424,10 +426,10 @@ struct AddFriendsView: View {
             } label: {
                 Text(showFriendsList ? "Show less" : "Show more")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(theme.fg.opacity(0.7))
                     .padding(.horizontal, 18)
                     .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.08))
+                    .background(theme.fg.opacity(0.08))
                     .clipShape(.capsule)
             }
             .frame(maxWidth: .infinity)
@@ -439,9 +441,9 @@ struct AddFriendsView: View {
         HStack(spacing: 14) {
             Text(friend.initials)
                 .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
                 .frame(width: 42, height: 42)
-                .background(Color.white.opacity(0.12))
+                .background(theme.fg.opacity(0.12))
                 .clipShape(Circle())
                 .overlay(
                     Circle()
@@ -450,7 +452,7 @@ struct AddFriendsView: View {
 
             Text(friend.firstName)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
                 .lineLimit(1)
 
             Spacer()
@@ -476,7 +478,7 @@ struct AddFriendsView: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(theme.fg.opacity(0.5))
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
@@ -504,7 +506,7 @@ struct AddFriendsView: View {
                 messageRecipient = MessageRecipient(numbers: [])
             }
 
-            Divider().background(Color.white.opacity(0.06)).padding(.leading, 62)
+            Divider().background(theme.fg.opacity(0.06)).padding(.leading, 62)
 
             shareRow(icon: "square.and.arrow.up", color: .gray, title: "Other apps") {
                 showShareSheet = true
@@ -519,11 +521,11 @@ struct AddFriendsView: View {
             if let icon {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(theme.fg.opacity(0.4))
             }
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(theme.fg.opacity(0.5))
                 .textCase(.uppercase)
         }
         .padding(.horizontal, 20)
@@ -538,18 +540,18 @@ struct AddFriendsView: View {
         return HStack(spacing: 14) {
             Text(user.initials)
                 .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
                 .frame(width: 38, height: 38)
-                .background(Color.white.opacity(0.12))
+                .background(theme.fg.opacity(0.12))
                 .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(user.firstName)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                 Text("@\(user.username)")
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(theme.fg.opacity(0.4))
             }
 
             Spacer()
@@ -557,10 +559,10 @@ struct AddFriendsView: View {
             if alreadyFriend || justAdded {
                 Text("Added")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(theme.fg.opacity(0.4))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.06))
+                    .background(theme.fg.opacity(0.06))
                     .clipShape(.capsule)
             } else if requested {
                 Button {
@@ -568,10 +570,10 @@ struct AddFriendsView: View {
                 } label: {
                     Text("Requested")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(theme.fg.opacity(0.7))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.12))
+                        .background(theme.fg.opacity(0.12))
                         .clipShape(.capsule)
                 }
                 .buttonStyle(.plain)
@@ -605,19 +607,19 @@ struct AddFriendsView: View {
         HStack(spacing: 14) {
             Text(user.initials)
                 .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
                 .frame(width: 38, height: 38)
-                .background(Color.white.opacity(0.12))
+                .background(theme.fg.opacity(0.12))
                 .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayName(for: user))
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                 if !user.username.isEmpty {
                     Text("@\(user.username)")
                         .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(theme.fg.opacity(0.4))
                 }
             }
 
@@ -630,13 +632,13 @@ struct AddFriendsView: View {
                 } label: {
                     Text(atCap ? "Full" : "Accept")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(atCap ? theme.fg : theme.accentOn)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(
                             atCap
-                            ? Color.white.opacity(0.15)
-                            : Color(red: 0.76, green: 0.38, blue: 0.35)
+                            ? theme.fg.opacity(0.15)
+                            : theme.accent
                         )
                         .clipShape(.capsule)
                 }
@@ -648,10 +650,10 @@ struct AddFriendsView: View {
                 } label: {
                     Text("Decline")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(theme.fg.opacity(0.7))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.08))
+                        .background(theme.fg.opacity(0.08))
                         .clipShape(.capsule)
                 }
                 .buttonStyle(.plain)
@@ -665,20 +667,20 @@ struct AddFriendsView: View {
             HStack(spacing: 14) {
                 Image(systemName: icon)
                     .font(.system(size: 16))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .frame(width: 36, height: 36)
                     .background(color)
                     .clipShape(.rect(cornerRadius: 8))
 
                 Text(title)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(theme.fg.opacity(0.3))
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
@@ -691,14 +693,14 @@ struct AddFriendsView: View {
         HStack(spacing: 14) {
             Text(contact.initials)
                 .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
                 .frame(width: 38, height: 38)
-                .background(Color.white.opacity(0.12))
+                .background(theme.fg.opacity(0.12))
                 .clipShape(Circle())
 
             Text(contact.fullName)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white)
+                .foregroundStyle(theme.fg)
                 .lineLimit(1)
 
             Spacer()
@@ -719,10 +721,10 @@ struct AddFriendsView: View {
             Text(text)
                 .font(.system(size: 13, weight: .semibold))
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(theme.accentOn)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+        .background(theme.accent)
         .clipShape(.capsule)
     }
 
@@ -733,7 +735,7 @@ struct AddFriendsView: View {
             Text(message)
                 .font(.system(size: 13, weight: .medium))
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(Color.white)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(

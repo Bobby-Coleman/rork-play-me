@@ -8,6 +8,8 @@ struct ArtistResultRow: View {
     let artist: ArtistSummary
     let onTap: () -> Void
 
+    @Environment(\.riffTheme) private var theme
+
     /// Image state keyed by the *resolved* artist id so we can prove that
     /// whatever URL is on screen corresponds to the currently-bound artist.
     /// If `forArtistId` no longer matches `artist.id` we treat the URL as
@@ -37,18 +39,18 @@ struct ArtistResultRow: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(artist.name)
                         .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                         .lineLimit(1)
                     Text(subtitle)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(theme.fg.opacity(0.4))
                         .tracking(0.5)
                         .lineLimit(1)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(theme.fg.opacity(0.35))
             }
             .padding(.vertical, 12)
             .contentShape(Rectangle())
@@ -112,7 +114,7 @@ struct ArtistResultRow: View {
                         // previously displayed image from the reused cell.
                         Text(initials.isEmpty ? "?" : initials)
                             .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(theme.fg.opacity(0.7))
                     }
                 }
                 // Tying AsyncImage's identity to the URL forces SwiftUI to
@@ -124,7 +126,7 @@ struct ArtistResultRow: View {
             } else {
                 Text(initials.isEmpty ? "?" : initials)
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(theme.fg.opacity(0.7))
             }
         }
         .frame(width: 56, height: 56)
@@ -136,11 +138,13 @@ struct ArtistResultRow: View {
 /// view so both `SendSongSheet` and `QuickSendSongSheet` can reuse the
 /// exact same pixel layout.
 struct ArtistResultHeader: View {
+    @Environment(\.riffTheme) private var theme
+
     var body: some View {
         Text("TOP RESULT")
             .font(.system(size: 11, weight: .bold))
             .tracking(1.5)
-            .foregroundStyle(.white.opacity(0.5))
+            .foregroundStyle(theme.fg.opacity(0.5))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 4)
             .padding(.bottom, 6)

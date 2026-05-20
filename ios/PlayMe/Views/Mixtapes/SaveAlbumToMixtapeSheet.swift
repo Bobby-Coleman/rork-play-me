@@ -12,6 +12,7 @@ struct SaveAlbumToMixtapeSheet: View {
     let appState: AppState
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.riffTheme) private var theme
     @State private var showCreate: Bool = false
     @State private var pendingMixtape: Mixtape?
     /// Surfaces a "Adding…" overlay while the tracklist fetch + N adds
@@ -41,7 +42,7 @@ struct SaveAlbumToMixtapeSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                theme.bg.ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 0) {
@@ -61,7 +62,7 @@ struct SaveAlbumToMixtapeSheet: View {
 
                         if userMixtapes.isEmpty && !store.hasLoaded {
                             ProgressView()
-                                .tint(.white)
+                                .tint(theme.fg)
                                 .padding(.vertical, 24)
                         } else if userMixtapes.isEmpty {
                             emptyHint
@@ -82,14 +83,14 @@ struct SaveAlbumToMixtapeSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                         .disabled(isAdding)
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .presentationBackground(.black)
-        .preferredColorScheme(.dark)
+        .presentationBackground(theme.bg)
+        .preferredColorScheme(theme.isLight ? .light : .dark)
         .sheet(isPresented: $showCreate) {
             // Same cover-required create flow as song saves; empty
             // mixtape lands at the top of `userMixtapes` for the user
@@ -134,7 +135,7 @@ struct SaveAlbumToMixtapeSheet: View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.white.opacity(0.08))
+                    .fill(theme.softBg)
                 AsyncImage(url: URL(string: album.artworkURL)) { phase in
                     if let image = phase.image {
                         image.resizable().aspectRatio(contentMode: .fill)
@@ -147,11 +148,11 @@ struct SaveAlbumToMixtapeSheet: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(album.name)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
                     .lineLimit(1)
                 Text((album.artistName ?? "Album") + " · " + trackCountDisplay)
                     .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(theme.sub)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -167,16 +168,16 @@ struct SaveAlbumToMixtapeSheet: View {
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.white.opacity(0.08))
+                        .fill(theme.softBg)
                     Image(systemName: "plus")
                         .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                 }
                 .frame(width: 56, height: 56)
 
                 Text("Create new mixtape")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.fg)
 
                 Spacer()
             }
@@ -197,16 +198,16 @@ struct SaveAlbumToMixtapeSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(mixtape.name)
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                         .lineLimit(1)
                     Text(songCountLabel(for: mixtape))
                         .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(theme.sub)
                 }
                 Spacer()
                 Image(systemName: "plus.circle")
                     .font(.system(size: 22))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(theme.fg.opacity(0.5))
             }
             .contentShape(Rectangle())
             .padding(.vertical, 8)
@@ -223,7 +224,7 @@ struct SaveAlbumToMixtapeSheet: View {
     private var emptyHint: some View {
         Text("You don't have any mixtapes yet. Create one to save this album.")
             .font(.system(size: 13))
-            .foregroundStyle(.white.opacity(0.45))
+            .foregroundStyle(theme.fg.opacity(0.45))
             .multilineTextAlignment(.center)
     }
 
@@ -231,14 +232,14 @@ struct SaveAlbumToMixtapeSheet: View {
 
     private var addingOverlay: some View {
         ZStack {
-            Color.black.opacity(0.6).ignoresSafeArea()
+            theme.bg.opacity(0.6).ignoresSafeArea()
             VStack(spacing: 12) {
                 ProgressView()
-                    .tint(.white)
+                    .tint(theme.fg)
                     .controlSize(.large)
                 Text("Adding songs…")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(theme.fg.opacity(0.85))
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 22)

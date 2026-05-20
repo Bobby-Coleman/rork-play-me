@@ -66,6 +66,7 @@ struct ChatView: View {
     @State private var highlightedMessageId: String?
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.riffTheme) private var theme
 
     private var currentUID: String {
         FirebaseService.shared.firebaseUID ?? ""
@@ -131,7 +132,7 @@ struct ChatView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            theme.bg.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 ChatMessagesCollectionView(
@@ -165,7 +166,7 @@ struct ChatView: View {
                 .animation(.easeOut(duration: 0.2), value: pendingReplyTo?.id)
                 .overlay {
                     if pendingReplyTo != nil {
-                        Color.black.opacity(0.001)
+                        theme.bg.opacity(0.001)
                             .contentShape(.rect)
                             .onTapGesture {
                                 withAnimation(.easeOut(duration: 0.2)) {
@@ -186,17 +187,19 @@ struct ChatView: View {
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(theme.toolbarColorScheme, for: .navigationBar)
+        .toolbarBackground(theme.bg, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 1) {
                     Text(friendName)
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                         .lineLimit(1)
                     Text(chatHeaderSubtitle)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(theme.sub)
                         .lineLimit(1)
                 }
                 .accessibilityElement(children: .combine)
@@ -215,7 +218,7 @@ struct ChatView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.fg)
                 }
             }
         }
@@ -290,10 +293,10 @@ struct ChatView: View {
             if showReportedToast {
                 Text("Report submitted. Thanks.")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.accentOn)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(.black.opacity(0.9))
+                    .background(theme.accent.opacity(0.9))
                     .clipShape(.capsule)
                     .padding(.top, 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -441,28 +444,33 @@ struct ChatView: View {
                 }
             }
                 .font(.system(size: 15))
-                .foregroundStyle(.white)
-                .tint(.white)
+                .foregroundStyle(theme.fg)
+                .tint(theme.fg)
                 .focused($isComposerFocused)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(Color.white.opacity(0.08))
+                .background(theme.softBg)
                 .clipShape(.capsule)
 
             if !newMessageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button {
                     sendMessage()
                 } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 30))
-                        .foregroundStyle(Color(red: 0.76, green: 0.38, blue: 0.35))
+                    ZStack {
+                        Circle()
+                            .fill(theme.accent)
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(theme.accentOn)
+                    }
                 }
                 .disabled(isSending)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color.black)
+        .background(theme.bg)
     }
 
     private func sendMessage() {

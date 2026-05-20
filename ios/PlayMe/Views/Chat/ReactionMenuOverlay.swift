@@ -65,6 +65,7 @@ struct ReactionMenuOverlay<BubbleContent: View>: View {
     var sourceFrame: CGRect? = nil
 
     @State private var animateIn: Bool = false
+    @Environment(\.riffTheme) private var theme
 
     /// Default reaction set — heart, thumbs up, thumbs down, ha-ha,
     /// emphasis, question. Mirrors iMessage's tapback options aside
@@ -84,7 +85,7 @@ struct ReactionMenuOverlay<BubbleContent: View>: View {
                 Rectangle()
                     .fill(.ultraThinMaterial)
                     .ignoresSafeArea()
-                    .overlay(Color.black.opacity(0.35).ignoresSafeArea())
+                    .overlay(theme.bg.opacity(0.45).ignoresSafeArea())
                     .opacity(animateIn ? 1 : 0)
                     .contentShape(.rect)
                     .onTapGesture { dismiss() }
@@ -166,10 +167,11 @@ struct ReactionMenuOverlay<BubbleContent: View>: View {
         .padding(.vertical, 8)
         .background(
             Capsule()
-                .fill(Color.black.opacity(0.7))
-                .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5))
+                .fill(theme.elevatedBg.opacity(0.95))
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(theme.border, lineWidth: 0.5))
         )
-        .shadow(color: .black.opacity(0.4), radius: 12, x: 0, y: 4)
+        .shadow(color: theme.bg.opacity(0.4), radius: 12, x: 0, y: 4)
     }
 
     private func emojiButton(_ emoji: String) -> some View {
@@ -188,7 +190,7 @@ struct ReactionMenuOverlay<BubbleContent: View>: View {
                 .background(
                     Circle()
                         .fill(isActive
-                              ? Color(red: 0.76, green: 0.38, blue: 0.35).opacity(0.55)
+                              ? theme.accent.opacity(0.55)
                               : Color.clear)
                 )
         }
@@ -202,7 +204,7 @@ struct ReactionMenuOverlay<BubbleContent: View>: View {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 onReply()
             }
-            Divider().background(Color.white.opacity(0.1))
+            Divider().background(theme.border)
             actionRow(systemImage: "doc.on.doc", title: "Copy", isEnabled: !message.text.isEmpty) {
                 UIPasteboard.general.string = message.text
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -212,13 +214,14 @@ struct ReactionMenuOverlay<BubbleContent: View>: View {
         .frame(width: 180)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.black.opacity(0.7))
+                .fill(theme.elevatedBg.opacity(0.95))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                        .stroke(theme.border, lineWidth: 0.5)
                 )
         )
-        .shadow(color: .black.opacity(0.4), radius: 12, x: 0, y: 4)
+        .shadow(color: theme.bg.opacity(0.4), radius: 12, x: 0, y: 4)
     }
 
     private func actionRow(
@@ -235,7 +238,7 @@ struct ReactionMenuOverlay<BubbleContent: View>: View {
                     .font(.system(size: 15))
                 Spacer()
             }
-            .foregroundStyle(.white.opacity(isEnabled ? 1 : 0.35))
+            .foregroundStyle(theme.fg.opacity(isEnabled ? 1 : 0.35))
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .contentShape(.rect)
