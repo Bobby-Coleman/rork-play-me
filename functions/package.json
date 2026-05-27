@@ -7,6 +7,8 @@
   "main": "index.js",
   "scripts": {
     "check": "node --check index.js",
+    "check:all": "node --check index.js && node --check scripts/staging-load-test.js && node --check scripts/cleanup-public-user-phone.js",
+    "cleanup:public-phone": "node scripts/cleanup-public-user-phone.js",
     "seed:featured-songs": "node scripts/seed-featured-songs.js",
     "seed:invite-codes": "node scripts/seed-invite-codes.js",
     "staging:load": "node scripts/staging-load-test.js"

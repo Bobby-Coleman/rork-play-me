@@ -78,7 +78,7 @@ struct FriendSelectorView: View {
     }
 
     private var renderablePendingUsers: [AppUser] {
-        appState.pendingSendRecipients(including: onboardingRequestedUsers)
+        item.kind == .song ? appState.pendingSendRecipients(including: onboardingRequestedUsers) : []
     }
 
     private var allSelected: Bool {
@@ -423,7 +423,7 @@ struct FriendSelectorView: View {
             return
         }
 
-        let friends = resolveSelectedFriends()
+        let friends = resolveSelectedAcceptedFriends()
         guard !friends.isEmpty else {
             commitSend()
             return
@@ -445,7 +445,8 @@ struct FriendSelectorView: View {
     private func commitSend() {
         guard canSend else { return }
         showSentAnimation = true
-        let friends = resolveSelectedFriends()
+        let friends = resolveSelectedAcceptedFriends()
+        let pendingUsers = resolveSelectedPendingUsers()
         let contacts = resolveSelectedContacts()
         let noteToSend = note.isEmpty ? nil : note
         let payload = item
@@ -455,6 +456,9 @@ struct FriendSelectorView: View {
             case .song(let s):
                 for friend in friends {
                     await appState.sendSong(s, to: friend, note: noteToSend)
+                }
+                for pendingUser in pendingUsers {
+                    _ = await appState.queueSongForPendingFriend(s, to: pendingUser, note: noteToSend)
                 }
                 for contact in contacts {
                     _ = await appState.sendSongToPendingContact(s, contact: contact, note: noteToSend)
@@ -495,7 +499,7 @@ struct FriendSelectorView: View {
                     friendChip(friend)
                 }
                 ForEach(renderablePendingUsers) { friend in
-                    friendChip(friend, status: "Pending")
+                    pendingFriendChip(friend)
                 }
                 ForEach(renderableInvitedContacts) { contact in
                     contactChip(contact)
@@ -557,6 +561,42 @@ struct FriendSelectorView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    private func pendingFriendChip(_ friend: AppUser) -> some View {
+        let isSelected = selectedFriends.contains(friend.id)
+        return ZStack(alignment: .topTrailing) {
+            Button {
+                if isSelected {
+                    selectedFriends.remove(friend.id)
+                } else {
+                    selectedFriends.insert(friend.id)
+                }
+            } label: {
+                chipLayout(label: friend.firstName, status: isSelected ? "Queues on accept" : "Pending", selected: isSelected) {
+                    Text(friend.initials)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                selectedFriends.remove(friend.id)
+                Task { await appState.cancelOutgoingRequest(to: friend) }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 20, height: 20)
+                    .background(Color.black.opacity(0.75), in: Circle())
+                    .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 0.5))
+            }
+            .buttonStyle(.plain)
+            .offset(x: 2, y: -6)
+            .accessibilityLabel("Cancel request to \(friend.firstName)")
+        }
+        .frame(width: 72)
     }
 
     /// Chip for a pending-signup contact. Visually consistent with
@@ -678,13 +718,19 @@ struct FriendSelectorView: View {
 
     // MARK: - Helpers
 
-    private func resolveSelectedFriends() -> [AppUser] {
+    private func resolveSelectedAcceptedFriends() -> [AppUser] {
         var seen = Set<String>()
         var result: [AppUser] = []
         for user in rankedFriends where selectedFriends.contains(user.id) && !seen.contains(user.id) {
             seen.insert(user.id)
             result.append(user)
         }
+        return result
+    }
+
+    private func resolveSelectedPendingUsers() -> [AppUser] {
+        var seen = Set<String>()
+        var result: [AppUser] = []
         for user in renderablePendingUsers where selectedFriends.contains(user.id) && !seen.contains(user.id) {
             seen.insert(user.id)
             result.append(user)

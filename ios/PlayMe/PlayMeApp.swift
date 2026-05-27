@@ -1,7 +1,9 @@
 import SwiftUI
 import UIKit
 import FirebaseAuth
+import FirebaseAppCheck
 import FirebaseCore
+import FirebaseCrashlytics
 import FirebaseMessaging
 import UserNotifications
 import ChottuLinkSDK
@@ -95,7 +97,9 @@ enum NotificationPermission {
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate, ChottuLinkDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        AppCheck.setAppCheckProviderFactory(RiffAppCheckProviderFactory())
         FirebaseApp.configure()
+        Crashlytics.crashlytics().setCustomValue("riff-ios", forKey: "app_family")
 
         // ChottuLink API key is loaded from `Config.plist` (gitignored)
         // or the runtime environment so it never ships in the public

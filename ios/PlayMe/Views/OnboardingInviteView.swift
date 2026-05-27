@@ -170,14 +170,14 @@ struct OnboardingInviteView: View {
     private var mainContent: some View {
         AppScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                Text("Invite friends to RIFF")
+                Text("Add friends to RIFF")
                     .font(.system(size: 26, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.top, 24)
                     .padding(.bottom, 6)
 
-                Text("You must have at least one friend added to use RIFF.")
+                Text("You can have up to \(Config.DEFAULT_FRIEND_LIMIT) friends. Invites and requests only count when someone accepts.")
                     .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.55))
                     .multilineTextAlignment(.center)

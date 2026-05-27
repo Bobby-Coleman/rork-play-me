@@ -12,5 +12,7 @@
 	<array>
 		<string>applinks:playme.chottu.link</string>
 	</array>
+	<key>com.apple.developer.devicecheck.appattest-environment</key>
+	<string>production</string>
 </dict>
 </plist>

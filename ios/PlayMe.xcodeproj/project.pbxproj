@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		8491A0A32F8841230088392D /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 8491A0A22F8841230088392D /* FirebaseMessaging */; };
 		84B7E0312F91B95F00B59DD6 /* ChottuLinkSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 84B7E0302F91B95F00B59DD6 /* ChottuLinkSDK */; };
+		APPCHK020000000000000002 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = APPCHK010000000000000001 /* FirebaseAppCheck */; };
+		CRASH020000000000000002 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = CRASH010000000000000001 /* FirebaseCrashlytics */; };
 		NK01A5E3C4D5B6A7F8E9A004 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = NK01A5E3C4D5B6A7F8E9A002 /* Nuke */; };
 		NK01A5E3C4D5B6A7F8E9A005 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = NK01A5E3C4D5B6A7F8E9A003 /* NukeUI */; };
 		NS01A5E3C4D5B6A7F8E9B003 /* PlayMeNotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = NS01A5E3C4D5B6A7F8E9B002 /* PlayMeNotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -140,6 +142,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				84B7E0312F91B95F00B59DD6 /* ChottuLinkSDK in Frameworks */,
+				APPCHK020000000000000002 /* FirebaseAppCheck in Frameworks */,
+				CRASH020000000000000002 /* FirebaseCrashlytics in Frameworks */,
 				8491A0A32F8841230088392D /* FirebaseMessaging in Frameworks */,
 				XXFB01A1E3C4D5B6A7F8E9XX /* FirebaseAuth in Frameworks */,
 				XXFB01A3E3C4D5B6A7F8E9XX /* FirebaseFirestore in Frameworks */,
@@ -235,6 +239,8 @@
 			);
 			name = PlayMe;
 			packageProductDependencies = (
+				APPCHK010000000000000001 /* FirebaseAppCheck */,
+				CRASH010000000000000001 /* FirebaseCrashlytics */,
 				XXFB01A2E3C4D5B6A7F8E9XX /* FirebaseAuth */,
 				XXFB01A4E3C4D5B6A7F8E9XX /* FirebaseFirestore */,
 				XXFB01A9E3C4D5B6A7F8E9XX /* FirebaseStorage */,
@@ -981,6 +987,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 84B7E02F2F91B95F00B59DD6 /* XCRemoteSwiftPackageReference "chottulink-ios-sdk" */;
 			productName = ChottuLinkSDK;
+		};
+		APPCHK010000000000000001 /* FirebaseAppCheck */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAppCheck;
+		};
+		CRASH010000000000000001 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = XXFB01A5E3C4D5B6A7F8E9XX /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
 		};
 		NK01A5E3C4D5B6A7F8E9A002 /* Nuke */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -113,7 +113,7 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, appState.isOnboarded else { return }
-            Task { await appState.refreshShares() }
+            Task { await appState.refreshShares(force: false) }
         }
         .onOpenURL { url in
             handleIncomingURL(url)

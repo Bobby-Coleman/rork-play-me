@@ -47,8 +47,8 @@
 		at the live hosted policy when it ships.
 	-->
 	<key>NSPrivacyPolicyURL</key>
-	<string>https://playme.app/privacy</string>
+	<string>https://rork-play-me.web.app/privacy/</string>
 	<key>NSTermsOfServiceURL</key>
-	<string>https://playme.app/terms</string>
+	<string>https://rork-play-me.web.app/terms/</string>
 </dict>
 </plist>

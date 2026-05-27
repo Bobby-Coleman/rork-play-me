@@ -17,30 +17,20 @@ struct AddFriendsView: View {
     @State private var visibleContactCount = 20
 
     @State private var messageRecipient: MessageRecipient?
-    @State private var showShareSheet = false
-    @State private var inviteCode: String = ""
-    @State private var inviteLink: String = ""
-    @State private var isMintingInvite = false
+    @State private var shareInvite: ShareInvite?
+    @State private var preparingInviteID: String?
 
     @State private var showFriendsList: Bool = true
     @State private var reportTarget: ReportTarget?
     @State private var showReportedToast: Bool = false
     @State private var pendingBlock: AppUser?
+    @State private var pendingRemoveFriend: AppUser?
+    @State private var unfriendErrorMessage: String?
 
     @FocusState private var searchFocused: Bool
 
-    private var inviteBody: String {
-        // Phase B: every share carries a single-use personal invite
-        // code + the ChottuLink shortlink. The recipient can either tap
-        // the link (deep-links straight into onboarding with the code
-        // auto-filled) or type the code manually if they got the
-        // message on a device that isn't the one they want to sign up
-        // on. Falls back to a bare TestFlight URL while the code is
-        // still minting (or if minting failed).
-        guard !inviteCode.isEmpty, !inviteLink.isEmpty else {
-            return "wanna do this? \(DeepLinkService.publicTestFlightInviteURL)"
-        }
-        return "wanna do this? I have an extra invite code \(inviteCode) — \(inviteLink)"
+    private var fallbackInviteBody: String {
+        "wanna do this? \(DeepLinkService.publicTestFlightInviteURL)"
     }
 
     private var isActive: Bool { !searchText.isEmpty }
@@ -180,23 +170,6 @@ struct AddFriendsView: View {
             .toolbarBackground(.visible, for: .navigationBar)
         }
         .task {
-            // Mint the invite code lazily so we don't burn a code every
-            // time the user just glances at this view. We do it
-            // up-front here (rather than on share tap) so the share
-            // sheet is instantly ready by the time the user taps a
-            // contact; if they never share, the code goes unused — at
-            // 10/UID/24h that's a non-issue.
-            if !isMintingInvite, inviteCode.isEmpty,
-               let username = appState.currentUser?.username,
-               Auth.auth().currentUser != nil {
-                isMintingInvite = true
-                if let invite = await DeepLinkService.shared.createPersonalInvite(for: username) {
-                    inviteCode = invite.code
-                    inviteLink = invite.shortURL
-                }
-                isMintingInvite = false
-            }
-
             let granted = await ContactsService.shared.requestAccess()
             if granted {
                 allContacts = ContactsService.shared.fetchContacts()
@@ -214,13 +187,13 @@ struct AddFriendsView: View {
             if MessageComposeView.canSendText {
                 MessageComposeView(
                     recipients: recipient.numbers,
-                    body: inviteBody
+                    body: recipient.body
                 ) { _ in messageRecipient = nil }
                 .ignoresSafeArea()
             }
         }
-        .sheet(isPresented: $showShareSheet) {
-            ShareSheetView(items: [inviteBody])
+        .sheet(item: $shareInvite) { invite in
+            ShareSheetView(items: [invite.body])
         }
         .sheet(item: $reportTarget) { target in
             ReportSheet(target: target, appState: appState) {
@@ -266,12 +239,42 @@ struct AddFriendsView: View {
         } message: {
             Text("They won't be able to send you songs or messages, and you won't see their content.")
         }
+        .alert("Remove \(pendingRemoveFriend?.firstName ?? "friend")?", isPresented: removeFriendAlertBinding) {
+            Button("Cancel", role: .cancel) { pendingRemoveFriend = nil }
+            Button("Remove Friend", role: .destructive) {
+                if let friend = pendingRemoveFriend {
+                    removeFriend(friend)
+                }
+                pendingRemoveFriend = nil
+            }
+        } message: {
+            Text("You can add them again later if you both have an open friend slot.")
+        }
+        .alert("Couldn't remove friend", isPresented: unfriendErrorBinding) {
+            Button("OK", role: .cancel) { unfriendErrorMessage = nil }
+        } message: {
+            Text(unfriendErrorMessage ?? "Please try again.")
+        }
     }
 
     private var blockAlertBinding: Binding<Bool> {
         Binding(
             get: { pendingBlock != nil },
             set: { if !$0 { pendingBlock = nil } }
+        )
+    }
+
+    private var removeFriendAlertBinding: Binding<Bool> {
+        Binding(
+            get: { pendingRemoveFriend != nil },
+            set: { if !$0 { pendingRemoveFriend = nil } }
+        )
+    }
+
+    private var unfriendErrorBinding: Binding<Bool> {
+        Binding(
+            get: { unfriendErrorMessage != nil },
+            set: { if !$0 { unfriendErrorMessage = nil } }
         )
     }
 
@@ -457,7 +460,7 @@ struct AddFriendsView: View {
 
             Menu {
                 Button(role: .destructive) {
-                    removeFriend(friend)
+                    pendingRemoveFriend = friend
                 } label: {
                     Label("Unfriend", systemImage: "person.badge.minus")
                 }
@@ -486,11 +489,29 @@ struct AddFriendsView: View {
     }
 
     private func removeFriend(_ friend: AppUser) {
+        let previousFriends = appState.friends
+        let previousCap = appState.friendCap
         withAnimation(.easeInOut(duration: 0.2)) {
             appState.friends.removeAll { $0.id == friend.id }
+            if let previousCap {
+                appState.friendCap = FirebaseService.FriendCapStatus(
+                    count: max(previousCap.count - 1, 0),
+                    limit: previousCap.limit
+                )
+            }
         }
         Task {
-            await FirebaseService.shared.removeFriend(friendUID: friend.id)
+            let ok = await FirebaseService.shared.removeFriend(friendUID: friend.id)
+            if ok {
+                try? await Task.sleep(for: .seconds(1))
+                await appState.refreshFriendCap()
+            } else {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    appState.friends = previousFriends
+                    appState.friendCap = previousCap
+                }
+                unfriendErrorMessage = "We couldn't remove \(friend.firstName). Check your connection and try again."
+            }
         }
     }
 
@@ -501,13 +522,13 @@ struct AddFriendsView: View {
             sectionHeader("Share your RIFF link", icon: "square.and.arrow.up")
 
             shareRow(icon: "message.fill", color: .green, title: "Messages") {
-                messageRecipient = MessageRecipient(numbers: [])
+                prepareMessageInvite(numbers: [], id: "messages")
             }
 
             Divider().background(Color.white.opacity(0.06)).padding(.leading, 62)
 
             shareRow(icon: "square.and.arrow.up", color: .gray, title: "Other apps") {
-                showShareSheet = true
+                prepareShareInvite()
             }
         }
     }
@@ -704,12 +725,50 @@ struct AddFriendsView: View {
             Spacer()
 
             Button {
-                messageRecipient = MessageRecipient(numbers: [contact.phoneNumber])
+                prepareMessageInvite(numbers: [contact.phoneNumber], id: contact.id)
             } label: {
-                addButtonLabel("Invite")
+                if preparingInviteID == contact.id {
+                    ProgressView()
+                        .tint(.white)
+                        .frame(width: 62, height: 28)
+                        .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                        .clipShape(.capsule)
+                } else {
+                    addButtonLabel("Invite")
+                }
             }
+            .disabled(preparingInviteID != nil)
         }
         .padding(.vertical, 8)
+    }
+
+    private func prepareMessageInvite(numbers: [String], id: String) {
+        guard preparingInviteID == nil else { return }
+        preparingInviteID = id
+        Task {
+            let body = await buildFreshInviteBody()
+            messageRecipient = MessageRecipient(numbers: numbers, body: body)
+            preparingInviteID = nil
+        }
+    }
+
+    private func prepareShareInvite() {
+        guard preparingInviteID == nil else { return }
+        preparingInviteID = "share"
+        Task {
+            let body = await buildFreshInviteBody()
+            shareInvite = ShareInvite(body: body)
+            preparingInviteID = nil
+        }
+    }
+
+    private func buildFreshInviteBody() async -> String {
+        guard let username = appState.currentUser?.username,
+              Auth.auth().currentUser != nil,
+              let invite = await DeepLinkService.shared.createPersonalInvite(for: username) else {
+            return fallbackInviteBody
+        }
+        return "wanna do this? I have an extra invite code \(invite.code) — \(invite.shortURL)"
     }
 
     private func addButtonLabel(_ text: String) -> some View {
@@ -793,4 +852,10 @@ struct AddFriendsView: View {
 private struct MessageRecipient: Identifiable {
     let id = UUID()
     let numbers: [String]
+    let body: String
+}
+
+private struct ShareInvite: Identifiable {
+    let id = UUID()
+    let body: String
 }

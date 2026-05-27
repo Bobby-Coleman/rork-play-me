@@ -12,6 +12,61 @@ This checklist is the launch-practical operating baseline for the Firebase produ
   - FCM send failures with invalid-token cleanup spikes.
 - Review alerts weekly during beta and daily during launch week.
 
+Suggested launch filters:
+
+```text
+jsonPayload.event="resolve_spotify_rate_limited"
+jsonPayload.event="resolve_spotify_http_failed"
+jsonPayload.event="resolve_spotify_token_mint_failed"
+jsonPayload.event="push_send_failed"
+jsonPayload.event="push_stale_token_cleanup_failed"
+jsonPayload.event="rate_limit_failed_open"
+jsonPayload.event="validate_invite_rate_limited"
+jsonPayload.event="redeem_invite_failed"
+```
+
+Alert on any sustained non-zero rate during the first paid-acquisition week.
+The filters intentionally rely on structured event names and avoid request
+bodies, phone numbers, invite-code contents, or message text.
+
+## App Check Rollout
+
+The iOS app attaches `X-Firebase-AppCheck` to custom Cloud Function HTTP
+requests. Functions default to monitor mode (`APP_CHECK_MODE` unset or
+`monitor`): missing/invalid tokens are logged as `app_check_missing` or
+`app_check_invalid` but not blocked.
+
+After Firebase Console shows legitimate iOS traffic passing App Check, enforce
+the sensitive HTTP endpoints:
+
+```sh
+# Set APP_CHECK_MODE=enforce in the Gen2 functions environment / deployment
+# pipeline, then redeploy functions.
+firebase deploy --only functions
+```
+
+Verify enforcement in staging before production. If legitimate clients are
+blocked, return to monitor mode and inspect the App Check dashboard plus Cloud
+Logging events.
+
+## Public Phone Cleanup
+
+New client writes store phone numbers only under
+`users/{uid}/private/profile.phone`. Public profile rules no longer allow
+client writes to `users/{uid}.phone`.
+
+Before production rules deploy, run the cleanup in staging:
+
+```sh
+cd functions
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/staging-service-account.json \
+FIREBASE_PROJECT_ID=riff-staging \
+npm run cleanup:public-phone -- --dry-run
+```
+
+If the count looks right, rerun without `--dry-run`. Repeat once against
+production during a quiet period, then deploy `firestore.rules`.
+
 ## Backups
 
 - Enable Firestore Point-in-Time Recovery when budget allows.
@@ -21,7 +76,9 @@ This checklist is the launch-practical operating baseline for the Firebase produ
 
 ## Staging Smoke Test
 
-Use a separate Firebase project and service account. Run:
+Use a separate Firebase project and service account. See
+[`docs/ops/staging.md`](staging.md) for the minimal setup and manual smoke
+checklist. Run:
 
 ```sh
 cd functions

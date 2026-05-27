@@ -23,6 +23,18 @@ struct SettingsView: View {
                 accountRow(label: "Phone", value: appState.currentUser?.phone ?? "—")
             }
 
+            Section {
+                Picker(selection: preferredMusicServiceBinding) {
+                    Text("Apple Music").tag(MusicService.appleMusic)
+                    Text("Spotify").tag(MusicService.spotify)
+                } label: {
+                    labelRow(icon: "music.note", title: "Music service", tint: .pink)
+                }
+                .pickerStyle(.menu)
+            } footer: {
+                Text("This controls which app Riff opens when you tap a song.")
+            }
+
             Section("Notifications") {
                 Toggle(isOn: notificationsBinding) {
                     labelRow(icon: "bell.fill", title: "Allow notifications", tint: .orange)
@@ -128,6 +140,13 @@ struct SettingsView: View {
                     if needsSettings { showNotificationsDeniedAlert = true }
                 }
             }
+        )
+    }
+
+    private var preferredMusicServiceBinding: Binding<MusicService> {
+        Binding(
+            get: { appState.preferredMusicService },
+            set: { appState.preferredMusicService = $0 }
         )
     }
 

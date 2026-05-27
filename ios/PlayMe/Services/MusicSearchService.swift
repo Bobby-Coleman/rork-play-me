@@ -1,4 +1,5 @@
 import Foundation
+import FirebaseAppCheck
 import FirebaseAuth
 
 /// Resolves an Apple-Music song URL (what MusicKit returns) into the
@@ -225,6 +226,9 @@ actor MusicSearchService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
+        if let appCheckToken = await currentAppCheckToken() {
+            request.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
+        }
 
         print("event=open_in_spotify resolve_attempt source=cloudfn url=\"\(endpoint.absoluteString)\" amURL=\"\(normalizedAmURL)\"")
 
@@ -262,6 +266,17 @@ actor MusicSearchService {
         } catch {
             print("event=open_in_spotify resolve_result source=cloudfn status=network_error error=\"\(error.localizedDescription)\" amURL=\"\(normalizedAmURL)\"")
             return nil
+        }
+    }
+
+    private func currentAppCheckToken() async -> String? {
+        await withCheckedContinuation { continuation in
+            AppCheck.appCheck().token(forcingRefresh: false) { token, error in
+                if let error {
+                    print("event=open_in_spotify app_check_token_failed error=\"\(error.localizedDescription)\"")
+                }
+                continuation.resume(returning: token?.token)
+            }
         }
     }
 

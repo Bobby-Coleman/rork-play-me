@@ -26,6 +26,10 @@ service cloud.firestore {
           || request.resource.data.song.diff(resource.data.song).affectedKeys().hasOnly(['spotifyURI']));
     }
 
+    function hasAcceptedFriendship(sender, recipient) {
+      return exists(/databases/$(database)/documents/users/$(sender)/friends/$(recipient));
+    }
+
     // -------- User profile field allowlist --------
     //
     // Fields the client may set/update on its own public `users/{uid}` doc.
@@ -39,11 +43,7 @@ service cloud.firestore {
         'notificationsEnabled', 'preferredMusicService',
         'avatarURL', 'avatarColor', 'theme',
         'tasteGenres', 'tasteArtists',
-        'createdAt', 'updatedAt',
-        // Legacy fields the existing client still touches during
-        // profile creation; keep allow-listed so we don't break older
-        // installs, but their values are stamped server-side anyway.
-        'phone'
+        'createdAt', 'updatedAt'
       ];
     }
 
@@ -155,11 +155,26 @@ service cloud.firestore {
       }
 
       // Sender-owned mirror of pending outgoing requests. This lets the sender
-      // reload pending recipients and send songs before the request is accepted.
+      // reload pending recipients while keeping delivery blocked until accept.
       match /outgoingFriendRequests/{targetId} {
         allow read, create, update: if request.auth != null && request.auth.uid == userId;
         allow delete: if request.auth != null
           && (request.auth.uid == userId || request.auth.uid == targetId);
+      }
+
+      // Songs selected for an existing Riff user before they accept the friend
+      // request. Only the sender can create/read/delete these queue rows; a
+      // Cloud Function delivers them into /shares after friendship acceptance.
+      match /pendingFriendShares/{queuedShareId} {
+        allow read, delete: if request.auth != null && request.auth.uid == userId;
+        allow create: if request.auth != null
+          && request.auth.uid == userId
+          && request.resource.data.senderId == userId
+          && request.resource.data.recipientId is string
+          && exists(/databases/$(database)/documents/users/$(userId)/outgoingFriendRequests/$(request.resource.data.recipientId))
+          && !hasAcceptedFriendship(userId, request.resource.data.recipientId)
+          && !isBlockedBy(request.resource.data.recipientId, userId);
+        allow update: if false;
       }
 
       // User-owned mixtapes (Pinterest-style boards of saved songs). Each
@@ -205,6 +220,7 @@ service cloud.firestore {
       allow read: if isShareParticipant();
       allow create: if request.auth != null
         && request.resource.data.senderId == request.auth.uid
+        && hasAcceptedFriendship(request.auth.uid, request.resource.data.recipientId)
         && !isBlockedBy(request.resource.data.recipientId, request.auth.uid);
       allow update: if isShareParticipant() && isSafeShareUpdate();
       allow delete: if isShareParticipant();
@@ -219,6 +235,7 @@ service cloud.firestore {
       allow read: if isShareParticipant();
       allow create: if request.auth != null
         && request.resource.data.senderId == request.auth.uid
+        && hasAcceptedFriendship(request.auth.uid, request.resource.data.recipientId)
         && !isBlockedBy(request.resource.data.recipientId, request.auth.uid);
       allow update: if false;
       allow delete: if isShareParticipant();
@@ -229,6 +246,7 @@ service cloud.firestore {
       allow read: if isShareParticipant();
       allow create: if request.auth != null
         && request.resource.data.senderId == request.auth.uid
+        && hasAcceptedFriendship(request.auth.uid, request.resource.data.recipientId)
         && !isBlockedBy(request.resource.data.recipientId, request.auth.uid);
       allow update: if false;
       allow delete: if isShareParticipant();

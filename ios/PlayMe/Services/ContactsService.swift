@@ -38,7 +38,6 @@ final class ContactsService {
             CNContactIdentifierKey as CNKeyDescriptor,
         ]
         let request = CNContactFetchRequest(keysToFetch: keys)
-        request.sortOrder = .givenName
 
         var results: [SimpleContact] = []
         do {
@@ -55,6 +54,43 @@ final class ContactsService {
         } catch {
             print("ContactsService: fetchContacts failed: \(error.localizedDescription)")
         }
-        return results
+        return results.suggestedInviteOrder()
     }
+}
+
+extension Array where Element == SimpleContact {
+    /// Privacy-safe invite ordering. Apple does not expose iMessage frequency
+    /// or "closest contacts" data to third-party apps, so we preserve the
+    /// phone-provided order and only boost contacts that are clearly actionable.
+    func suggestedInviteOrder(prioritizedContactIds: Set<String> = []) -> [SimpleContact] {
+        enumerated()
+            .sorted { lhs, rhs in
+                let l = inviteRank(lhs.element, originalIndex: lhs.offset, prioritizedContactIds: prioritizedContactIds)
+                let r = inviteRank(rhs.element, originalIndex: rhs.offset, prioritizedContactIds: prioritizedContactIds)
+                if l.bucket != r.bucket { return l.bucket < r.bucket }
+                if l.digitRank != r.digitRank { return l.digitRank < r.digitRank }
+                return l.originalIndex < r.originalIndex
+            }
+            .map(\.element)
+    }
+}
+
+private func inviteRank(
+    _ contact: SimpleContact,
+    originalIndex: Int,
+    prioritizedContactIds: Set<String>
+) -> (bucket: Int, digitRank: Int, originalIndex: Int) {
+    let hasName = !contact.fullName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    let digitCount = contact.phoneNumber.filter(\.isNumber).count
+    let bucket: Int
+    if prioritizedContactIds.contains(contact.id) {
+        bucket = 0
+    } else if hasName && digitCount >= 10 {
+        bucket = 1
+    } else if digitCount >= 10 {
+        bucket = 2
+    } else {
+        bucket = 3
+    }
+    return (bucket, -digitCount, originalIndex)
 }

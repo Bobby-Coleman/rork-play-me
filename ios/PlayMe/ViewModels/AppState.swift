@@ -25,6 +25,9 @@ struct CreateMixtapeDraft {
 @MainActor
 class AppState {
     private let shareFanOutBatchSize = 8
+    private let foregroundRefreshMinInterval: TimeInterval = 45
+    private var lastSuccessfulShareRefreshAt: Date?
+    private var isRefreshSharesInFlight = false
 
     var isOnboarded: Bool = UserDefaults.standard.bool(forKey: "isOnboarded") {
         didSet { UserDefaults.standard.set(isOnboarded, forKey: "isOnboarded") }
@@ -285,11 +288,12 @@ class AppState {
     /// post-redeem messaging (e.g. "you'll be friends with X" vs
     /// "joined via Bobby's launch code"). Nil until validation succeeds.
     var inviteCodeKind: FirebaseService.InviteCodeKind? = nil
-    /// Outcome of the post-register redeem. Server tells us whether the
-    /// personal-code auto-friend was applied or skipped (inviter at cap,
-    /// missing, etc.). Surfaces a soft message after registration if not
-    /// `applied`. Nil until redeem completes.
-    var inviteRedeemAutoFriend: String? = nil
+    /// User who created the redeemed invite code. Invite codes are gateways,
+    /// not automatic friendships, so this user is pinned as a suggestion.
+    var inviteSuggestedUser: AppUser? = nil
+    /// Contacts already signed up for Riff, matched server-side by private
+    /// profile phone numbers and rendered as onboarding suggestions.
+    var contactSuggestedUsers: [AppUser] = []
     /// Genres the user picked on the taste screen. Persisted to
     /// `users/{uid}.tasteGenres` once registration succeeds.
     var tasteGenres: [String] = []
@@ -441,17 +445,12 @@ class AppState {
         currentUser = AppUser(id: uid, firstName: firstName, lastName: lastName, username: username.lowercased(), phone: phoneNumber)
 
         // Redeem the invite code now that the profile exists. Server-side
-        // bumps the use count, stamps attribution on the user doc, and
-        // (for `personal` codes) best-effort auto-friends the inviter.
-        // We capture the autoFriend disposition so the UI can show a
-        // soft "your friend is at capacity" message when applicable.
+        // bumps the use count and stamps attribution, but does not create
+        // friendships. The inviter comes back as a suggested person to add.
         if !inviteCode.isEmpty {
             let result = await firebase.redeemInviteCode(inviteCode)
-            inviteRedeemAutoFriend = result.autoFriend
-            // If the server auto-friended, refresh our local friend list
-            // so the new friendship appears immediately on first paint.
-            if result.autoFriend == "applied" {
-                await refreshFriends()
+            if let suggestedInviter = result.suggestedInviter {
+                rememberInviteSuggestedUser(suggestedInviter)
             }
         }
         DeepLinkService.shared.clearPendingInviteCode()
@@ -502,25 +501,42 @@ class AppState {
         let serverLikes = await firebase.loadLikedShareIds()
         likedShareIds = serverLikes
 
-        let serverFriends = await firebase.loadFriends()
-        blockedUserIds = await firebase.loadBlockedUserIds()
+        async let friendsFetch = firebase.loadFriends()
+        async let blockedFetch = firebase.loadBlockedUserIds()
+        let (serverFriends, blocked) = await (friendsFetch, blockedFetch)
+        blockedUserIds = blocked
         friends = serverFriends.filter { !blockedUserIds.contains($0.id) }
-        sendStats = await firebase.loadSendStats()
 
         await refreshFriendRequests()
         startIncomingRequestsListener()
         startOutgoingRequestsListener()
         startReceivedSharesListener()
+        startConversationsListener()
+
+        async let notificationsFetch = firebase.loadNotificationsEnabled()
+        async let receivedFetch = firebase.loadReceivedShares()
+        async let conversationsFetch: () = loadConversations()
+        let (notifications, serverReceived, _) = await (notificationsFetch, receivedFetch, conversationsFetch)
+        notificationsEnabled = notifications
+        receivedShares = serverReceived.filter { !blockedUserIds.contains($0.sender.id) }
+
+        syncWidgetWithLatestReceivedShare()
+        isLoading = false
+
+        Task { await loadDeferredLaunchData() }
+    }
+
+    private func loadDeferredLaunchData() async {
+        guard currentUser != nil else { return }
+
+        let firebase = FirebaseService.shared
+        if !firebase.isSignedIn { return }
+
+        sendStats = await firebase.loadSendStats()
+
         startSentSharesListener()
         startReceivedMixtapeSharesListener()
         startReceivedAlbumSharesListener()
-        startConversationsListener()
-
-        notificationsEnabled = await firebase.loadNotificationsEnabled()
-
-        let serverReceived = await firebase.loadReceivedShares()
-            .filter { !blockedUserIds.contains($0.sender.id) }
-        receivedShares = serverReceived
 
         let serverSent = await firebase.loadSentShares()
         sentShares = serverSent
@@ -539,22 +555,15 @@ class AppState {
         sentAlbumShares = sa
 
         // Hydrate the SaveService index and the user's mixtapes in
-        // parallel — they live in independent subcollections, and
-        // neither blocks first-paint of the home / discovery feeds. The
-        // Mixtapes screen will see populated data the moment the user
-        // navigates there.
+        // parallel. These are tab-specific and should not block first paint.
         async let saveIndex: () = saveService.loadFromFirestore()
         async let mixtapeFetch: () = mixtapeStore.loadFromFirestore()
         _ = await (saveIndex, mixtapeFetch)
 
-        await loadConversations()
-        syncWidgetWithLatestReceivedShare()
-        isLoading = false
-
         // Late-arriving queued shares (friend queued a song AFTER this user
         // signed up) need a retry. The claimRequest doc triggers the server
-        // fan-out, and is cheap enough to run on every foreground.
-        Task { await firebase.requestPendingSharesClaim() }
+        // fan-out. Keep it after first paint so it never blocks launch.
+        await firebase.requestPendingSharesClaim()
     }
 
     func sendSong(_ song: Song, to friend: AppUser, note: String?) async {
@@ -607,6 +616,32 @@ class AppState {
             try? await Task.sleep(for: .seconds(2))
             showSentToast = false
         }
+    }
+
+    @discardableResult
+    func queueSongForPendingFriend(_ song: Song, to user: AppUser, note: String?) async -> Bool {
+        guard let sender = currentUser else { return false }
+
+        let enrichedSong = await enrichSongWithSpotifyURI(song)
+        let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedNote = (trimmedNote?.isEmpty ?? true) ? nil : trimmedNote
+        let share = SongShare(
+            song: enrichedSong,
+            sender: AppUser(id: sender.id, firstName: sender.firstName, lastName: sender.lastName, username: sender.username, phone: sender.phone),
+            recipient: user,
+            note: cleanedNote
+        )
+
+        guard await FirebaseService.shared.savePendingFriendShare(share) != nil else {
+            queuedContactError = "We couldn't queue that song. Try again."
+            clearQueuedContactFeedbackSoon()
+            return false
+        }
+
+        let name = user.firstName.isEmpty ? "@\(user.username)" : user.firstName
+        queuedContactToast = "We'll deliver to \(name) when they accept your request."
+        clearQueuedContactFeedbackSoon()
+        return true
     }
 
     func hasLocallySentSong(_ song: Song, to friend: AppUser) -> Bool {
@@ -985,9 +1020,7 @@ class AppState {
         let firebase = FirebaseService.shared
         blockedUserIds = await firebase.loadBlockedUserIds()
         let serverFriends = await firebase.loadFriends()
-        if !serverFriends.isEmpty {
-            friends = serverFriends.filter { !blockedUserIds.contains($0.id) }
-        }
+        friends = serverFriends.filter { !blockedUserIds.contains($0.id) }
         // Friend cap is derived from the public user doc which is
         // updated by the `onFriendCreated` / `onFriendDeleted` Cloud
         // Function triggers. Refresh alongside the friends list so the
@@ -1158,6 +1191,7 @@ class AppState {
     /// Cancel a pending outgoing request.
     func cancelOutgoingRequest(to user: AppUser) async {
         await FirebaseService.shared.cancelOutgoingRequest(toUID: user.id)
+        await FirebaseService.shared.deletePendingFriendShares(toUID: user.id)
         outgoingRequestUIDs.remove(user.id)
         outgoingRequests.removeAll { $0.id == user.id }
         onboardingRequestedUsers.removeAll { $0.id == user.id }
@@ -1172,6 +1206,26 @@ class AppState {
         guard !isOnboarded else { return }
         onboardingRequestedUsers.removeAll { $0.id == user.id }
         onboardingRequestedUsers.append(user)
+    }
+
+    func rememberInviteSuggestedUser(_ user: AppUser) {
+        guard !isOnboarded else { return }
+        inviteSuggestedUser = user
+        contactSuggestedUsers.removeAll { $0.id == user.id }
+    }
+
+    func refreshContactSuggestions(from contacts: [SimpleContact]) async {
+        guard !isOnboarded else { return }
+        let matched = await FirebaseService.shared.matchContacts(contacts)
+        let excluded = Set(
+            friends.map(\.id)
+                + outgoingRequests.map(\.id)
+                + onboardingRequestedUsers.map(\.id)
+                + [currentUser?.id, inviteSuggestedUser?.id].compactMap { $0 }
+        )
+        contactSuggestedUsers = matched.filter { user in
+            !excluded.contains(user.id) && !blockedUserIds.contains(user.id)
+        }
     }
 
     /// Accept an incoming friend request; refreshes `friends` so the
@@ -1443,7 +1497,8 @@ class AppState {
         inviteCode = ""
         inviteCodeError = nil
         inviteCodeKind = nil
-        inviteRedeemAutoFriend = nil
+        inviteSuggestedUser = nil
+        contactSuggestedUsers = []
         DeepLinkService.shared.clearPendingInviteCode()
         DeepLinkService.shared.clearPendingReferrer()
         AudioPlayerService.shared.stop()
@@ -1458,9 +1513,18 @@ class AppState {
         clearWidgetSharedState()
     }
 
-    func refreshShares() async {
+    func refreshShares(force: Bool = true) async {
         let firebase = FirebaseService.shared
         guard firebase.isSignedIn else { return }
+        guard !isRefreshSharesInFlight else { return }
+        if !force,
+           let lastSuccessfulShareRefreshAt,
+           Date().timeIntervalSince(lastSuccessfulShareRefreshAt) < foregroundRefreshMinInterval {
+            return
+        }
+
+        isRefreshSharesInFlight = true
+        defer { isRefreshSharesInFlight = false }
 
         blockedUserIds = await firebase.loadBlockedUserIds()
 
@@ -1501,6 +1565,7 @@ class AppState {
         _ = await (saveIndex, mixtapeFetch)
 
         syncWidgetWithLatestReceivedShare()
+        lastSuccessfulShareRefreshAt = Date()
     }
 
     private func mapShare(_ response: APIShareResponse) -> SongShare? {

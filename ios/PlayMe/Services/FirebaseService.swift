@@ -1,4 +1,5 @@
 import Foundation
+import FirebaseAppCheck
 import FirebaseAuth
 import FirebaseFirestore
 import CryptoKit
@@ -197,7 +198,6 @@ class FirebaseService {
                     "username": lowered,
                     "firstName": firstName,
                     "lastName": lastName,
-                    "phone": FieldValue.delete(),
                     "createdAt": FieldValue.serverTimestamp(),
                     "updatedAt": FieldValue.serverTimestamp(),
                 ]
@@ -232,7 +232,6 @@ class FirebaseService {
             "firstName": firstName ?? username,
             "lastName": lastName ?? "",
             "updatedAt": FieldValue.serverTimestamp(),
-            "phone": FieldValue.delete(),
         ]
         var privateData: [String: Any] = ["updatedAt": FieldValue.serverTimestamp()]
         if let phone { privateData["phone"] = PhoneNormalizer.normalize(phone) ?? phone }
@@ -243,7 +242,6 @@ class FirebaseService {
                 try await ref.updateData(data)
             } else {
                 data["createdAt"] = FieldValue.serverTimestamp()
-                data.removeValue(forKey: "phone")
                 try await ref.setData(data)
             }
             if privateData["phone"] != nil {
@@ -382,6 +380,78 @@ class FirebaseService {
         } catch {
             print("FirebaseService: save share failed: \(error.localizedDescription)")
             return nil
+        }
+    }
+
+    /// Queue a song for an existing Riff user who has not accepted the
+    /// sender's friend request yet. A Cloud Function delivers these queued
+    /// rows into `shares` only after the accepted friendship exists.
+    func savePendingFriendShare(_ share: SongShare) async -> String? {
+        guard let uid = firebaseUID, uid == share.sender.id else { return nil }
+
+        let pairKey = [share.sender.id, share.recipient.id].sorted().joined(separator: "_")
+        let ref = db.collection("users")
+            .document(uid)
+            .collection("pendingFriendShares")
+            .document()
+
+        let data: [String: Any] = [
+            "senderId": uid,
+            "recipientId": share.recipient.id,
+            "recipientUsername": share.recipient.username,
+            "pairKey": pairKey,
+            "note": share.note as Any,
+            "createdAt": FieldValue.serverTimestamp(),
+            "song": [
+                "id": share.song.id,
+                "title": share.song.title,
+                "artist": share.song.artist,
+                "albumArtURL": share.song.albumArtURL,
+                "duration": share.song.duration,
+                "spotifyURI": share.song.spotifyURI as Any,
+                "previewURL": share.song.previewURL as Any,
+                "appleMusicURL": share.song.appleMusicURL as Any,
+                "artistId": share.song.artistId as Any,
+                "albumId": share.song.albumId as Any,
+            ],
+            "sender": [
+                "id": uid,
+                "firstName": share.sender.firstName,
+                "lastName": share.sender.lastName,
+                "username": share.sender.username,
+            ],
+            "recipient": [
+                "id": share.recipient.id,
+                "firstName": share.recipient.firstName,
+                "lastName": share.recipient.lastName,
+                "username": share.recipient.username,
+            ],
+        ]
+
+        do {
+            try await ref.setData(data)
+            return ref.documentID
+        } catch {
+            print("FirebaseService: save pending friend share failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func deletePendingFriendShares(toUID: String) async {
+        guard let uid = firebaseUID else { return }
+        do {
+            let snap = try await db.collection("users")
+                .document(uid)
+                .collection("pendingFriendShares")
+                .whereField("recipientId", isEqualTo: toUID)
+                .limit(to: 100)
+                .getDocuments()
+            guard !snap.documents.isEmpty else { return }
+            let batch = db.batch()
+            snap.documents.forEach { batch.deleteDocument($0.reference) }
+            try await batch.commit()
+        } catch {
+            print("FirebaseService: delete pending friend shares failed: \(error.localizedDescription)")
         }
     }
 
@@ -956,15 +1026,17 @@ class FirebaseService {
 
     /// Remove a bidirectional friendship. Deletes both sides so neither user
     /// sees the other in their friends list anymore.
-    func removeFriend(friendUID: String) async {
-        guard let uid = firebaseUID else { return }
+    func removeFriend(friendUID: String) async -> Bool {
+        guard let uid = firebaseUID else { return false }
         do {
             let batch = db.batch()
             batch.deleteDocument(db.collection("users").document(uid).collection("friends").document(friendUID))
             batch.deleteDocument(db.collection("users").document(friendUID).collection("friends").document(uid))
             try await batch.commit()
+            return true
         } catch {
             print("FirebaseService: remove friend failed: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -1592,6 +1664,24 @@ class FirebaseService {
         return URL(string: "https://\(Self.functionsRegion)-\(projectId).cloudfunctions.net/\(name)")
     }
 
+    private func currentAppCheckToken() async -> String? {
+        await withCheckedContinuation { continuation in
+            AppCheck.appCheck().token(forcingRefresh: false) { token, error in
+                if let error {
+                    #if DEBUG
+                    print("FirebaseService: App Check token unavailable: \(error.localizedDescription)")
+                    #endif
+                }
+                continuation.resume(returning: token?.token)
+            }
+        }
+    }
+
+    private func attachAppCheckToken(to request: inout URLRequest) async {
+        guard let token = await currentAppCheckToken(), !token.isEmpty else { return }
+        request.setValue(token, forHTTPHeaderField: "X-Firebase-AppCheck")
+    }
+
     // MARK: - Invite codes
 
     /// Validation reason from the `validateInviteCode` Cloud Function.
@@ -1618,14 +1708,13 @@ class FirebaseService {
         case admin
     }
 
-    /// Outcome of redeem. `kind` echoes the doc kind; `autoFriend`
-    /// describes whether the server tried (and succeeded) auto-friending
-    /// the inviter on `personal` codes. UI shows a soft warning if the
-    /// inviter was already at their friend cap.
+    /// Outcome of redeem. `kind` echoes the doc kind. Invite codes are
+    /// gateways only; `suggestedInviter` is a public profile the onboarding
+    /// UI can pin at the top of suggestions.
     struct RedeemInviteResult {
         let redeemed: Bool
         let kind: InviteCodeKind?
-        let autoFriend: String?
+        let suggestedInviter: AppUser?
     }
 
     /// Result of `generateInviteCode`. iOS turns this into a ChottuLink
@@ -1633,6 +1722,69 @@ class FirebaseService {
     struct GeneratedInvite {
         let code: String
         let destinationURL: String
+    }
+
+    private static func parsePublicUser(_ raw: Any?) -> AppUser? {
+        guard let dict = raw as? [String: Any],
+              let id = dict["id"] as? String,
+              let firstName = dict["firstName"] as? String,
+              let username = dict["username"] as? String else {
+            return nil
+        }
+        let lastName = dict["lastName"] as? String ?? ""
+        return AppUser(id: id, firstName: firstName, lastName: lastName, username: username, phone: "")
+    }
+
+    /// Matches the user's local contacts against private profile phone
+    /// numbers server-side. Returns only public user fields; phone numbers
+    /// never come back to the client.
+    func matchContacts(_ contacts: [SimpleContact]) async -> [AppUser] {
+        guard let user = Auth.auth().currentUser else { return [] }
+        guard let url = functionEndpoint(name: "matchContacts") else { return [] }
+        let phones = Array(Set(contacts.compactMap { PhoneNormalizer.normalize($0.phoneNumber) })).prefix(500)
+        guard !phones.isEmpty else { return [] }
+
+        let idToken: String
+        do {
+            idToken = try await user.getIDToken()
+        } catch {
+            return []
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["phones": Array(phones)])
+        await attachAppCheckToken(to: &req)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            guard status == 200,
+                  let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  json["ok"] as? Bool == true,
+                  let rawUsers = json["users"] as? [Any] else {
+                #if DEBUG
+                let body = String(data: data, encoding: .utf8) ?? ""
+                print("FirebaseService: matchContacts rejected status=\(status) body=\(body)")
+                #endif
+                return []
+            }
+
+            var seen = Set<String>()
+            return rawUsers.compactMap { raw in
+                guard let user = Self.parsePublicUser(raw), seen.insert(user.id).inserted else {
+                    return nil
+                }
+                return user
+            }
+        } catch {
+            #if DEBUG
+            print("FirebaseService: matchContacts error: \(error.localizedDescription)")
+            #endif
+            return []
+        }
     }
 
     /// Returns `(valid, reason?, kind?)`. Valid codes return `(true, nil, kind)`.
@@ -1648,6 +1800,7 @@ class FirebaseService {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try? JSONSerialization.data(withJSONObject: ["code": trimmed])
+        await attachAppCheckToken(to: &req)
         do {
             let (data, response) = try await URLSession.shared.data(for: req)
             let http = response as? HTTPURLResponse
@@ -1690,25 +1843,24 @@ class FirebaseService {
     }
 
     /// Atomically redeem a previously-validated invite code for the current
-    /// signed-in user. Stamps `users/{uid}.invitedBy`, `invitedByUid`, and
-    /// `invitedByKind` server-side; for `personal` codes the server also
-    /// best-effort auto-friends the code's `createdByUid`.
+    /// signed-in user. Stamps attribution server-side and may return the
+    /// inviter as a suggested person to add. It does not create friendships.
     func redeemInviteCode(_ code: String) async -> RedeemInviteResult {
         guard let user = Auth.auth().currentUser else {
-            return RedeemInviteResult(redeemed: false, kind: nil, autoFriend: nil)
+            return RedeemInviteResult(redeemed: false, kind: nil, suggestedInviter: nil)
         }
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !trimmed.isEmpty else {
-            return RedeemInviteResult(redeemed: false, kind: nil, autoFriend: nil)
+            return RedeemInviteResult(redeemed: false, kind: nil, suggestedInviter: nil)
         }
         guard let url = functionEndpoint(name: "redeemInviteCode") else {
-            return RedeemInviteResult(redeemed: false, kind: nil, autoFriend: nil)
+            return RedeemInviteResult(redeemed: false, kind: nil, suggestedInviter: nil)
         }
         let idToken: String
         do {
             idToken = try await user.getIDToken()
         } catch {
-            return RedeemInviteResult(redeemed: false, kind: nil, autoFriend: nil)
+            return RedeemInviteResult(redeemed: false, kind: nil, suggestedInviter: nil)
         }
 
         var req = URLRequest(url: url)
@@ -1716,6 +1868,7 @@ class FirebaseService {
         req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try? JSONSerialization.data(withJSONObject: ["code": trimmed])
+        await attachAppCheckToken(to: &req)
         do {
             let (data, response) = try await URLSession.shared.data(for: req)
             let http = response as? HTTPURLResponse
@@ -1724,20 +1877,20 @@ class FirebaseService {
                 let body = String(data: data, encoding: .utf8) ?? ""
                 print("FirebaseService: redeemInviteCode rejected status=\(http?.statusCode ?? -1) body=\(body)")
                 #endif
-                return RedeemInviteResult(redeemed: false, kind: nil, autoFriend: nil)
+                return RedeemInviteResult(redeemed: false, kind: nil, suggestedInviter: nil)
             }
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return RedeemInviteResult(redeemed: false, kind: nil, autoFriend: nil)
+                return RedeemInviteResult(redeemed: false, kind: nil, suggestedInviter: nil)
             }
             let ok = json["redeemed"] as? Bool == true
             let kind = (json["kind"] as? String).flatMap { InviteCodeKind(rawValue: $0) }
-            let autoFriend = json["autoFriend"] as? String
-            return RedeemInviteResult(redeemed: ok, kind: kind, autoFriend: autoFriend)
+            let suggestedInviter = Self.parsePublicUser(json["suggestedInviter"])
+            return RedeemInviteResult(redeemed: ok, kind: kind, suggestedInviter: suggestedInviter)
         } catch {
             #if DEBUG
             print("FirebaseService: redeemInviteCode error: \(error.localizedDescription)")
             #endif
-            return RedeemInviteResult(redeemed: false, kind: nil, autoFriend: nil)
+            return RedeemInviteResult(redeemed: false, kind: nil, suggestedInviter: nil)
         }
     }
 
@@ -1757,6 +1910,7 @@ class FirebaseService {
         // Empty body — server doesn't take params today, but keep the
         // POST + content-type so this can grow (e.g. campaign tag) later.
         req.httpBody = try? JSONSerialization.data(withJSONObject: [String: Any]())
+        await attachAppCheckToken(to: &req)
 
         do {
             let (data, response) = try await URLSession.shared.data(for: req)
@@ -1825,6 +1979,7 @@ class FirebaseService {
         req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = "{}".data(using: .utf8)
+        await attachAppCheckToken(to: &req)
 
         do {
             let (data, response) = try await URLSession.shared.data(for: req)
@@ -1882,6 +2037,7 @@ class FirebaseService {
         req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = "{}".data(using: .utf8)
+        await attachAppCheckToken(to: &req)
 
         do {
             let (data, response) = try await URLSession.shared.data(for: req)

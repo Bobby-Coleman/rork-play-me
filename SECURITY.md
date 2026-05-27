@@ -12,12 +12,12 @@ that way.
 | 1 | Lock unauth Cloud Functions | ✅ Landed | Deprecated `swap`/`refresh`/`getTokens`/`auth` return 410. `validateInviteCode` now has per-IP token bucket (20/10min). `resolveSpotifyTrack` + `redeemInviteCode` already required Bearer ID token. |
 | 2 | Firestore rules hardening | ✅ Landed | Field allowlists on `users/{uid}` writes; conversation update key gate; message length cap (2000); reaction emoji allowlist; `spotifyResolutions` writes now admin-only; friend-cap gate on friend doc create. |
 | 3 | Friend-gate DMs + per-UID throttles | ⏳ Deferred | The current participant-gate is already strong: a conversation must exist before either side can send, and conversation creation requires participant === auth.uid. Pushing further to "must be friends" would break the Discovery reply flow. Per-UID throttles need a Cloud Function trigger refactor; see "Follow-ups". |
-| 4 | App Check | ⏳ Deferred | Requires Firebase Console + `FirebaseAppCheck` SDK addition. See "Follow-ups". |
+| 4 | App Check | ✅ Monitor-ready | `FirebaseAppCheck` SDK is wired on iOS, custom HTTP calls attach `X-Firebase-AppCheck`, and Functions log missing/invalid tokens. Console rollout/enforcement still required. |
 | 5a | PII print gating | ✅ Landed | Phone numbers, message text, contact full names wrapped in `#if DEBUG`. ShazamKit prints already gated. |
 | 5b | ChottuLink API key rotation path | ✅ Landed | Key moved out of `PlayMeApp.swift` into `Config.plist` (gitignored). `Config.plist.template` documents the values. **You must rotate the key — the previous value is in the git history.** See "Required follow-up actions". |
 | 6 | Cost hygiene | ✅ Landed | Daily scheduled `cleanupPushDedupe` sweeper; `requestPendingSharesClaim` no-ops within a session; `loadBlockedUsers` switched from N+1 to bounded-concurrency fan-out. |
-| 7 | Privacy compliance | ✅ Landed | `PrivacyInfo.xcprivacy` added; `NSPrivacyPolicyURL` + `NSTermsOfServiceURL` set in Info.plist. **You must publish the policy at `https://playme.app/privacy` before App Store submission.** |
-| 8 | Crashlytics / structured logging | ⏳ Deferred | Requires Firebase Console enable. See "Follow-ups". |
+| 7 | Privacy compliance | ✅ Landed | `PrivacyInfo.xcprivacy` added; `NSPrivacyPolicyURL` + `NSTermsOfServiceURL` point at Firebase-hosted policy pages. |
+| 8 | Crashlytics / structured logging | ✅ Code landed | `FirebaseCrashlytics` package is wired and high-risk Functions emit structured Cloud Logging events. Firebase Console alert setup still required. |
 | – | Friend cap (8 per user, configurable) | ✅ Landed | Default 8 in `Config.DEFAULT_FRIEND_LIMIT`, `firestore.rules`, and `functions/index.js`. Per-account override via `users/{uid}.friendLimit`. Enforced at rules level (soft) + Cloud Function trigger (hard). UI surfaces "{n} of {limit} friends" + disables Accept button at cap. |
 | – | OTP resend cooldown + countdown | ✅ Landed | Both OTP entry views (`OTPVerifyView` and `OTPVerificationView`) show "Resend code in m:ss" with a `monospacedDigit` countdown. Cooldown escalates per session (30s → 60s → 120s, capped); session resend cap = 5 (`Config.OTP_RESEND_SESSION_MAX`). |
 
@@ -112,10 +112,10 @@ that way.
    ChottuLink dashboard, drop it into `ios/PlayMe/Config.plist`
    locally, and configure your CI to inject it into the production
    build. The previous key should be revoked.
-2. **Publish the privacy policy + terms of service** at
-   `https://playme.app/privacy` and `/terms` before App Store
-   submission. Update the URLs in `ios/PlayMe/Info.plist` if you
-   host elsewhere.
+2. **Deploy Firebase Hosting** so the policy pages added under
+   `public/privacy/` and `public/terms/` are live at the URLs in
+   `ios/PlayMe/Info.plist`. Update those URLs if you later move to a
+   custom domain.
 3. **Deploy the new Firestore rules + Cloud Functions.** Run
    `firebase deploy --only firestore:rules,functions` to ship the
    server-side changes. Rules deploy is essentially instant; the new
@@ -136,24 +136,17 @@ that way.
 
 Adds device attestation (App Attest on iOS) so requests to Cloud
 Functions can verify they originate from a legitimate app install
-rather than a script with a stolen Bearer token. To enable:
+rather than a script with a stolen Bearer token. The code is now
+monitor-ready. To finish rollout:
 
 1. In Firebase Console → App Check, register the iOS app with App
    Attest as the provider.
-2. Add `FirebaseAppCheck` to the Xcode project's Swift package
-   manifest.
-3. In `PlayMeApp.swift` `init` (BEFORE `FirebaseApp.configure()`),
-   set the provider:
-   ```swift
-   let providerFactory = AppCheckDebugProviderFactory()  // for DEBUG
-   // or AppAttestProviderFactory() in release
-   AppCheck.setAppCheckProviderFactory(providerFactory)
-   ```
-4. In Cloud Functions, set `enforceAppCheck: true` on the `onRequest`
-   options for each callable that should require it (start with
-   `resolveSpotifyTrack`, `redeemInviteCode`, `validateInviteCode`).
-5. Roll out gradually — start in "monitor" mode in Firebase Console
-   to see the rejection rate before flipping to "enforce".
+2. Confirm Cloud Logging events for `app_check_missing` and
+   `app_check_invalid` stay low for legitimate builds.
+3. Set `APP_CHECK_MODE=enforce` in the Gen2 Functions deployment
+   environment after staging verification.
+4. Roll out gradually — start with staging, then production monitor,
+   then production enforce.
 
 ### Per-UID rate limiting on message send + friend requests
 
@@ -169,14 +162,9 @@ expires automatically). This keeps the rule's `get()` budget small
 ### Tier 8: Crashlytics + structured logging
 
 1. In Firebase Console → Crashlytics, enable for the iOS app.
-2. Add `FirebaseCrashlytics` to the Swift package manifest.
-3. The first session after deploy automatically uploads the dSYM and
-   starts collecting crashes.
-4. For structured server logs, wrap the existing `console.log` calls
-   in functions with a small helper that emits JSON so Cloud Logging
-   can index by field. See `JSON.stringify({ event: "...", ... })`
-   examples already used in `cascadeDeleteUser` and
-   `onFriendCreated`.
+2. Add Cloud Logging alert policies using the structured `event`
+   fields documented in `docs/ops/production-readiness.md`.
+3. Verify one test crash and one test Function error before paid ads.
 
 ### Keychain migration for phone / profile cache
 

@@ -18,6 +18,7 @@ struct SendFirstSongRiffView: View {
 
     @State private var showSendSheet = false
     @State private var gridVM = SongGridViewModel()
+    @State private var isPreparingSendSheet = false
 
     @Environment(\.riffTheme) private var theme
 
@@ -50,20 +51,27 @@ struct SendFirstSongRiffView: View {
                 Spacer(minLength: 18)
 
                 Button {
-                    showSendSheet = true
+                    openSendSheet()
                 } label: {
                     VStack(spacing: 12) {
-                        Text("search a song")
+                        Text(isPreparingSendSheet ? "loading friends" : "search a song")
                             .font(.system(size: 22, weight: .semibold))
                             .foregroundStyle(theme.fg)
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 44, weight: .semibold))
-                            .foregroundStyle(theme.fg)
+                        if isPreparingSendSheet {
+                            ProgressView()
+                                .tint(theme.fg)
+                                .frame(height: 44)
+                        } else {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 44, weight: .semibold))
+                                .foregroundStyle(theme.fg)
+                        }
                     }
                     .frame(maxWidth: .infinity)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .disabled(isPreparingSendSheet)
 
                 Spacer(minLength: 12)
             }
@@ -75,6 +83,7 @@ struct SendFirstSongRiffView: View {
         }
         .task {
             await gridVM.loadIfNeeded()
+            await appState.refreshFriends()
         }
         .sheet(isPresented: $showSendSheet) {
             SendSongSheet(
@@ -99,5 +108,15 @@ struct SendFirstSongRiffView: View {
             height: height
         )
         .frame(width: width, height: height)
+    }
+
+    private func openSendSheet() {
+        guard !isPreparingSendSheet else { return }
+        isPreparingSendSheet = true
+        Task {
+            await appState.refreshFriends()
+            isPreparingSendSheet = false
+            showSendSheet = true
+        }
     }
 }

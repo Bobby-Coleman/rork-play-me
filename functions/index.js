@@ -13,6 +13,41 @@ const jwt = require("jsonwebtoken");
 
 admin.initializeApp();
 
+// --------------- Structured Logging ---------------
+//
+// Keep production logs indexable in Cloud Logging without dumping request
+// bodies, phone numbers, secrets, message text, or invite-code contents.
+function compactLogPayload(payload = {}) {
+  const out = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (value === undefined || value === null || value === "") continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+function logEvent(event, payload = {}) {
+  console.log(JSON.stringify({ event, ...compactLogPayload(payload) }));
+}
+
+function logWarn(event, payload = {}) {
+  console.warn(JSON.stringify({ event, ...compactLogPayload(payload) }));
+}
+
+function logError(event, err, payload = {}) {
+  console.error(
+    JSON.stringify({
+      event,
+      message: err && err.message ? err.message : String(err),
+      ...compactLogPayload(payload),
+    })
+  );
+}
+
+function hashForLog(value) {
+  return crypto.createHash("sha256").update(String(value || "")).digest("hex").slice(0, 12);
+}
+
 // --------------- Phone Normalization ---------------
 
 // Mirror of ios/PlayMe/Utilities/PhoneNormalizer.swift so the server key
@@ -98,6 +133,16 @@ async function getUserName(uid) {
   return d.firstName || d.username || "Someone";
 }
 
+function publicUserPayload(uid, data = {}) {
+  if (!uid) return null;
+  return {
+    id: uid,
+    username: data.username || "",
+    firstName: data.firstName || "",
+    lastName: data.lastName || "",
+  };
+}
+
 // True when `recipientUid` has disabled all notifications from their Settings
 // screen. Missing flag defaults to enabled.
 async function notificationsEnabledFor(recipientUid) {
@@ -176,17 +221,18 @@ async function sendPush(uid, opts = {}) {
         payload: { aps },
       },
     });
+    logEvent("push_sent", { uid, type: stringData.type, collapseId, threadId });
   } catch (err) {
     if (
       err.code === "messaging/registration-token-not-registered" ||
       err.code === "messaging/invalid-registration-token"
     ) {
-      console.log(`Stale FCM token, clearing: ${err.code}`);
+      logWarn("push_stale_token", { uid, code: err.code });
       await clearFCMToken(uid).catch((clearErr) => {
-        console.error("sendPush stale token cleanup failed:", clearErr.message);
+        logError("push_stale_token_cleanup_failed", clearErr, { uid });
       });
     } else {
-      console.error("sendPush error:", err);
+      logError("push_send_failed", err, { uid, type: stringData.type });
     }
   }
 }
@@ -209,7 +255,7 @@ async function shouldSendPush(key, ttlHours = 24) {
       return true;
     });
   } catch (err) {
-    console.error("push dedupe failed open:", err.message);
+    logError("push_dedupe_failed_open", err);
     return true;
   }
 }
@@ -271,7 +317,7 @@ async function consumeRateLimitToken(namespace, key, opts = {}) {
       return true;
     });
   } catch (err) {
-    console.error(`rate limit ${namespace} failed open:`, err.message);
+    logError("rate_limit_failed_open", err, { namespace });
     return true;
   }
 }
@@ -593,28 +639,38 @@ exports.onFriendCreated = onDocumentCreated(
       const count = typeof data.friendCount === "number" ? data.friendCount : 0;
       const limit =
         typeof data.friendLimit === "number" ? data.friendLimit : DEFAULT_FRIEND_LIMIT;
-      if (count <= limit) return;
+      if (count <= limit) {
+        // Friendship is valid. Continue below so queued songs that were
+        // selected while the request was pending can now be delivered.
+      } else {
+        console.log(
+          JSON.stringify({
+            event: "friend_cap_exceeded",
+            userId,
+            friendId,
+            count,
+            limit,
+          })
+        );
 
-      console.log(
-        JSON.stringify({
-          event: "friend_cap_exceeded",
-          userId,
-          friendId,
-          count,
-          limit,
-        })
-      );
-
-      const batch = db.batch();
-      batch.delete(userRef.collection("friends").doc(friendId));
-      batch.delete(
-        db.collection("users").doc(friendId).collection("friends").doc(userId)
-      );
-      await batch.commit();
-      // The companion onFriendDeleted triggers will decrement both
-      // sides' friendCount back into range.
+        const batch = db.batch();
+        batch.delete(userRef.collection("friends").doc(friendId));
+        batch.delete(
+          db.collection("users").doc(friendId).collection("friends").doc(userId)
+        );
+        await batch.commit();
+        // The companion onFriendDeleted triggers will decrement both
+        // sides' friendCount back into range.
+        return;
+      }
     } catch (err) {
       console.error("onFriendCreated: hard cap check failed:", err.message);
+    }
+
+    // Both mirrored friend docs fire this trigger; the lexical guard makes
+    // pending-song delivery run once per accepted pair.
+    if (userId < friendId) {
+      await deliverPendingFriendSharesForPair(userId, friendId);
     }
   }
 );
@@ -833,6 +889,11 @@ exports.deleteAccount = onRequest(async (req, res) => {
     return;
   }
 
+  if (!(await verifyAppCheckHeader(req, "deleteAccount"))) {
+    res.status(401).json({ error: "Invalid App Check token" });
+    return;
+  }
+
   const authHeader = req.get("Authorization") || "";
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
   if (!match) {
@@ -867,10 +928,171 @@ function conversationIdFor(uidA, uidB) {
   return `${a}_${b}`;
 }
 
-// Fans out every queued pending-share for the given phone into the recipient's
-// feed, creates bidirectional friendships, a DM conversation + first message,
-// deletes the pending docs, and pushes a "magic moment" notification.
-// Idempotent: each pending doc maps to a deterministic shares/{pendingDocId}.
+function friendPairKey(uidA, uidB) {
+  return [uidA, uidB].sort().join("_");
+}
+
+async function deliverPendingFriendSharesForPair(uidA, uidB) {
+  if (!uidA || !uidB || uidA === uidB) return { count: 0 };
+
+  const db = admin.firestore();
+  const pairKey = friendPairKey(uidA, uidB);
+  const [aFriend, bFriend] = await Promise.all([
+    db.collection("users").doc(uidA).collection("friends").doc(uidB).get(),
+    db.collection("users").doc(uidB).collection("friends").doc(uidA).get(),
+  ]);
+  if (!aFriend.exists || !bFriend.exists) return { count: 0 };
+
+  const [aQueued, bQueued] = await Promise.all([
+    db
+      .collection("users")
+      .doc(uidA)
+      .collection("pendingFriendShares")
+      .where("recipientId", "==", uidB)
+      .limit(100)
+      .get(),
+    db
+      .collection("users")
+      .doc(uidB)
+      .collection("pendingFriendShares")
+      .where("recipientId", "==", uidA)
+      .limit(100)
+      .get(),
+  ]);
+  const pendingDocs = [...aQueued.docs, ...bQueued.docs];
+  if (pendingDocs.length === 0) return { count: 0 };
+
+  let delivered = 0;
+  const pushPromises = [];
+
+  for (const doc of pendingDocs) {
+    const data = doc.data() || {};
+    const senderId = data.senderId;
+    const recipientId = data.recipientId;
+    const song = data.song;
+    if (!senderId || !recipientId || !song) {
+      await doc.ref.delete().catch(() => {});
+      continue;
+    }
+    if (
+      !(
+        (senderId === uidA && recipientId === uidB) ||
+        (senderId === uidB && recipientId === uidA)
+      )
+    ) {
+      continue;
+    }
+    if (await isBlockedBy(recipientId, senderId)) {
+      await doc.ref.delete().catch(() => {});
+      continue;
+    }
+
+    const sender = data.sender || {};
+    const recipient = data.recipient || {};
+    const note = typeof data.note === "string" ? data.note : null;
+    const batch = db.batch();
+    const shareRef = db.collection("shares").doc(doc.id);
+
+    batch.set(shareRef, {
+      senderId,
+      recipientId,
+      recipientUsername: recipient.username || data.recipientUsername || "",
+      note,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      song,
+      sender: {
+        id: senderId,
+        firstName: sender.firstName || "",
+        lastName: sender.lastName || "",
+        username: sender.username || "",
+      },
+      recipient: {
+        id: recipientId,
+        firstName: recipient.firstName || "",
+        lastName: recipient.lastName || "",
+        username: recipient.username || "",
+      },
+      queuedFromPendingFriendRequest: true,
+      pendingFriendShareId: doc.id,
+    });
+
+    const convId = conversationIdFor(senderId, recipientId);
+    const convRef = db.collection("conversations").doc(convId);
+    const participants = [senderId, recipientId].sort();
+    const messageText = note && note.trim().length > 0 ? note : "";
+    const lastMessageText = messageText || song.title || "";
+
+    batch.set(
+      convRef,
+      {
+        participants,
+        participantNames: {
+          [senderId]: sender.firstName || "",
+          [recipientId]: recipient.firstName || "",
+        },
+        lastMessageText,
+        lastMessageTimestamp: admin.firestore.FieldValue.serverTimestamp(),
+        [`unreadCount_${recipientId}`]: admin.firestore.FieldValue.increment(1),
+        [`unreadCount_${senderId}`]: 0,
+      },
+      { merge: true }
+    );
+
+    batch.set(convRef.collection("messages").doc(doc.id), {
+      senderId,
+      text: messageText,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      song,
+      queuedFromPendingFriendRequest: true,
+    });
+    batch.delete(doc.ref);
+
+    try {
+      await batch.commit();
+      delivered += 1;
+      pushPromises.push(
+        (async () => {
+          if (!(await shouldSendPush(`pending_friend_share:${doc.id}:${recipientId}`))) return;
+          await sendPush(recipientId, {
+            title: "PlayMe",
+            body: `${sender.firstName || "A friend"} sent you "${song.title || "a song"}"`,
+            mutableContent: true,
+            data: {
+              type: "new_share",
+              id: doc.id,
+              shareId: doc.id,
+              queuedFromPendingFriendRequest: "true",
+              widgetSongTitle: song.title || "",
+              widgetSongArtist: song.artist || "",
+              widgetSenderFirstName: sender.firstName || "",
+              widgetNote: note || "",
+              widgetAlbumArtURL: song.albumArtURL || "",
+            },
+            collapseId: `share-${doc.id}`,
+            threadId: "shares",
+          });
+        })()
+      );
+    } catch (err) {
+      logError("pending_friend_share_delivery_failed", err, {
+        senderId,
+        recipientId,
+        pendingFriendShareId: doc.id,
+      });
+    }
+  }
+
+  await Promise.allSettled(pushPromises);
+  if (delivered > 0) {
+    logEvent("pending_friend_shares_delivered", { pairKey, delivered });
+  }
+  return { count: delivered };
+}
+
+// Converts phone-keyed pending shares into accepted-only friend-request queues.
+// The joining user gets a normal incoming friend request, and the song moves
+// into users/{sender}/pendingFriendShares. Actual share delivery happens only
+// after the request is accepted and friend docs exist.
 async function claimPendingSharesForUser(uid, phoneE164) {
   if (!uid || !phoneE164) {
     console.log("claimPendingSharesForUser: missing uid or phone", {
@@ -942,84 +1164,54 @@ async function claimPendingSharesForUser(uid, phoneE164) {
     };
 
     const batch = db.batch();
+    const ts = admin.firestore.FieldValue.serverTimestamp();
 
-    const shareRef = db.collection("shares").doc(doc.id);
-    batch.set(shareRef, {
-      senderId,
-      recipientId: uid,
-      recipientUsername: myUsername,
-      note,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-      song,
-      sender: {
-        id: senderId,
-        firstName: senderFirstName,
-        lastName: senderLastName,
-        username: senderUsername,
-      },
-      recipient: {
-        id: uid,
-        firstName: myFirstName,
-        lastName: myLastName,
-        username: myUsername,
-      },
-      claimedFromPending: true,
-    });
-
-    // Bidirectional friendship with merge so we don't clobber addedAt if re-run.
     batch.set(
-      db.collection("users").doc(uid).collection("friends").doc(senderId),
+      db.collection("users").doc(uid).collection("friendRequests").doc(senderId),
       {
         username: senderUsername,
         firstName: senderFirstName,
         lastName: senderLastName,
-        addedAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: ts,
       },
       { merge: true }
     );
     batch.set(
-      db.collection("users").doc(senderId).collection("friends").doc(uid),
+      db.collection("users").doc(senderId).collection("outgoingFriendRequests").doc(uid),
       {
         username: myUsername,
         firstName: myFirstName,
         lastName: myLastName,
-        addedAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: ts,
       },
       { merge: true }
     );
-
-    // Conversation doc (deterministic pair ID). merge:true keeps existing fields
-    // if a conversation already exists between these two users.
-    const convId = conversationIdFor(uid, senderId);
-    const convRef = db.collection("conversations").doc(convId);
-    const participants = [uid, senderId].sort();
-    const messageText = note && note.trim().length > 0 ? note : "";
-    const lastMessageText = messageText || song?.title || "";
-
     batch.set(
-      convRef,
+      db.collection("users").doc(senderId).collection("pendingFriendShares").doc(doc.id),
       {
-        participants,
-        participantNames: {
-          [uid]: myFirstName,
-          [senderId]: senderFirstName,
+        senderId,
+        recipientId: uid,
+        recipientUsername: myUsername,
+        pairKey: friendPairKey(senderId, uid),
+        note,
+        createdAt: ts,
+        song,
+        sender: {
+          id: senderId,
+          firstName: senderFirstName,
+          lastName: senderLastName,
+          username: senderUsername,
         },
-        lastMessageText,
-        lastMessageTimestamp: admin.firestore.FieldValue.serverTimestamp(),
-        [`unreadCount_${uid}`]: admin.firestore.FieldValue.increment(1),
-        [`unreadCount_${senderId}`]: 0,
+        recipient: {
+          id: uid,
+          firstName: myFirstName,
+          lastName: myLastName,
+          username: myUsername,
+        },
+        claimedFromPhoneInvite: true,
       },
       { merge: true }
     );
-
-    // First message: use deterministic ID (pending doc id) so retries don't dupe.
-    const msgRef = convRef.collection("messages").doc(doc.id);
-    batch.set(msgRef, {
-      senderId,
-      text: messageText,
-      timestamp: admin.firestore.FieldValue.serverTimestamp(),
-      song,
-    });
 
     batch.delete(doc.ref);
 
@@ -1028,36 +1220,9 @@ async function claimPendingSharesForUser(uid, phoneE164) {
       claimed += 1;
       inviterIds.add(senderId);
 
-      // Fire a magic-moment push to the new user for every claimed share.
-      // Includes the widget payload so the home-screen widget populates
-      // instantly the first time they receive a song post-signup.
-      pushPromises.push(
-        (async () => {
-          if (!(await shouldSendPush(`pending_share:${doc.id}:${uid}`))) return;
-          await sendPush(uid, {
-            title: "PlayMe",
-            body: `${senderFirstName || "A friend"} sent you "${song.title || "a song"}"`,
-            mutableContent: true,
-            data: {
-              type: "new_share",
-              id: doc.id,
-              shareId: doc.id,
-              claimedFromPending: "true",
-              widgetSongTitle: song.title || "",
-              widgetSongArtist: song.artist || "",
-              widgetSenderFirstName: senderFirstName || "",
-              widgetNote: note || "",
-              widgetAlbumArtURL: song.albumArtURL || "",
-            },
-            collapseId: `share-${doc.id}`,
-            threadId: "shares",
-          });
-        })()
-      );
-
       console.log(
         JSON.stringify({
-          event: "pending_share_claimed",
+          event: "pending_share_converted_to_friend_request",
           uid,
           phoneE164,
           senderId,
@@ -1339,6 +1504,11 @@ exports.resolveSpotifyTrack = onRequest({ secrets: [spotifyClientSecret] }, asyn
     return;
   }
 
+  if (!(await verifyAppCheckHeader(req, "resolveSpotifyTrack"))) {
+    res.status(401).json({ error: "Invalid App Check token" });
+    return;
+  }
+
   // Auth: require Firebase ID token so abuse is traceable to a real user.
   const authHeader = req.get("Authorization") || "";
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
@@ -1349,7 +1519,7 @@ exports.resolveSpotifyTrack = onRequest({ secrets: [spotifyClientSecret] }, asyn
   try {
     await admin.auth().verifyIdToken(match[1]);
   } catch (err) {
-    console.error("resolveSpotifyTrack: token verification failed:", err.message);
+    logError("resolve_spotify_auth_failed", err);
     res.status(401).json({ error: "Invalid token" });
     return;
   }
@@ -1367,7 +1537,7 @@ exports.resolveSpotifyTrack = onRequest({ secrets: [spotifyClientSecret] }, asyn
   try {
     accessToken = await getSpotifyAppAccessToken(spotifyClientSecret.value());
   } catch (err) {
-    console.error("resolveSpotifyTrack: failed to mint app token:", err.message);
+    logError("resolve_spotify_token_mint_failed", err);
     res.status(502).json({ error: "Spotify token mint failed", details: err.message });
     return;
   }
@@ -1392,7 +1562,7 @@ exports.resolveSpotifyTrack = onRequest({ secrets: [spotifyClientSecret] }, asyn
 
     if (searchRes.status === 429) {
       const retryAfter = searchRes.headers.get("Retry-After") || "";
-      console.warn(`resolveSpotifyTrack: HTTP 429 rate limited; retry-after=${retryAfter}s title="${title}" artist="${artist}"`);
+      logWarn("resolve_spotify_rate_limited", { retryAfter });
       res.status(503).json({ error: "Rate limited", retryAfter });
       return;
     }
@@ -1404,7 +1574,7 @@ exports.resolveSpotifyTrack = onRequest({ secrets: [spotifyClientSecret] }, asyn
       try {
         accessToken = await getSpotifyAppAccessToken(spotifyClientSecret.value());
       } catch (err) {
-        console.error("resolveSpotifyTrack: re-mint after 401 failed:", err.message);
+        logError("resolve_spotify_token_remint_failed", err);
         res.status(502).json({ error: "Spotify token re-mint failed" });
         return;
       }
@@ -1418,14 +1588,17 @@ exports.resolveSpotifyTrack = onRequest({ secrets: [spotifyClientSecret] }, asyn
       searchJson = await retryRes.json();
     } else if (!searchRes.ok) {
       const body = await searchRes.text().catch(() => "");
-      console.error(`resolveSpotifyTrack: Spotify search HTTP ${searchRes.status}: ${body.slice(0, 200)}`);
+      logError("resolve_spotify_http_failed", new Error(`HTTP ${searchRes.status}`), {
+        status: searchRes.status,
+        bodyPreview: body.slice(0, 200),
+      });
       res.status(502).json({ error: `Spotify search failed: HTTP ${searchRes.status}` });
       return;
     } else {
       searchJson = await searchRes.json();
     }
   } catch (err) {
-    console.error("resolveSpotifyTrack: network error:", err.message);
+    logError("resolve_spotify_network_failed", err);
     res.status(502).json({ error: "Spotify search network error", details: err.message });
     return;
   }
@@ -1434,7 +1607,11 @@ exports.resolveSpotifyTrack = onRequest({ secrets: [spotifyClientSecret] }, asyn
   const best = pickBestMatch(tracks, title, artist);
 
   if (!best || !best.id) {
-    console.log(`resolveSpotifyTrack: no_match title="${title}" artist="${artist}" amURL="${amURL}"`);
+    logEvent("resolve_spotify_no_match", {
+      hasAppleMusicURL: Boolean(amURL),
+      titleLength: title.length,
+      artistLength: artist.length,
+    });
     res.json({ error: "no_match" });
     return;
   }
@@ -1473,14 +1650,16 @@ exports.resolveSpotifyTrack = onRequest({ secrets: [spotifyClientSecret] }, asyn
           { merge: true }
         );
     } catch (err) {
-      console.error(
-        "resolveSpotifyTrack: cache write failed:",
-        err && err.message ? err.message : err
-      );
+      logError("resolve_spotify_cache_write_failed", err);
     }
   }
 
-  console.log(`resolveSpotifyTrack: ok title="${title}" artist="${artist}" → trackId=${trackId} matched="${matchedTitle}" by "${matchedArtist}"`);
+  logEvent("resolve_spotify_success", {
+    trackId,
+    hasAppleMusicURL: Boolean(amURL),
+    matchedTitleLength: matchedTitle.length,
+    matchedArtistLength: matchedArtist.length,
+  });
   res.json({ trackId, spotifyURL, matchedTitle, matchedArtist });
 });
 
@@ -1515,6 +1694,11 @@ exports.getMusicKitDeveloperToken = onRequest(
 
     if (req.method !== "POST" && req.method !== "GET") {
       res.status(405).json({ error: "method_not_allowed" });
+      return;
+    }
+
+    if (!(await verifyAppCheckHeader(req, "getMusicKitDeveloperToken"))) {
+      res.status(401).json({ error: "invalid_app_check" });
       return;
     }
 
@@ -1614,6 +1798,28 @@ async function verifyAuthHeader(req) {
   }
 }
 
+function appCheckMode() {
+  const raw = (process.env.APP_CHECK_MODE || "monitor").toLowerCase();
+  return raw === "enforce" ? "enforce" : "monitor";
+}
+
+async function verifyAppCheckHeader(req, endpoint) {
+  const token = req.get("X-Firebase-AppCheck") || "";
+  const mode = appCheckMode();
+  if (!token) {
+    logWarn("app_check_missing", { endpoint, mode });
+    return mode !== "enforce";
+  }
+
+  try {
+    await admin.appCheck().verifyToken(token);
+    return true;
+  } catch (err) {
+    logWarn("app_check_invalid", { endpoint, mode, message: err.message });
+    return mode !== "enforce";
+  }
+}
+
 // Invite-code constants shared by validate / redeem / generate.
 //
 // Schema for `inviteCodes/{CODE_UPPER}`:
@@ -1632,9 +1838,8 @@ async function verifyAuthHeader(req) {
 //     campaign?:     string                              // free-form tag
 //   }
 //
-// Fan-out by kind on redeem:
-//   personal → write users/{uid}.invitedByUid + auto-friend createdByUid
-//              (skipped silently if inviter is at friend cap or missing)
+// Redeem behavior by kind:
+//   personal → write users/{uid}.invitedByUid + return inviter as a suggestion
 //   creator  → write users/{uid}.invitedByUid + invitedByKind; no friendship
 //   admin    → write users/{uid}.invitedByKind only; no invitedByUid; no friendship
 const INVITE_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
@@ -1666,6 +1871,11 @@ exports.validateInviteCode = onRequest(async (req, res) => {
     return;
   }
 
+  if (!(await verifyAppCheckHeader(req, "validateInviteCode"))) {
+    res.status(401).json({ valid: false, reason: "invalid_app_check" });
+    return;
+  }
+
   // The onboarding gate is the one endpoint we can't strictly require
   // a Firebase Bearer token on — the user hasn't signed in yet. We
   // rate-limit by client IP instead: 20 checks per IP per 10 minutes
@@ -1679,9 +1889,7 @@ exports.validateInviteCode = onRequest(async (req, res) => {
     windowSeconds: 600,
   });
   if (!allowed) {
-    console.warn(
-      JSON.stringify({ event: "validate_invite_rate_limited", ip })
-    );
+    logWarn("validate_invite_rate_limited", { ip });
     res.status(429).json({ valid: false, reason: "rate_limited" });
     return;
   }
@@ -1696,27 +1904,41 @@ exports.validateInviteCode = onRequest(async (req, res) => {
     const db = admin.firestore();
     const snap = await db.collection("inviteCodes").doc(code).get();
     if (!snap.exists) {
+      const missAllowed = await consumeRateLimitToken("validateInviteCodeMiss", code, {
+        max: 5,
+        windowSeconds: 3600,
+      });
+      if (!missAllowed) {
+        logWarn("validate_invite_probe_burst", { codeHash: hashForLog(code) });
+        res.status(429).json({ valid: false, reason: "rate_limited" });
+        return;
+      }
+      logEvent("validate_invite_rejected", { reason: "not_found" });
       res.json({ valid: false, reason: "not_found" });
       return;
     }
     const data = snap.data() || {};
     if (data.disabled === true) {
+      logEvent("validate_invite_rejected", { reason: "disabled" });
       res.json({ valid: false, reason: "disabled" });
       return;
     }
     if (data.expiresAt && data.expiresAt.toMillis && data.expiresAt.toMillis() < Date.now()) {
+      logEvent("validate_invite_rejected", { reason: "expired" });
       res.json({ valid: false, reason: "expired" });
       return;
     }
     const maxUses = typeof data.maxUses === "number" ? data.maxUses : 1;
     const useCount = typeof data.useCount === "number" ? data.useCount : 0;
     if (useCount >= maxUses) {
+      logEvent("validate_invite_rejected", { reason: "exhausted", kind: inviteKindFromDoc(data) });
       res.json({ valid: false, reason: "exhausted" });
       return;
     }
+    logEvent("validate_invite_success", { kind: inviteKindFromDoc(data) });
     res.json({ valid: true, kind: inviteKindFromDoc(data) });
   } catch (err) {
-    console.log("validateInviteCode error:", err && err.message ? err.message : err);
+    logError("validate_invite_failed", err);
     res.status(500).json({ valid: false, reason: "server_error" });
   }
 });
@@ -1759,27 +1981,17 @@ exports.cleanupPushDedupe = onSchedule(
   }
 );
 
-// `redeemInviteCode` (POST { code }) — atomic redeem called from the
-// client immediately after profile creation. Bumps `useCount` and stamps
-// `redeemedBy/redeemedAt`. Then fans out by `kind`:
-//
-//   personal → auto-friend the code's `createdByUid` (best effort; skipped
-//              silently if the inviter is at their friend cap, doesn't
-//              exist, or matches the redeemer). Stamps `invitedByUid`.
-//   creator  → no friendship written, but stamps `invitedByUid` for
-//              attribution (e.g. "joined via Bobby's launch code").
-//   admin    → attribution only; no `invitedByUid`, no friendship.
-//
-// Response always includes `redeemed: true` on success plus optional
-// `autoFriend` field for personal codes:
-//   "applied"               — friend docs were written
-//   "skipped_inviter_at_cap"— inviter already at friendLimit
-//   "skipped_self"          — redeemer = creator (shouldn't happen)
-//   "skipped_inviter_missing"— inviter doc deleted/missing
-//   "n/a"                   — non-personal kind, no auto-friend attempted
+// `redeemInviteCode` (POST { code }) — atomic gateway redeem called from the
+// client immediately after profile creation. Bumps `useCount`, stamps
+// attribution fields on the new user's doc, and returns the inviter as a
+// suggestion when present. It intentionally does NOT create friendships.
 exports.redeemInviteCode = onRequest(async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).json({ redeemed: false, reason: "method_not_allowed" });
+    return;
+  }
+  if (!(await verifyAppCheckHeader(req, "redeemInviteCode"))) {
+    res.status(401).json({ redeemed: false, reason: "invalid_app_check" });
     return;
   }
   const uid = await verifyAuthHeader(req);
@@ -1828,38 +2040,9 @@ exports.redeemInviteCode = onRequest(async (req, res) => {
       const kind = inviteKindFromDoc(data);
       const createdByUid = typeof data.createdByUid === "string" ? data.createdByUid : null;
 
-      // Determine auto-friend disposition. We read both user docs INSIDE
-      // the transaction so a concurrent friend add can't push the
-      // inviter over their cap between our cap-check and our write.
-      // Firestore transactions retry on concurrent writes to any read
-      // doc, so this is safe.
-      let autoFriend = "n/a";
-      let redeemerSnap = null;
       let inviterSnap = null;
-      if (kind === "personal") {
-        if (!createdByUid) {
-          autoFriend = "skipped_inviter_missing";
-        } else if (createdByUid === uid) {
-          autoFriend = "skipped_self";
-        } else {
-          const inviterRef = db.collection("users").doc(createdByUid);
-          [redeemerSnap, inviterSnap] = await Promise.all([
-            txn.get(userRef),
-            txn.get(inviterRef),
-          ]);
-          if (!inviterSnap.exists) {
-            autoFriend = "skipped_inviter_missing";
-          } else {
-            const inviterData = inviterSnap.data() || {};
-            const fc = typeof inviterData.friendCount === "number" ? inviterData.friendCount : 0;
-            const fl = typeof inviterData.friendLimit === "number" ? inviterData.friendLimit : 8;
-            if (fc >= fl) {
-              autoFriend = "skipped_inviter_at_cap";
-            } else {
-              autoFriend = "applied";
-            }
-          }
-        }
+      if (createdByUid && kind !== "admin" && createdByUid !== uid) {
+        inviterSnap = await txn.get(db.collection("users").doc(createdByUid));
       }
 
       // ----- Writes -----
@@ -1883,44 +2066,123 @@ exports.redeemInviteCode = onRequest(async (req, res) => {
       }
       txn.set(userRef, userPatch, { merge: true });
 
-      // Personal-kind auto-friend: write both sides of the friend pair.
-      // `onFriendCreated` will fan out friendCount bumps automatically.
-      if (autoFriend === "applied" && inviterSnap && redeemerSnap) {
-        const inviterRef = db.collection("users").doc(createdByUid);
-        const inviterData = inviterSnap.data() || {};
-        const redeemerData = redeemerSnap.data() || {};
+      const suggestedInviter =
+        inviterSnap && inviterSnap.exists
+          ? publicUserPayload(createdByUid, inviterSnap.data() || {})
+          : null;
 
-        const inviterFriendDoc = userRef.collection("friends").doc(createdByUid);
-        const redeemerFriendDoc = inviterRef.collection("friends").doc(uid);
-        const ts = admin.firestore.FieldValue.serverTimestamp();
-
-        txn.set(inviterFriendDoc, {
-          username: inviterData.username || "",
-          firstName: inviterData.firstName || "",
-          lastName: inviterData.lastName || "",
-          addedAt: ts,
-        });
-        txn.set(redeemerFriendDoc, {
-          username: redeemerData.username || "",
-          firstName: redeemerData.firstName || "",
-          lastName: redeemerData.lastName || "",
-          addedAt: ts,
-        });
-      }
-
-      return { kind, autoFriend };
+      return { kind, suggestedInviter };
     });
 
     res.json({
       redeemed: true,
       kind: outcome.kind,
-      autoFriend: outcome.autoFriend,
+      suggestedInviter: outcome.suggestedInviter || null,
+    });
+    logEvent("redeem_invite_success", {
+      uid,
+      kind: outcome.kind,
+      hasSuggestedInviter: !!outcome.suggestedInviter,
     });
   } catch (err) {
     const status = err && typeof err.code === "number" ? err.code : 500;
     const reason = err && err.message ? err.message : "server_error";
-    console.log("redeemInviteCode failed:", reason);
+    logWarn("redeem_invite_failed", { uid, status, reason });
     res.status(status).json({ redeemed: false, reason });
+  }
+});
+
+// `matchContacts` (POST { phones: string[] }) — authenticated lookup used by
+// onboarding to suggest contacts who already have Riff accounts. Phone numbers
+// are stored in users/{uid}/private/profile and never returned to the client;
+// the response contains only safe public profile fields.
+exports.matchContacts = onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).json({ ok: false, reason: "method_not_allowed" });
+    return;
+  }
+  if (!(await verifyAppCheckHeader(req, "matchContacts"))) {
+    res.status(401).json({ ok: false, reason: "invalid_app_check" });
+    return;
+  }
+  const uid = await verifyAuthHeader(req);
+  if (!uid) {
+    res.status(401).json({ ok: false, reason: "unauthenticated" });
+    return;
+  }
+
+  const body = inviteRequestBody(req);
+  const rawPhones = Array.isArray(body.phones) ? body.phones : [];
+  const phones = Array.from(
+    new Set(
+      rawPhones
+        .slice(0, 500)
+        .map((phone) => normalizeE164(String(phone || "")))
+        .filter(Boolean)
+    )
+  );
+
+  if (phones.length === 0) {
+    res.json({ ok: true, users: [] });
+    return;
+  }
+
+  const allowed = await consumeRateLimitToken("matchContacts", uid, {
+    max: 30,
+    windowSeconds: 3600,
+  });
+  if (!allowed) {
+    logWarn("match_contacts_rate_limited", { uid });
+    res.status(429).json({ ok: false, reason: "rate_limited" });
+    return;
+  }
+
+  const db = admin.firestore();
+  try {
+    const blockedSnap = await db.collection("users").doc(uid).collection("blocked").get();
+    const blockedByMe = new Set(blockedSnap.docs.map((doc) => doc.id));
+    const matchedUids = new Set();
+    const chunkSize = 30;
+
+    for (let i = 0; i < phones.length; i += chunkSize) {
+      const chunk = phones.slice(i, i + chunkSize);
+      const privateMatches = await db
+        .collectionGroup("private")
+        .where("phone", "in", chunk)
+        .get();
+
+      for (const doc of privateMatches.docs) {
+        if (doc.id !== "profile") continue;
+        const userRef = doc.ref.parent.parent;
+        const matchedUid = userRef ? userRef.id : null;
+        if (!matchedUid || matchedUid === uid || blockedByMe.has(matchedUid)) continue;
+        matchedUids.add(matchedUid);
+      }
+    }
+
+    const profileRefs = Array.from(matchedUids).map((matchedUid) =>
+      db.collection("users").doc(matchedUid)
+    );
+    const publicSnaps = profileRefs.length > 0 ? await db.getAll(...profileRefs) : [];
+    const users = [];
+
+    for (const snap of publicSnaps) {
+      if (!snap.exists) continue;
+      const matchedUid = snap.id;
+      if (await isBlockedBy(matchedUid, uid)) continue;
+      const payload = publicUserPayload(matchedUid, snap.data() || {});
+      if (payload && payload.username) users.push(payload);
+    }
+
+    logEvent("match_contacts_success", {
+      uid,
+      inputCount: phones.length,
+      matchCount: users.length,
+    });
+    res.json({ ok: true, users });
+  } catch (err) {
+    logError("match_contacts_failed", err, { uid, inputCount: phones.length });
+    res.status(500).json({ ok: false, reason: "server_error" });
   }
 });
 
@@ -1943,6 +2205,10 @@ exports.generateInviteCode = onRequest(async (req, res) => {
     res.status(405).json({ ok: false, reason: "method_not_allowed" });
     return;
   }
+  if (!(await verifyAppCheckHeader(req, "generateInviteCode"))) {
+    res.status(401).json({ ok: false, reason: "invalid_app_check" });
+    return;
+  }
   const uid = await verifyAuthHeader(req);
   if (!uid) {
     res.status(401).json({ ok: false, reason: "unauthenticated" });
@@ -1954,9 +2220,7 @@ exports.generateInviteCode = onRequest(async (req, res) => {
     windowSeconds: 86400,
   });
   if (!allowed) {
-    console.warn(
-      JSON.stringify({ event: "generate_invite_rate_limited", uid })
-    );
+    logWarn("generate_invite_rate_limited", { uid });
     res.status(429).json({ ok: false, reason: "rate_limited" });
     return;
   }
@@ -1986,20 +2250,16 @@ exports.generateInviteCode = onRequest(async (req, res) => {
       break;
     }
     if (!code) {
-      console.error(
-        JSON.stringify({ event: "generate_invite_collision_exhausted", uid })
-      );
+      logError("generate_invite_collision_exhausted", new Error("collision_exhausted"), { uid });
       res.status(500).json({ ok: false, reason: "server_error" });
       return;
     }
 
     const destinationURL = `${TESTFLIGHT_URL}?code=${code}`;
+    logEvent("generate_invite_success", { uid, kind: "personal" });
     res.json({ ok: true, code, destinationURL });
   } catch (err) {
-    console.log(
-      "generateInviteCode failed:",
-      err && err.message ? err.message : err
-    );
+    logError("generate_invite_failed", err, { uid });
     res.status(500).json({ ok: false, reason: "server_error" });
   }
 });

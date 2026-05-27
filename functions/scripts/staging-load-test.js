@@ -13,10 +13,16 @@ function argNumber(name, fallback) {
 const userCount = argNumber("users", 20);
 const shareCount = argNumber("shares", 50);
 const messageCount = argNumber("messages", 50);
+const inviteCount = argNumber("invites", 10);
 const projectId = process.env.FIREBASE_PROJECT_ID;
 
 if (!projectId) {
   console.error("Set FIREBASE_PROJECT_ID to a staging Firebase project.");
+  process.exit(1);
+}
+
+if (userCount < 2) {
+  console.error("Use --users=2 or higher so share/message/friend smoke paths have two participants.");
   process.exit(1);
 }
 
@@ -53,6 +59,43 @@ async function main() {
   await batch.commit();
 
   let writes = 0;
+
+  for (let i = 0; i < inviteCount; i += 1) {
+    await db.collection("inviteCodes").doc(`${runId}-INVITE-${i}`).set({
+      kind: i % 2 === 0 ? "creator" : "personal",
+      createdByUid: userId(i % userCount),
+      redeemed: false,
+      useCount: 0,
+      maxUses: i % 2 === 0 ? 100 : 1,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    writes += 1;
+  }
+
+  for (let i = 0; i < Math.min(userCount - 1, 25); i += 1) {
+    const sender = userId(i);
+    const recipient = userId(i + 1);
+    await db.collection("users").doc(recipient).collection("friendRequests").doc(sender).set({
+      senderId: sender,
+      recipientId: recipient,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    await db.collection("users").doc(sender).collection("outgoingFriendRequests").doc(recipient).set({
+      senderId: sender,
+      recipientId: recipient,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    await db.collection("users").doc(recipient).collection("friends").doc(sender).set({
+      username: `${runId}-u${i}`,
+      firstName: `Load${i}`,
+      addedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    await db.collection("users").doc(recipient).collection("blocked").doc(userId((i + 2) % userCount)).set({
+      blockedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    writes += 4;
+  }
+
   for (let i = 0; i < shareCount; i += 1) {
     const sender = userId(i % userCount);
     const recipient = userId((i + 1) % userCount);
@@ -116,13 +159,29 @@ async function main() {
     .limit(10)
     .get();
 
+  const inviteRead = await db
+    .collection("inviteCodes")
+    .where("kind", "in", ["creator", "personal"])
+    .limit(10)
+    .get();
+
+  const friendRequestRead = await db
+    .collection("users")
+    .doc(userId(1))
+    .collection("friendRequests")
+    .limit(10)
+    .get();
+
   console.log(
     JSON.stringify({
       runId,
       users: userCount,
+      invites: inviteCount,
       writes,
       shareReadCount: shareRead.size,
       conversationReadCount: convoRead.size,
+      inviteReadCount: inviteRead.size,
+      friendRequestReadCount: friendRequestRead.size,
     })
   );
 }
