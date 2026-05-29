@@ -299,6 +299,13 @@ class AppState {
     /// Contacts already signed up for Riff, matched server-side by private
     /// profile phone numbers and rendered as onboarding suggestions.
     var contactSuggestedUsers: [AppUser] = []
+    /// True while a `matchContacts` lookup is in flight, so the suggestions
+    /// UI can show a spinner instead of looking empty/broken during the call.
+    var isLoadingContactSuggestions = false
+    /// Identity of the contact set the last successful (or in-flight) match
+    /// was started for. Lets us skip redundant lookups when the same contacts
+    /// are passed again (e.g. PickFriends `.onChange` re-firing).
+    private var lastContactSuggestionKey: Int?
     /// Genres the user picked on the taste screen. Persisted to
     /// `users/{uid}.tasteGenres` once registration succeeds.
     var tasteGenres: [String] = []
@@ -1219,8 +1226,22 @@ class AppState {
         contactSuggestedUsers.removeAll { $0.id == user.id }
     }
 
-    func refreshContactSuggestions(from contacts: [SimpleContact]) async {
+    /// Matches device contacts against existing Riff users. Safe to call from
+    /// several places (contact-permission prefetch, PickFriends `.task`/
+    /// `.onChange`): it dedupes by contact-set identity so the expensive
+    /// server lookup runs at most once per distinct set unless `force` is set.
+    func refreshContactSuggestions(from contacts: [SimpleContact], force: Bool = false) async {
         guard !isOnboarded else { return }
+
+        let key = Self.contactSuggestionKey(for: contacts)
+        // Skip if the same contacts are already loaded or being loaded.
+        if !force, key == lastContactSuggestionKey,
+           isLoadingContactSuggestions || !contactSuggestedUsers.isEmpty {
+            return
+        }
+        lastContactSuggestionKey = key
+
+        isLoadingContactSuggestions = true
         let matched = await FirebaseService.shared.matchContacts(contacts)
         let excluded = Set(
             friends.map(\.id)
@@ -1231,6 +1252,16 @@ class AppState {
         contactSuggestedUsers = matched.filter { user in
             !excluded.contains(user.id) && !blockedUserIds.contains(user.id)
         }
+        isLoadingContactSuggestions = false
+    }
+
+    /// Order-independent identity for a contact set, used to dedupe lookups.
+    private static func contactSuggestionKey(for contacts: [SimpleContact]) -> Int {
+        var hasher = Hasher()
+        for id in contacts.map(\.id).sorted() {
+            hasher.combine(id)
+        }
+        return hasher.finalize()
     }
 
     /// Accept an incoming friend request; refreshes `friends` so the

@@ -2171,13 +2171,20 @@ exports.matchContacts = onRequest(async (req, res) => {
     const matchedUids = new Set();
     const chunkSize = 30;
 
+    // Fire every chunk's collection-group query concurrently. Phone lists can
+    // span up to ~17 chunks (500 phones / 30); running them serially added
+    // multiple seconds of round-trip latency to onboarding. Promise.all
+    // collapses that to roughly a single round-trip.
+    const chunkQueries = [];
     for (let i = 0; i < phones.length; i += chunkSize) {
       const chunk = phones.slice(i, i + chunkSize);
-      const privateMatches = await db
-        .collectionGroup("private")
-        .where("phone", "in", chunk)
-        .get();
+      chunkQueries.push(
+        db.collectionGroup("private").where("phone", "in", chunk).get()
+      );
+    }
+    const chunkSnaps = await Promise.all(chunkQueries);
 
+    for (const privateMatches of chunkSnaps) {
       for (const doc of privateMatches.docs) {
         if (doc.id !== "profile") continue;
         const userRef = doc.ref.parent.parent;
@@ -2191,15 +2198,19 @@ exports.matchContacts = onRequest(async (req, res) => {
       db.collection("users").doc(matchedUid)
     );
     const publicSnaps = profileRefs.length > 0 ? await db.getAll(...profileRefs) : [];
-    const users = [];
 
-    for (const snap of publicSnaps) {
-      if (!snap.exists) continue;
-      const matchedUid = snap.id;
-      if (await isBlockedBy(matchedUid, uid)) continue;
-      const payload = publicUserPayload(matchedUid, snap.data() || {});
+    // Run the reverse block checks concurrently rather than awaiting one per
+    // matched user in series.
+    const candidates = publicSnaps.filter((snap) => snap.exists);
+    const blockChecks = await Promise.all(
+      candidates.map((snap) => isBlockedBy(snap.id, uid))
+    );
+    const users = [];
+    candidates.forEach((snap, idx) => {
+      if (blockChecks[idx]) return;
+      const payload = publicUserPayload(snap.id, snap.data() || {});
       if (payload && payload.username) users.push(payload);
-    }
+    });
 
     logEvent("match_contacts_success", {
       uid,

@@ -2,24 +2,29 @@ import SwiftUI
 
 /// Screen 4 — OTP verify.
 ///
-/// Restyled chrome around the existing UIKit `OTPTextField` so iOS SMS
-/// autofill ("From Messages" QuickType candidate) keeps working — the
-/// autofill timing is fragile and is preserved verbatim from
-/// `OTPVerificationView` rather than rewritten in pure SwiftUI.
+/// Uses a native SwiftUI `TextField` with `.oneTimeCode` so iOS SMS
+/// autofill works reliably across iOS versions. SwiftUI updates the
+/// binding no matter how the system injects the code (delegate path or a
+/// direct `.text` set), which the previous UIKit `OTPTextField` could not
+/// do consistently — that fragility is why autofill worked on some phones
+/// but not others.
 struct OTPVerifyView: View {
     let appState: AppState
     let onVerified: () -> Void
     let onBack: (() -> Void)?
 
     @State private var codeText: String = ""
-    @State private var otpResetToken = 0
     @State private var isVerifying = false
     @State private var errorMessage: String?
-    @State private var fieldIsFocused = false
     @State private var isResending = false
     @State private var resendCooldownRemaining = 0
     @State private var resendCountThisSession = 0
     @State private var resendConfirmation: String?
+    /// Debounce so the user sees the filled code briefly before we
+    /// auto-submit, and so a re-fired autofill doesn't double-submit.
+    @State private var autoSubmitWork: DispatchWorkItem?
+
+    @FocusState private var fieldFocused: Bool
 
     @Environment(\.riffTheme) private var theme
 
@@ -31,7 +36,14 @@ struct OTPVerifyView: View {
                     RiffSubhead(text: "We sent a 6-digit code to your phone.")
                         .padding(.top, 8)
 
-                    OTPTextField(text: $codeText, shouldFocus: fieldIsFocused, resetToken: otpResetToken) { verifyCode() }
+                    TextField("", text: $codeText)
+                        .textContentType(.oneTimeCode)
+                        .keyboardType(.numberPad)
+                        .focused($fieldFocused)
+                        .font(.system(size: 28, weight: .semibold, design: .monospaced))
+                        .tracking(6)
+                        .foregroundStyle(theme.fg)
+                        .tint(Color(red: 0.98, green: 0.78, blue: 0.13))
                         .frame(height: 56)
                         .padding(.horizontal, 18)
                         .background(
@@ -39,16 +51,18 @@ struct OTPVerifyView: View {
                                 .fill(theme.fg.opacity(0.06))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 16)
-                                        .stroke(theme.fg.opacity(fieldIsFocused ? 0.22 : 0.10), lineWidth: 1)
+                                        .stroke(theme.fg.opacity(fieldFocused ? 0.22 : 0.10), lineWidth: 1)
                                 )
                         )
                         .padding(.top, 24)
+                        .onChange(of: codeText) { _, newValue in
+                            handleCodeChange(newValue)
+                        }
                         .task {
                             // Brief settle so the field is in a window before
-                            // it claims first responder; OTPTextField gates the
-                            // actual becomeFirstResponder on window presence.
+                            // it claims first responder.
                             try? await Task.sleep(for: .milliseconds(150))
-                            fieldIsFocused = true
+                            fieldFocused = true
                         }
 
                     if isVerifying {
@@ -114,6 +128,23 @@ struct OTPVerifyView: View {
         }
     }
 
+    /// Filters to digits, caps at 6, and schedules a debounced auto-submit
+    /// once the code is complete. Runs for both manual typing and SMS
+    /// autofill (SwiftUI pushes autofilled text through the binding).
+    private func handleCodeChange(_ newValue: String) {
+        let digits = String(newValue.filter(\.isNumber).prefix(6))
+        if digits != codeText {
+            codeText = digits
+            return
+        }
+
+        autoSubmitWork?.cancel()
+        guard digits.count == 6, !isVerifying else { return }
+        let work = DispatchWorkItem { verifyCode() }
+        autoSubmitWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
     private func verifyCode() {
         guard codeText.count == 6, !isVerifying else { return }
         errorMessage = nil
@@ -127,7 +158,6 @@ struct OTPVerifyView: View {
             } else {
                 errorMessage = appState.registrationError ?? "Invalid code. Please try again."
                 codeText = ""
-                otpResetToken += 1
             }
         }
     }
@@ -151,7 +181,6 @@ struct OTPVerifyView: View {
             isResending = false
             if success {
                 codeText = ""
-                otpResetToken += 1
                 resendCountThisSession += 1
                 let cooldown = Config.otpResendCooldown(forAttempt: resendCountThisSession)
                 resendConfirmation = "We sent a new code."

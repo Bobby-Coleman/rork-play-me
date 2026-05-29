@@ -159,7 +159,21 @@ struct PickFriendsView: View {
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        if !searchActive && !suggestedUsers.isEmpty {
+                        if !searchActive && suggestedUsers.isEmpty && appState.isLoadingContactSuggestions {
+                            sectionHeader("Suggestions", icon: "sparkles")
+                                .padding(.top, 16)
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                    .tint(Color.white.opacity(0.66))
+                                    .scaleEffect(0.85)
+                                Text("Finding friends from your contacts…")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(Color.white.opacity(0.5))
+                            }
+                            .padding(.vertical, 12)
+                            Divider().background(theme.border)
+                                .padding(.vertical, 12)
+                        } else if !searchActive && !suggestedUsers.isEmpty {
                             sectionHeader("Suggestions", icon: "sparkles")
                                 .padding(.top, 16)
                             ForEach(displayedSuggestions) { user in
@@ -192,9 +206,14 @@ struct PickFriendsView: View {
             )
         }
         .task {
+            // Run the contact match concurrently with the friend refreshes
+            // instead of after them, so suggestions aren't gated behind two
+            // sequential round-trips. The match itself is deduped/prefetched
+            // in AppState, so this usually resolves instantly here.
+            async let suggestions: Void = appState.refreshContactSuggestions(from: contacts)
             await appState.refreshFriends()
             await appState.refreshFriendRequests()
-            await appState.refreshContactSuggestions(from: contacts)
+            await suggestions
         }
         .onChange(of: contacts) { _, newContacts in
             Task { await appState.refreshContactSuggestions(from: newContacts) }

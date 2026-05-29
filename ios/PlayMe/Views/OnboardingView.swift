@@ -67,6 +67,14 @@ struct OnboardingView: View {
         .riffTheme(appState.appTheme)
         .preferredColorScheme(appState.appTheme.isLight ? .light : .dark)
         .animation(.riffSlide, value: step)
+        .onChange(of: contacts) { _, newContacts in
+            // Prefetch contact-match suggestions the moment contacts are
+            // hydrated (right after the permission grant), so they're ready
+            // by the time the user reaches PickFriends a couple screens later
+            // instead of triggering a cold ~20s lookup on that screen.
+            guard !newContacts.isEmpty else { return }
+            Task { await appState.refreshContactSuggestions(from: newContacts) }
+        }
     }
 
     private var slideTransition: AnyTransition {

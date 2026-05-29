@@ -77,6 +77,10 @@ struct PhoneEntryRiffView: View {
             let success = await appState.sendCode(phoneNumber: formattedPhone)
             isSending = false
             if success {
+                // Drop the phone field's first responder so the OTP screen's
+                // field is the clean first responder when the SMS arrives —
+                // a competing first responder can suppress the autofill chip.
+                UIApplication.pm_dismissKeyboard()
                 onCodeSent()
             } else {
                 errorMessage = appState.registrationError ?? "Could not send code. Check your number."
