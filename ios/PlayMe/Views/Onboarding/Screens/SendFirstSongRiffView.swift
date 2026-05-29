@@ -19,6 +19,10 @@ struct SendFirstSongRiffView: View {
     @State private var showSendSheet = false
     @State private var gridVM = SongGridViewModel()
     @State private var isPreparingSendSheet = false
+    /// One-shot guard so the step only advances once, no matter which send
+    /// path fired (direct search vs artist/album profile) or how many times
+    /// the observed signal toggles.
+    @State private var didComplete = false
 
     @Environment(\.riffTheme) private var theme
 
@@ -85,12 +89,19 @@ struct SendFirstSongRiffView: View {
             await gridVM.loadIfNeeded()
             await appState.refreshFriends()
         }
+        .onChange(of: appState.onboardingFirstSongShared) { _, shared in
+            // Advancement is driven by this signal for every send path. The
+            // direct path no longer calls onContinue itself, so there's no
+            // double-advance; the guard covers any redundant toggles.
+            guard shared, !didComplete else { return }
+            didComplete = true
+            onContinue()
+        }
         .sheet(isPresented: $showSendSheet) {
             SendSongSheet(
                 appState: appState,
                 invitedContacts: appState.invitedContacts,
-                onboardingRequestedUsers: appState.onboardingRequestedUsers,
-                onSent: onContinue
+                onboardingRequestedUsers: appState.onboardingRequestedUsers
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
@@ -112,6 +123,7 @@ struct SendFirstSongRiffView: View {
 
     private func openSendSheet() {
         guard !isPreparingSendSheet else { return }
+        appState.onboardingFirstSongShared = false
         isPreparingSendSheet = true
         Task {
             await appState.refreshFriends()

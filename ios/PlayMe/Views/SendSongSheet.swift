@@ -24,12 +24,6 @@ struct SendSongSheet: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var detailArtist: ArtistSummary?
     @State private var detailAlbum: Album?
-    /// Album the user wants to share with friends. Optional-driven
-    /// recipient picker — same pattern as the mixtape-share button.
-    /// Save-to-mixtape for albums is reached from the share view's
-    /// bookmark icon, not from the search-result row, so there is no
-    /// `saveAlbum` state mirrored here.
-    @State private var shareAlbum: Album?
     @State private var audioPlayer: AudioPlayerService = .shared
     @AppStorage("songSearch.recentQueries") private var recentSearchesRaw: String = "[]"
     @FocusState private var isSearchFocused: Bool
@@ -121,24 +115,6 @@ struct SendSongSheet: View {
             AlbumDetailView(album: album, appState: appState)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
-        }
-        .sheet(item: $shareAlbum) { album in
-            // Album shares run through the same unified share view as
-            // songs. The view branches internally on `.album(...)` to
-            // render the album artwork and dispatch via
-            // `appState.sendAlbum` instead of the per-recipient song
-            // fan-out.
-            NavigationStack {
-                FriendSelectorView(
-                    item: .album(album),
-                    appState: appState,
-                    onBack: { shareAlbum = nil },
-                    onSent: { shareAlbum = nil }
-                )
-            }
-            .presentationBackground(.black)
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
         }
     }
 
@@ -303,10 +279,6 @@ struct SendSongSheet: View {
                     onTap: {
                         commitCurrentSearch()
                         detailAlbum = album
-                    },
-                    onShareTap: {
-                        commitCurrentSearch()
-                        shareAlbum = album
                     }
                 )
                 .id(album.id)
@@ -346,10 +318,6 @@ struct SendSongSheet: View {
                 onTap: {
                     commitCurrentSearch()
                     detailAlbum = album
-                },
-                onShareTap: {
-                    commitCurrentSearch()
-                    shareAlbum = album
                 }
             )
             .id(album.id)
@@ -380,10 +348,6 @@ struct SendSongSheet: View {
                 onTap: {
                     commitCurrentSearch()
                     detailAlbum = album
-                },
-                onShareTap: {
-                    commitCurrentSearch()
-                    shareAlbum = album
                 }
             )
             .id(album.id)

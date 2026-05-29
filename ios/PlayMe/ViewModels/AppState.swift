@@ -282,6 +282,13 @@ class AppState {
     /// first-song step. Keep the full profiles here so they remain selectable
     /// as first-song recipients.
     var onboardingRequestedUsers: [AppUser] = []
+    /// One-shot signal that the onboarding first-song send completed. Set by
+    /// `FriendSelectorView.commitSend` for any song-send path while the user is
+    /// still onboarding (direct search, artist profile, or album detail), and
+    /// observed by `SendFirstSongRiffView` to advance the step uniformly
+    /// regardless of how deep the send originated. Reset when the send sheet
+    /// reopens.
+    var onboardingFirstSongShared: Bool = false
     /// Invite code the user submitted on the gate screen. Validated via the
     /// `validateInviteCode` Cloud Function before SMS verification, then
     /// redeemed once the profile is created. Cleared on signOut.

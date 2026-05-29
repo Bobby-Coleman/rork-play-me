@@ -11,11 +11,6 @@ struct QuickSendSongSheet: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var detailArtist: ArtistSummary?
     @State private var detailAlbum: Album?
-    /// Album the user wants to share with a friend. Save-to-mixtape for
-    /// albums lives behind the share view's bookmark icon, not the
-    /// search-result row, so this view doesn't need a `saveAlbum`
-    /// counterpart.
-    @State private var shareAlbum: Album?
     @State private var note: String = ""
     @State private var isSending: Bool = false
     @State private var pendingDuplicateSong: Song?
@@ -73,23 +68,6 @@ struct QuickSendSongSheet: View {
             AlbumDetailView(album: album, appState: appState)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
-        }
-        .sheet(item: $shareAlbum) { album in
-            // Routes album shares through the unified share view, same
-            // as the song flow. Internal branching renders the album
-            // artwork and dispatches via `appState.sendAlbum` rather
-            // than per-recipient song writes.
-            NavigationStack {
-                FriendSelectorView(
-                    item: .album(album),
-                    appState: appState,
-                    onBack: { shareAlbum = nil },
-                    onSent: { shareAlbum = nil }
-                )
-            }
-            .presentationBackground(.black)
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
         }
         .alert("Send again?", isPresented: $showDuplicateSendAlert) {
             Button("Cancel", role: .cancel) {
@@ -258,10 +236,6 @@ struct QuickSendSongSheet: View {
                     onTap: {
                         commitCurrentSearch()
                         detailAlbum = album
-                    },
-                    onShareTap: {
-                        commitCurrentSearch()
-                        shareAlbum = album
                     }
                 )
                 .id(album.id)
@@ -301,10 +275,6 @@ struct QuickSendSongSheet: View {
                 onTap: {
                     commitCurrentSearch()
                     detailAlbum = album
-                },
-                onShareTap: {
-                    commitCurrentSearch()
-                    shareAlbum = album
                 }
             )
             .id(album.id)
@@ -331,10 +301,6 @@ struct QuickSendSongSheet: View {
                 onTap: {
                     commitCurrentSearch()
                     detailAlbum = album
-                },
-                onShareTap: {
-                    commitCurrentSearch()
-                    shareAlbum = album
                 }
             )
             .id(album.id)

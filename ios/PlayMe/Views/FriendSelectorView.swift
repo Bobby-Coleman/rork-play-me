@@ -74,7 +74,12 @@ struct FriendSelectorView: View {
     /// Invited contacts are only meaningful when sharing a song. For
     /// other payloads the chip row hides them — see type doc for why.
     private var renderableInvitedContacts: [SimpleContact] {
-        item.kind == .song ? invitedContacts : []
+        guard item.kind == .song else { return [] }
+        // During onboarding, always surface invited-from-contacts recipients
+        // from AppState so nested entry points (artist/album -> SongActionSheet)
+        // that don't thread the param still show them. Post-onboarding the
+        // param is empty anyway, preserving friends-only behavior.
+        return appState.isOnboarded ? invitedContacts : appState.invitedContacts
     }
 
     private var renderablePendingUsers: [AppUser] {
@@ -475,6 +480,12 @@ struct FriendSelectorView: View {
                 }
                 for contact in contacts {
                     _ = await appState.sendSongToPendingContact(s, contact: contact, note: noteToSend)
+                }
+                // Signal onboarding completion regardless of which path opened
+                // this view (direct search vs artist/album profile). The
+                // onboarding first-song screen observes this to advance.
+                if !appState.isOnboarded {
+                    appState.onboardingFirstSongShared = true
                 }
             case .album(let a):
                 await appState.sendAlbum(a, to: friends, note: noteToSend)
