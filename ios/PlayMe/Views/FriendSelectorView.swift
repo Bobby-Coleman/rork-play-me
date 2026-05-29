@@ -96,6 +96,15 @@ struct FriendSelectorView: View {
         !selectedFriends.isEmpty || !selectedContacts.isEmpty
     }
 
+    /// Post-onboarding, songs can only be sent to accepted friends. When the
+    /// user has none, we replace the recipient picker with an "Add a friend
+    /// first" state instead of an empty list. During onboarding (`isOnboarded
+    /// == false`) the first-song flow stays open so pending people are still
+    /// reachable.
+    private var isSendGated: Bool {
+        appState.isOnboarded && appState.friends.isEmpty
+    }
+
     var body: some View {
         ZStack {
             Color.black
@@ -103,21 +112,25 @@ struct FriendSelectorView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { isNoteFocused = false }
 
-            VStack(spacing: 0) {
-                Spacer(minLength: 16)
-                artwork
-                Spacer(minLength: 16)
-                titleBlock
-                Spacer(minLength: 16)
-                if item.kind == .song {
-                    previewControls
-                        .padding(.horizontal, 40)
-                    Spacer(minLength: 20)
+            if isSendGated {
+                addFriendFirstState
+            } else {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 16)
+                    artwork
+                    Spacer(minLength: 16)
+                    titleBlock
+                    Spacer(minLength: 16)
+                    if item.kind == .song {
+                        previewControls
+                            .padding(.horizontal, 40)
+                        Spacer(minLength: 20)
+                    }
+                    sendButton
+                    Spacer()
+                    friendChipRow
+                        .padding(.bottom, 16)
                 }
-                sendButton
-                Spacer()
-                friendChipRow
-                    .padding(.bottom, 16)
             }
 
             if showSentAnimation {
@@ -487,6 +500,47 @@ struct FriendSelectorView: View {
         if cleaned.count == 1 { return first }
         if cleaned.count == 2 { return "\(cleaned[0]) and \(cleaned[1])" }
         return "\(first) and \(cleaned.count - 1) others"
+    }
+
+    // MARK: - Add-a-friend-first gate
+
+    private var addFriendFirstState: some View {
+        VStack(spacing: 20) {
+            Spacer()
+
+            Image(systemName: "person.2.badge.plus")
+                .font(.system(size: 48, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
+
+            VStack(spacing: 8) {
+                Text("Add a friend first")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(.white)
+
+                Text("Once a friend accepts your request, you can send them songs.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
+
+            Button {
+                showAddFriends = true
+            } label: {
+                Text("Add friends")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                    .clipShape(.capsule)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 40)
+            .padding(.top, 8)
+
+            Spacer()
+        }
     }
 
     // MARK: - Friend chip row

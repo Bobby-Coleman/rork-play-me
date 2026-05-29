@@ -243,6 +243,11 @@ class AppState {
     /// search sheets, feed cards, and onboarding all share the same recipient
     /// source and dedupe rules.
     func pendingSendRecipients(including extraUsers: [AppUser] = []) -> [AppUser] {
+        // Pending (not-yet-accepted) recipients are only offered during
+        // onboarding's first-song step. Once onboarded, songs may only be
+        // sent to accepted friends, so we never surface pending people here.
+        // This prevents abuse of sends to users who never accepted a request.
+        guard !isOnboarded else { return [] }
         let friendIds = Set(friends.map(\.id))
         var seen = Set<String>()
         return (outgoingRequests + onboardingRequestedUsers + extraUsers).filter { user in

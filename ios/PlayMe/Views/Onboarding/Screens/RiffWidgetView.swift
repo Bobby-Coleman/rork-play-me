@@ -1,4 +1,5 @@
 import SwiftUI
+import WidgetKit
 
 /// Screen 14 — Add the widget.
 ///
@@ -13,6 +14,13 @@ struct RiffWidgetView: View {
     let onBack: (() -> Void)?
 
     @Environment(\.riffTheme) private var theme
+
+    @State private var isChecking = false
+    @State private var showNotFoundAlert = false
+
+    /// Widget kind string declared by the `PlayMeWidget` extension. Must match
+    /// `StaticConfiguration(kind:)` for detection to work.
+    private let widgetKind = "PlayMeWidget"
 
     var body: some View {
         RiffScreenChrome(stepIdx: stepIdx, totalSteps: totalSteps, onBack: onBack) {
@@ -33,9 +41,45 @@ struct RiffWidgetView: View {
             Spacer(minLength: 0)
         } footer: {
             VStack(spacing: 0) {
-                RiffPrimaryButton(title: "I added the widget", action: onDone)
+                RiffPrimaryButton(
+                    title: isChecking ? "Checking…" : "I added the widget",
+                    disabled: isChecking,
+                    action: verifyWidgetInstalled
+                )
                 RiffTextLink(title: "I'll do it later", action: onSkip)
                     .padding(.top, 4)
+            }
+        }
+        .alert("We can't see the RIFF widget yet", isPresented: $showNotFoundAlert) {
+            Button("Try again", action: verifyWidgetInstalled)
+            Button("Continue anyway", action: onDone)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Make sure you added the RIFF widget to your Home Screen, then tap Try again.")
+        }
+    }
+
+    /// Confirms the user actually installed the widget before advancing.
+    /// `WidgetCenter.getCurrentConfigurations` returns the widgets of our kinds
+    /// currently on the Home Screen. If none are found we prompt rather than
+    /// silently advancing; if the API errors we fall back to the same prompt
+    /// so the user is never hard-blocked.
+    private func verifyWidgetInstalled() {
+        guard !isChecking else { return }
+        isChecking = true
+        WidgetCenter.shared.getCurrentConfigurations { result in
+            DispatchQueue.main.async {
+                isChecking = false
+                switch result {
+                case .success(let infos):
+                    if infos.contains(where: { $0.kind == widgetKind }) {
+                        onDone()
+                    } else {
+                        showNotFoundAlert = true
+                    }
+                case .failure:
+                    showNotFoundAlert = true
+                }
             }
         }
     }

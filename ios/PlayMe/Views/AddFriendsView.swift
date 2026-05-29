@@ -144,6 +144,11 @@ struct AddFriendsView: View {
                                     .padding(.bottom, 16)
                             }
 
+                            if !appState.outgoingRequests.isEmpty {
+                                sentRequestsSection
+                                    .padding(.bottom, 16)
+                            }
+
                             if !appState.friends.isEmpty {
                                 yourFriendsSection
                                     .padding(.bottom, 16)
@@ -674,6 +679,70 @@ struct AddFriendsView: View {
                         .padding(.vertical, 6)
                         .background(Color.white.opacity(0.08))
                         .clipShape(.capsule)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - Sent (outgoing) friend requests
+
+    private var sentRequestsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("Sent Requests", icon: "checkmark.circle")
+
+            LazyVStack(spacing: 0) {
+                ForEach(appState.outgoingRequests) { user in
+                    sentRequestRow(user)
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    private func sentRequestRow(_ user: AppUser) -> some View {
+        HStack(spacing: 14) {
+            Text(user.initials)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(Color.white.opacity(0.12))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayName(for: user))
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white)
+                Text("Request sent")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                Button {
+                    Task { await appState.sendFriendRequest(to: user) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .frame(width: 32, height: 32)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    Task { await appState.cancelOutgoingRequest(to: user) }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .frame(width: 32, height: 32)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
             }

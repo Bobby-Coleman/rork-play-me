@@ -11,6 +11,9 @@ nonisolated struct SongEntry: TimelineEntry {
     let senderFirstName: String
     let note: String?
     let shareId: String?
+    /// False before the first real song is received. Drives the
+    /// "Tap to set up" empty state so a fresh widget never looks blank.
+    let hasSong: Bool
 }
 
 nonisolated struct SongProvider: TimelineProvider {
@@ -22,7 +25,8 @@ nonisolated struct SongProvider: TimelineProvider {
             albumImage: nil,
             senderFirstName: "Molly",
             note: "this song reminds me of you",
-            shareId: nil
+            shareId: nil,
+            hasSong: true
         )
     }
 
@@ -38,7 +42,12 @@ nonisolated struct SongProvider: TimelineProvider {
 
     private func loadEntry() -> SongEntry {
         let defaults = UserDefaults(suiteName: widgetAppGroupId)
-        let title = defaults?.string(forKey: "widgetSongTitle") ?? "Play Me"
+        // A real song has been received only when the app/extension has
+        // written a stored title. Until then we show the "Tap to set up"
+        // empty state instead of placeholder copy on a blank tile.
+        let storedTitle = defaults?.string(forKey: "widgetSongTitle")
+        let hasSong = !(storedTitle?.isEmpty ?? true)
+        let title = storedTitle ?? "Play Me"
         let artist = defaults?.string(forKey: "widgetSongArtist") ?? "Open the app to see songs"
         let firstName = defaults?.string(forKey: "widgetSenderFirstName") ?? ""
         let note = defaults?.string(forKey: "widgetNote")
@@ -57,7 +66,8 @@ nonisolated struct SongProvider: TimelineProvider {
             albumImage: albumImage,
             senderFirstName: firstName,
             note: note,
-            shareId: shareId
+            shareId: shareId,
+            hasSong: hasSong
         )
     }
 }
@@ -73,6 +83,33 @@ struct PlayMeWidgetView: View {
     private var bubbleSize: CGFloat { isSmall ? 22 : 28 }
 
     var body: some View {
+        if entry.hasSong {
+            songBody
+        } else {
+            emptyBody
+        }
+    }
+
+    /// Shown before the first song arrives. Centered RIFF wordmark + prompt on
+    /// the dark tile so the widget reads as branded and actionable, not broken.
+    private var emptyBody: some View {
+        VStack(spacing: 4) {
+            Text("RIFF")
+                .font(.system(size: isSmall ? 22 : 28, weight: .heavy, design: .rounded))
+                .tracking(2)
+                .foregroundStyle(.white)
+            Text("Tap to set up")
+                .font(.system(size: isSmall ? 11 : 13, weight: .medium))
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .containerBackground(for: .widget) {
+            Color(white: 0.08)
+        }
+        .widgetURL(URL(string: "playme://"))
+    }
+
+    private var songBody: some View {
         ZStack(alignment: .bottomLeading) {
             Color.clear
 
