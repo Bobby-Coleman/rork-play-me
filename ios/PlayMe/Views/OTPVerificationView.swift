@@ -1,4 +1,91 @@
 import SwiftUI
+import UIKit
+
+// MARK: - Native one-time-code field
+
+/// Native `UITextField` wrapper for SMS one-time-code entry.
+///
+/// UIKit is the most reliable target for iOS "From Messages" autofill:
+/// - SwiftUI's `TextField` can silently drop the autofilled value on iOS 17+
+///   (the tap on the suggestion doesn't reach the binding).
+/// - Our earlier UIKit version *blocked* autofill by returning `false` from
+///   `shouldChangeCharactersIn`, which cancels the system's insertion.
+///
+/// This version never blocks input. It lets the system insert the code and
+/// reads the result via the `.editingChanged` control event, which fires for
+/// both manual typing and autofill. Clearing is done explicitly through
+/// `resetToken` so a re-render never wipes a freshly autofilled code.
+struct OTPCodeField: UIViewRepresentable {
+    @Binding var text: String
+    var maxDigits: Int = 6
+    /// Bump to clear the field (e.g. after a failed verify / on resend).
+    var resetToken: Int = 0
+    var textColor: UIColor = .white
+    var onComplete: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UITextField {
+        let tf = UITextField()
+        tf.keyboardType = .numberPad
+        tf.textContentType = .oneTimeCode
+        tf.textColor = textColor
+        tf.tintColor = UIColor(red: 0.98, green: 0.78, blue: 0.13, alpha: 1)
+        tf.font = .monospacedDigitSystemFont(ofSize: 28, weight: .semibold)
+        tf.defaultTextAttributes[.kern] = 6
+        tf.textAlignment = .left
+        // No `shouldChangeCharactersIn` override — the system is free to insert
+        // the autofilled code. We observe the result here.
+        tf.addTarget(context.coordinator,
+                     action: #selector(Coordinator.editingChanged(_:)),
+                     for: .editingChanged)
+        return tf
+    }
+
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        context.coordinator.parent = self
+
+        // Explicit clear only, gated on the reset token. We never clear off the
+        // binding going empty, which previously raced the autofill -> binding
+        // sync and wiped freshly filled codes.
+        if context.coordinator.lastResetToken != resetToken {
+            context.coordinator.lastResetToken = resetToken
+            uiView.text = ""
+            context.coordinator.didComplete = false
+        }
+
+        // Claim first responder once, after the field is in a window, so the
+        // autofill candidate attaches to a focused, empty field.
+        if !context.coordinator.didFocus, uiView.window != nil {
+            context.coordinator.didFocus = true
+            uiView.becomeFirstResponder()
+        }
+    }
+
+    final class Coordinator: NSObject {
+        var parent: OTPCodeField
+        var didFocus = false
+        var didComplete = false
+        var lastResetToken = 0
+
+        init(_ parent: OTPCodeField) { self.parent = parent }
+
+        @objc func editingChanged(_ tf: UITextField) {
+            let digits = String((tf.text ?? "").filter { $0.isNumber }.prefix(parent.maxDigits))
+            if tf.text != digits { tf.text = digits }
+            if parent.text != digits { parent.text = digits }
+
+            if digits.count >= parent.maxDigits {
+                if !didComplete {
+                    didComplete = true
+                    parent.onComplete()
+                }
+            } else {
+                didComplete = false
+            }
+        }
+    }
+}
 
 // MARK: - OTP Verification View
 
@@ -8,6 +95,7 @@ struct OTPVerificationView: View {
     var onBack: (() -> Void)? = nil
 
     @State private var codeText: String = ""
+    @State private var otpResetToken = 0
     @State private var isVerifying = false
     @State private var errorMessage: String?
     @State private var isResending = false
@@ -15,8 +103,6 @@ struct OTPVerificationView: View {
     @State private var resendCountThisSession = 0
     @State private var resendConfirmation: String?
     @State private var autoSubmitWork: DispatchWorkItem?
-
-    @FocusState private var fieldFocused: Bool
 
     var body: some View {
         ZStack {
@@ -54,33 +140,19 @@ struct OTPVerificationView: View {
                     .foregroundStyle(.white.opacity(0.5))
                     .padding(.bottom, 32)
 
-                TextField("", text: $codeText)
-                    .textContentType(.oneTimeCode)
-                    .keyboardType(.numberPad)
-                    .focused($fieldFocused)
-                    .font(.system(size: 28, weight: .semibold, design: .monospaced))
-                    .tracking(6)
-                    .foregroundStyle(.white)
-                    .tint(Color(red: 0.98, green: 0.78, blue: 0.13))
-                    .frame(height: 56)
-                    .padding(.horizontal, 18)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color.white.opacity(0.06))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .stroke(Color.white.opacity(fieldFocused ? 0.22 : 0.10), lineWidth: 1)
-                            )
-                    )
-                    .onChange(of: codeText) { _, newValue in
-                        handleCodeChange(newValue)
-                    }
-                    .task {
-                        // Brief settle so the field is in a window before it
-                        // claims first responder.
-                        try? await Task.sleep(for: .milliseconds(150))
-                        fieldFocused = true
-                    }
+                OTPCodeField(text: $codeText, resetToken: otpResetToken) {
+                    handleComplete()
+                }
+                .frame(height: 56)
+                .padding(.horizontal, 18)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.white.opacity(0.06))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                        )
+                )
 
                 if isVerifying {
                     HStack(spacing: 6) {
@@ -152,18 +224,11 @@ struct OTPVerificationView: View {
         }
     }
 
-    /// Filters to digits, caps at 6, and schedules a debounced auto-submit
-    /// once complete. Runs for both manual typing and SMS autofill (SwiftUI
-    /// pushes autofilled text through the binding regardless of iOS version).
-    private func handleCodeChange(_ newValue: String) {
-        let digits = String(newValue.filter(\.isNumber).prefix(6))
-        if digits != codeText {
-            codeText = digits
-            return
-        }
-
+    /// Called by `OTPCodeField` once six digits are present. Debounced ~250ms
+    /// so the user sees the filled code before we verify.
+    private func handleComplete() {
         autoSubmitWork?.cancel()
-        guard digits.count == 6, !isVerifying else { return }
+        guard codeText.count == 6, !isVerifying else { return }
         let work = DispatchWorkItem { verifyCode() }
         autoSubmitWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
@@ -182,6 +247,7 @@ struct OTPVerificationView: View {
             } else {
                 errorMessage = appState.registrationError ?? "Invalid code. Please try again."
                 codeText = ""
+                otpResetToken += 1
             }
         }
     }
@@ -205,6 +271,7 @@ struct OTPVerificationView: View {
             isResending = false
             if success {
                 codeText = ""
+                otpResetToken += 1
                 resendCountThisSession += 1
                 let cooldown = Config.otpResendCooldown(forAttempt: resendCountThisSession)
                 resendConfirmation = "We sent a new code."

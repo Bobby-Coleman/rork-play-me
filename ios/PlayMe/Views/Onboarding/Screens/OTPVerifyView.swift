@@ -14,6 +14,7 @@ struct OTPVerifyView: View {
     let onBack: (() -> Void)?
 
     @State private var codeText: String = ""
+    @State private var otpResetToken = 0
     @State private var isVerifying = false
     @State private var errorMessage: String?
     @State private var isResending = false
@@ -23,8 +24,6 @@ struct OTPVerifyView: View {
     /// Debounce so the user sees the filled code briefly before we
     /// auto-submit, and so a re-fired autofill doesn't double-submit.
     @State private var autoSubmitWork: DispatchWorkItem?
-
-    @FocusState private var fieldFocused: Bool
 
     @Environment(\.riffTheme) private var theme
 
@@ -36,34 +35,24 @@ struct OTPVerifyView: View {
                     RiffSubhead(text: "We sent a 6-digit code to your phone.")
                         .padding(.top, 8)
 
-                    TextField("", text: $codeText)
-                        .textContentType(.oneTimeCode)
-                        .keyboardType(.numberPad)
-                        .focused($fieldFocused)
-                        .font(.system(size: 28, weight: .semibold, design: .monospaced))
-                        .tracking(6)
-                        .foregroundStyle(theme.fg)
-                        .tint(Color(red: 0.98, green: 0.78, blue: 0.13))
-                        .frame(height: 56)
-                        .padding(.horizontal, 18)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(theme.fg.opacity(0.06))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(theme.fg.opacity(fieldFocused ? 0.22 : 0.10), lineWidth: 1)
-                                )
-                        )
-                        .padding(.top, 24)
-                        .onChange(of: codeText) { _, newValue in
-                            handleCodeChange(newValue)
-                        }
-                        .task {
-                            // Brief settle so the field is in a window before
-                            // it claims first responder.
-                            try? await Task.sleep(for: .milliseconds(150))
-                            fieldFocused = true
-                        }
+                    OTPCodeField(
+                        text: $codeText,
+                        resetToken: otpResetToken,
+                        textColor: UIColor(theme.fg)
+                    ) {
+                        handleComplete()
+                    }
+                    .frame(height: 56)
+                    .padding(.horizontal, 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(theme.fg.opacity(0.06))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(theme.fg.opacity(0.18), lineWidth: 1)
+                            )
+                    )
+                    .padding(.top, 24)
 
                     if isVerifying {
                         HStack(spacing: 6) {
@@ -128,18 +117,11 @@ struct OTPVerifyView: View {
         }
     }
 
-    /// Filters to digits, caps at 6, and schedules a debounced auto-submit
-    /// once the code is complete. Runs for both manual typing and SMS
-    /// autofill (SwiftUI pushes autofilled text through the binding).
-    private func handleCodeChange(_ newValue: String) {
-        let digits = String(newValue.filter(\.isNumber).prefix(6))
-        if digits != codeText {
-            codeText = digits
-            return
-        }
-
+    /// Called by `OTPCodeField` once six digits are present. Debounced ~250ms
+    /// so the user sees the filled code before we verify.
+    private func handleComplete() {
         autoSubmitWork?.cancel()
-        guard digits.count == 6, !isVerifying else { return }
+        guard codeText.count == 6, !isVerifying else { return }
         let work = DispatchWorkItem { verifyCode() }
         autoSubmitWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
@@ -158,6 +140,7 @@ struct OTPVerifyView: View {
             } else {
                 errorMessage = appState.registrationError ?? "Invalid code. Please try again."
                 codeText = ""
+                otpResetToken += 1
             }
         }
     }
@@ -181,6 +164,7 @@ struct OTPVerifyView: View {
             isResending = false
             if success {
                 codeText = ""
+                otpResetToken += 1
                 resendCountThisSession += 1
                 let cooldown = Config.otpResendCooldown(forAttempt: resendCountThisSession)
                 resendConfirmation = "We sent a new code."
