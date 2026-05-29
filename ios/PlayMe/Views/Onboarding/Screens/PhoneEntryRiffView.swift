@@ -35,6 +35,7 @@ struct PhoneEntryRiffView: View {
                             keyboard: .phonePad,
                             contentType: .telephoneNumber,
                             autocorrection: false,
+                            autoFocus: true,
                             onSubmit: {
                                 if canSubmit { submit() }
                             }

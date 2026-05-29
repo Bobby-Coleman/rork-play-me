@@ -1098,6 +1098,12 @@ class FirebaseService {
         let myFirst = firstName.isEmpty ? (UserDefaults.standard.string(forKey: "currentUserFirstName") ?? "") : firstName
         let myLast = lastName.isEmpty ? (UserDefaults.standard.string(forKey: "currentUserLastName") ?? "") : lastName
         do {
+            let targetSnap = try await db.collection("users").document(toUID).getDocument()
+            guard targetSnap.exists else {
+                await deleteStaleRequestMirror(otherUID: toUID, direction: .outgoing)
+                return false
+            }
+
             let batch = db.batch()
             let incomingRef = db.collection("users").document(toUID)
                 .collection("friendRequests").document(uid)
@@ -1258,13 +1264,10 @@ class FirebaseService {
                 .order(by: "createdAt", descending: true)
                 .limit(to: friendRequestReadLimit)
                 .getDocuments()
-            return snapshot.documents.compactMap { doc -> AppUser? in
-                let data = doc.data()
-                let username = data["username"] as? String ?? ""
-                let firstName = data["firstName"] as? String ?? username
-                let lastName = data["lastName"] as? String ?? ""
-                return AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: "")
-            }
+            return await filterExistingRequestUsers(
+                snapshot.documents.compactMap(parseRequestUser),
+                direction: .incoming
+            )
         } catch {
             print("FirebaseService: load incoming requests failed: \(error.localizedDescription)")
             return []
@@ -1280,7 +1283,10 @@ class FirebaseService {
                 .order(by: "createdAt", descending: true)
                 .limit(to: friendRequestReadLimit)
                 .getDocuments()
-            return snapshot.documents.compactMap(parseRequestUser)
+            return await filterExistingRequestUsers(
+                snapshot.documents.compactMap(parseRequestUser),
+                direction: .outgoing
+            )
         } catch {
             print("FirebaseService: load outgoing requests failed: \(error.localizedDescription)")
             return []
@@ -1312,16 +1318,13 @@ class FirebaseService {
             .collection("friendRequests")
             .order(by: "createdAt", descending: true)
             .limit(to: friendRequestReadLimit)
-            .addSnapshotListener { snapshot, _ in
-                guard let docs = snapshot?.documents else { return }
-                let requests = docs.map { doc -> AppUser in
-                    let data = doc.data()
-                    let username = data["username"] as? String ?? ""
-                    let firstName = data["firstName"] as? String ?? username
-                    let lastName = data["lastName"] as? String ?? ""
-                    return AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: "")
+            .addSnapshotListener { [weak self] snapshot, _ in
+                guard let self, let docs = snapshot?.documents else { return }
+                let requests = docs.compactMap(self.parseRequestUser)
+                Task { @MainActor in
+                    let filtered = await self.filterExistingRequestUsers(requests, direction: .incoming)
+                    onChange(filtered)
                 }
-                onChange(requests)
             }
     }
 
@@ -1339,8 +1342,66 @@ class FirebaseService {
                     return
                 }
                 guard let self, let docs = snapshot?.documents else { return }
-                onChange(docs.compactMap(self.parseRequestUser))
+                let requests = docs.compactMap(self.parseRequestUser)
+                Task { @MainActor in
+                    let filtered = await self.filterExistingRequestUsers(requests, direction: .outgoing)
+                    onChange(filtered)
+                }
             }
+    }
+
+    private enum FriendRequestDirection {
+        case incoming
+        case outgoing
+    }
+
+    private func filterExistingRequestUsers(_ users: [AppUser], direction: FriendRequestDirection) async -> [AppUser] {
+        var result: [AppUser] = []
+        for user in users {
+            do {
+                let snap = try await db.collection("users").document(user.id).getDocument()
+                if snap.exists {
+                    result.append(user)
+                } else {
+                    await deleteStaleRequestMirror(otherUID: user.id, direction: direction)
+                }
+            } catch {
+                // If the existence check is transiently unavailable, keep the
+                // request visible rather than hiding a valid pending request.
+                result.append(user)
+            }
+        }
+        return result
+    }
+
+    private func deleteStaleRequestMirror(otherUID: String, direction: FriendRequestDirection) async {
+        guard let uid = firebaseUID else { return }
+        do {
+            let batch = db.batch()
+            switch direction {
+            case .incoming:
+                batch.deleteDocument(
+                    db.collection("users").document(uid)
+                        .collection("friendRequests").document(otherUID)
+                )
+                batch.deleteDocument(
+                    db.collection("users").document(otherUID)
+                        .collection("outgoingFriendRequests").document(uid)
+                )
+            case .outgoing:
+                batch.deleteDocument(
+                    db.collection("users").document(uid)
+                        .collection("outgoingFriendRequests").document(otherUID)
+                )
+                batch.deleteDocument(
+                    db.collection("users").document(otherUID)
+                        .collection("friendRequests").document(uid)
+                )
+            }
+            try await batch.commit()
+        } catch {
+            print("FirebaseService: stale friend request cleanup failed: \(error.localizedDescription)")
+        }
     }
 
     private func parseRequestUser(from doc: QueryDocumentSnapshot) -> AppUser? {

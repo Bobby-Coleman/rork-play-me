@@ -2,6 +2,7 @@ import SwiftUI
 import MessageUI
 import Contacts
 import FirebaseAuth
+import UIKit
 
 /// Screen 12 — Pick friends to invite via SMS.
 ///
@@ -25,6 +26,7 @@ struct PickFriendsView: View {
     @State private var inviteRecipient: OutgoingInvite?
     @State private var preparingInviteID: String?
     @State private var visibleContactCount: Int = 20
+    @State private var showAllSuggestions = false
     @FocusState private var searchFocused: Bool
 
     @Environment(\.riffTheme) private var theme
@@ -77,6 +79,16 @@ struct PickFriendsView: View {
         }
     }
 
+    private let suggestionPreviewCount = 3
+
+    private var displayedSuggestions: [AppUser] {
+        showAllSuggestions ? suggestedUsers : Array(suggestedUsers.prefix(suggestionPreviewCount))
+    }
+
+    private var hasMoreSuggestions: Bool {
+        !showAllSuggestions && suggestedUsers.count > suggestionPreviewCount
+    }
+
     private var slotItems: [InviteSlotItem] {
         var seen = Set<String>()
         var items: [InviteSlotItem] = []
@@ -97,6 +109,13 @@ struct PickFriendsView: View {
         !slotItems.isEmpty
     }
 
+    /// While searching (field focused or query present), collapse the slot
+    /// meter + external-share row so results get the full viewport height and
+    /// aren't pinned behind a tall header when the keyboard is up.
+    private var searchActive: Bool {
+        searchFocused || !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
         RiffScreenChrome(
             stepIdx: stepIdx,
@@ -106,36 +125,49 @@ struct PickFriendsView: View {
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text("Invite your \(friendLimit) favorite people")
-                                .font(.system(size: 24, weight: .semibold))
-                                .tracking(-0.48)
-                                .foregroundStyle(theme.fg)
-                            Spacer()
-                            Counter(count: slotItems.count, limit: friendLimit)
+                    if !searchActive {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text("Invite your \(friendLimit) favorite people")
+                                    .font(.system(size: 24, weight: .semibold))
+                                    .tracking(-0.48)
+                                    .foregroundStyle(theme.fg)
+                                Spacer()
+                                Counter(count: slotItems.count, limit: friendLimit)
+                            }
+                            Text("\(max(friendLimit - slotItems.count, 0)) invites left. Add someone now so you can send your first song right away.")
+                                .font(.system(size: 13))
+                                .foregroundStyle(theme.sub)
+                                .lineSpacing(2)
                         }
-                        Text("\(max(friendLimit - slotItems.count, 0)) invites left. Add someone now so you can send your first song right away.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(theme.sub)
-                            .lineSpacing(2)
-                    }
-                    InviteSlotRow(items: slotItems, limit: friendLimit)
+                        .transition(.opacity)
 
-                    inviteViaMessagesButton
+                        InviteSlotRow(items: slotItems, limit: friendLimit)
+                            .transition(.opacity)
+                    }
+
                     searchBar
+
+                    if !searchActive {
+                        externalShareRow
+                            .transition(.opacity)
+                    }
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 4)
+                .animation(.spring(response: 0.38, dampingFraction: 0.9), value: searchActive)
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        if !suggestedUsers.isEmpty {
+                        if !searchActive && !suggestedUsers.isEmpty {
                             sectionHeader("Suggestions", icon: "sparkles")
                                 .padding(.top, 16)
-                            ForEach(suggestedUsers) { user in
+                            ForEach(displayedSuggestions) { user in
                                 suggestionRow(user, pinned: user.id == appState.inviteSuggestedUser?.id)
                                 Divider().background(theme.border)
+                            }
+                            if hasMoreSuggestions {
+                                showMoreSuggestionsButton
                             }
                             Divider().background(theme.border)
                                 .padding(.vertical, 12)
@@ -148,7 +180,7 @@ struct PickFriendsView: View {
                         }
                     }
                     .padding(.horizontal, 24)
-                    .padding(.bottom, 12)
+                    .padding(.bottom, 24)
                 }
                 .scrollDismissesKeyboard(.interactively)
             }
@@ -185,68 +217,64 @@ struct PickFriendsView: View {
     }
 
     private var searchBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(theme.faint)
-                .font(.system(size: 14))
-            AppTextField("Search username or contacts", text: $search, submitLabel: .search) {
-                searchFocused = false
+        HStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(Color.white.opacity(0.82))
+                    .font(.system(size: 16, weight: .semibold))
+                AppTextField("Search contacts", text: $search, submitLabel: .search) {
+                    searchFocused = false
+                }
+                .foregroundStyle(.white)
+                .font(.system(size: 17, weight: .semibold))
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .focused($searchFocused)
             }
-            .foregroundStyle(theme.fg)
-            .autocorrectionDisabled()
-            .textInputAutocapitalization(.never)
-            .focused($searchFocused)
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 40)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(theme.softBg)
-        )
-    }
-
-    private var inviteViaMessagesButton: some View {
-        Button {
-            prepareMessageInvite(contact: nil, id: "messages")
-        } label: {
-            HStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.green)
-                        .frame(width: 42, height: 42)
-                    Image(systemName: "message.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Invite via iMessage")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(theme.bg)
-                    Text("Sends your one-use invite code and link")
-                        .font(.system(size: 12))
-                        .foregroundStyle(theme.bg.opacity(0.72))
-                }
-
-                Spacer()
-
-                if preparingInviteID == "messages" {
-                    ProgressView()
-                        .tint(theme.bg)
-                } else {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(theme.bg.opacity(0.55))
-                }
-            }
-            .padding(14)
+            .padding(.horizontal, 18)
+            .frame(height: 58)
+            .frame(maxWidth: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 18)
-                    .fill(theme.fg)
+                    .fill(Color.white.opacity(0.14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18)
+                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                    )
+                    .shadow(color: Color.white.opacity(0.05), radius: 16, y: 6)
             )
+
+            if searchActive {
+                Button(action: exitSearch) {
+                    Text("Cancel")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(theme.fg)
+                }
+                .buttonStyle(.plain)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(preparingInviteID != nil)
+    }
+
+    private var externalShareRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("Share your link with friends", icon: "square.and.arrow.up")
+                .padding(.bottom, 0)
+
+            HStack(spacing: 14) {
+                shareSourceButton(
+                    title: "Messages",
+                    systemImage: "message.fill",
+                    tint: Color(red: 0.20, green: 0.78, blue: 0.35),
+                    isLoading: preparingInviteID == "messages"
+                ) {
+                    prepareMessageInvite(contact: nil, id: "messages")
+                }
+
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.top, 2)
     }
 
     @ViewBuilder
@@ -308,6 +336,19 @@ struct PickFriendsView: View {
         }
     }
 
+    private var showMoreSuggestionsButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { showAllSuggestions = true }
+        } label: {
+            Text("Show more (\(suggestedUsers.count - suggestionPreviewCount))")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(theme.sub)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
     private var seeMoreButton: some View {
         if hasMoreContacts {
@@ -330,25 +371,58 @@ struct PickFriendsView: View {
     private func sectionHeader(_ title: String, icon: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(theme.faint)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.66))
             Text(title.uppercased())
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12, weight: .bold))
                 .tracking(0.7)
-                .foregroundStyle(theme.faint)
+                .foregroundStyle(Color.white.opacity(0.66))
         }
         .padding(.bottom, 8)
+    }
+
+    private func shareSourceButton(
+        title: String,
+        systemImage: String,
+        tint: Color,
+        isLoading: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(tint)
+                        .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
+                        .frame(width: 58, height: 58)
+                        .shadow(color: tint.opacity(0.35), radius: 14, y: 6)
+
+                    if isLoading {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: systemImage)
+                            .font(.system(size: 23, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                }
+
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.82))
+            }
+            .frame(width: 76)
+        }
+        .buttonStyle(.plain)
+        .disabled(preparingInviteID != nil)
+        .opacity(preparingInviteID != nil && !isLoading ? 0.45 : 1)
     }
 
     private func suggestionRow(_ user: AppUser, pinned: Bool) -> some View {
         let slotFull = slotItems.count >= friendLimit
 
         return HStack(spacing: 12) {
-            Text(user.initials)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(theme.bg)
-                .frame(width: 42, height: 42)
-                .background(Circle().fill(theme.fg))
+            UserAvatar(user: user, side: 42, inverted: true)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(user.firstName.isEmpty ? "@\(user.username)" : user.firstName)
@@ -364,6 +438,7 @@ struct PickFriendsView: View {
             Button {
                 guard !slotFull else { return }
                 Task { await appState.sendFriendRequest(to: user) }
+                exitSearch()
             } label: {
                 actionPill("Add", disabled: slotFull)
             }
@@ -380,11 +455,7 @@ struct PickFriendsView: View {
         let slotFull = !requested && !alreadyFriend && slotItems.count >= friendLimit
 
         return HStack(spacing: 12) {
-            Text(user.initials)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(theme.fg)
-                .frame(width: 38, height: 38)
-                .background(Circle().fill(theme.softBg))
+            UserAvatar(user: user, side: 38)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(user.firstName)
@@ -410,6 +481,7 @@ struct PickFriendsView: View {
                 Button {
                     guard !slotFull else { return }
                     Task { await appState.sendFriendRequest(to: user) }
+                    exitSearch()
                 } label: {
                     actionPill("Add", disabled: slotFull)
                 }
@@ -427,11 +499,7 @@ struct PickFriendsView: View {
         let isPreparing = preparingInviteID == contact.id
 
         return HStack(spacing: 12) {
-            Text(contact.initials)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(theme.fg)
-                .frame(width: 38, height: 38)
-                .background(Circle().fill(theme.softBg))
+            ContactAvatar(contact: contact, side: 38)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(contact.fullName)
@@ -448,7 +516,7 @@ struct PickFriendsView: View {
                 Button {
                     appState.invitedContacts.removeAll { $0.id == contact.id }
                 } label: {
-                    statusPill("Invited")
+                    statusPill("Added")
                 }
                 .buttonStyle(.plain)
             } else {
@@ -461,7 +529,7 @@ struct PickFriendsView: View {
                             .tint(theme.fg)
                             .frame(width: 58, height: 30)
                     } else {
-                        actionPill("Invite", disabled: limitReached)
+                        actionPill("Add", disabled: limitReached)
                     }
                 }
                 .buttonStyle(.plain)
@@ -479,19 +547,39 @@ struct PickFriendsView: View {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
         }
-        .foregroundStyle(disabled ? theme.faint : theme.bg)
+        .foregroundStyle(disabled ? Color.white.opacity(0.30) : Color.black)
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        .background(Capsule().fill(disabled ? theme.softBg : theme.fg))
+        .background(
+            Capsule()
+                .fill(disabled ? Color.white.opacity(0.08) : Color.white)
+                .overlay(Capsule().stroke(Color.white.opacity(disabled ? 0.08 : 0.22), lineWidth: 1))
+                .shadow(color: disabled ? .clear : Color.white.opacity(0.10), radius: 10, y: 4)
+        )
     }
 
     private func statusPill(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(theme.sub)
+            .foregroundStyle(Color.white.opacity(0.64))
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .background(Capsule().fill(theme.softBg))
+            .background(
+                Capsule()
+                    .fill(Color.white.opacity(0.08))
+                    .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
+            )
+    }
+
+    /// Returns the screen from search mode back to the default slots/circles
+    /// view (clears the query + unfocuses, which un-collapses the header). Used
+    /// after an add so the newly added person shows up in the circles.
+    private func exitSearch() {
+        search = ""
+        searchResults = []
+        searchTask?.cancel()
+        isSearching = false
+        searchFocused = false
     }
 
     private func prepareMessageInvite(contact: SimpleContact?, id: String) {
@@ -524,6 +612,7 @@ struct PickFriendsView: View {
         if !appState.invitedContacts.contains(where: { $0.id == contact.id }) {
             appState.invitedContacts.append(contact)
         }
+        exitSearch()
     }
 
     private func performSearch(_ text: String) {
@@ -577,6 +666,13 @@ private enum InviteSlotItem: Identifiable {
         }
     }
 
+    var thumbnailData: Data? {
+        switch self {
+        case .user: return nil
+        case .contact(let contact, _): return contact.thumbnailData
+        }
+    }
+
     var status: String {
         switch self {
         case .user(_, let status), .contact(_, let status): return status
@@ -606,11 +702,7 @@ private struct InviteSlotRow: View {
 
     private func filledSlot(_ item: InviteSlotItem) -> some View {
         VStack(spacing: 7) {
-            Text(item.initials)
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(theme.bg)
-                .frame(width: 58, height: 58)
-                .background(Circle().fill(theme.fg))
+            SlotAvatar(item: item, side: 58)
             Text(item.label)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(theme.fg)
@@ -632,11 +724,86 @@ private struct InviteSlotRow: View {
             Text("Open")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(theme.faint)
-            Text("Not invited")
+            Text("Not added")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(theme.faint)
         }
         .frame(width: 76)
+    }
+}
+
+// MARK: - Avatars
+
+private struct UserAvatar: View {
+    let user: AppUser
+    let side: CGFloat
+    var inverted: Bool = false
+    @Environment(\.riffTheme) private var theme
+
+    var body: some View {
+        Text(user.initials)
+            .font(.system(size: side > 40 ? 13 : 12, weight: .bold))
+            .foregroundStyle(inverted ? theme.bg : theme.fg)
+            .frame(width: side, height: side)
+            .background(
+                Circle()
+                    .fill(inverted ? theme.fg : Color.white.opacity(0.08))
+                    .overlay(Circle().stroke(Color.white.opacity(0.10), lineWidth: 1))
+            )
+    }
+}
+
+private struct ContactAvatar: View {
+    let contact: SimpleContact
+    let side: CGFloat
+    @Environment(\.riffTheme) private var theme
+
+    var body: some View {
+        Group {
+            if let data = contact.thumbnailData,
+               let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    Circle().fill(Color.white.opacity(0.08))
+                    Text(contact.initials.isEmpty ? "?" : contact.initials)
+                        .font(.system(size: side > 40 ? 16 : 13, weight: .bold))
+                        .foregroundStyle(theme.fg)
+                }
+            }
+        }
+        .frame(width: side, height: side)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
+    }
+}
+
+private struct SlotAvatar: View {
+    let item: InviteSlotItem
+    let side: CGFloat
+    @Environment(\.riffTheme) private var theme
+
+    var body: some View {
+        Group {
+            if let data = item.thumbnailData,
+               let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    Circle().fill(theme.fg)
+                    Text(item.initials)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(theme.bg)
+                }
+            }
+        }
+        .frame(width: side, height: side)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
     }
 }
 

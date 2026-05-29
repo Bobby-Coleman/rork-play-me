@@ -727,7 +727,7 @@ async function cascadeDeleteUser(uid) {
   const userSnap = await userRef.get();
   const userData = userSnap.exists ? userSnap.data() : {};
   const username = userData.username;
-  const phone = userData.phone ? normalizeE164(userData.phone) : null;
+  const phone = normalizeE164(userData.phone || (await getPrivatePhone(uid)));
 
   console.log(
     JSON.stringify({
@@ -780,7 +780,34 @@ async function cascadeDeleteUser(uid) {
     console.error("cascadeDeleteUser: friends delete failed:", err.message);
   }
 
-  // 5) Purge pending-shares queued for this user's phone (if any).
+  // 5) Delete pending friend requests involving this account, including
+  //    mirrored request docs on the other user's side. Deleting a Firestore
+  //    document does not delete its subcollections, so these would otherwise
+  //    leave "Requested" ghosts for users who tried to add a deleted account.
+  try {
+    const [incoming, outgoing] = await Promise.all([
+      userRef.collection("friendRequests").get(),
+      userRef.collection("outgoingFriendRequests").get(),
+    ]);
+    const ops = [];
+    for (const req of incoming.docs) {
+      ops.push((b) => b.delete(req.ref));
+      ops.push((b) =>
+        b.delete(db.collection("users").doc(req.id).collection("outgoingFriendRequests").doc(uid))
+      );
+    }
+    for (const req of outgoing.docs) {
+      ops.push((b) => b.delete(req.ref));
+      ops.push((b) =>
+        b.delete(db.collection("users").doc(req.id).collection("friendRequests").doc(uid))
+      );
+    }
+    await commitBatched(db, ops);
+  } catch (err) {
+    console.error("cascadeDeleteUser: friend request delete failed:", err.message);
+  }
+
+  // 6) Purge pending-shares queued for this user's phone (if any).
   if (phone) {
     try {
       const phoneRef = db.collection("pendingShares").doc(phone);
@@ -796,7 +823,7 @@ async function cascadeDeleteUser(uid) {
     }
   }
 
-  // 6) Anonymize shares authored by this user. Receivers keep their history
+  // 7) Anonymize shares authored by this user. Receivers keep their history
   //    but the sender is now "Deleted user". We also clear shares addressed
   //    TO this user so the sender's "Sent" tab hides personal info.
   try {
@@ -833,7 +860,7 @@ async function cascadeDeleteUser(uid) {
     );
   }
 
-  // 7) Anonymize participantNames in any conversations the user is part of.
+  // 8) Anonymize participantNames in any conversations the user is part of.
   try {
     const convos = await db
       .collection("conversations")
@@ -850,7 +877,7 @@ async function cascadeDeleteUser(uid) {
     );
   }
 
-  // 8) Delete private profile metadata and then the public user profile doc.
+  // 9) Delete private profile metadata and then the public user profile doc.
   try {
     await userRef.collection("private").doc("profile").delete().catch(() => {});
     await userRef.delete();

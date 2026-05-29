@@ -18,36 +18,36 @@ struct MusicServiceView: View {
 
     var body: some View {
         RiffScreenChrome(stepIdx: stepIdx, totalSteps: totalSteps, onBack: onBack) {
-            RiffStagger(delay: 0.06) {
+            RiffStagger(delay: 0.04) {
                 RiffHeadline(text: "Where do you listen?")
             }
-            VStack(spacing: 12) {
-                RiffStagger(delay: 0.22) {
+
+            Spacer(minLength: 0)
+
+            // Single stagger wrapping both cards keeps the entrance subtle and,
+            // crucially, avoids per-card spring offsets that were swallowing
+            // early taps while the cards were still settling.
+            RiffStagger(delay: 0.16) {
+                VStack(spacing: 14) {
                     ServiceCard(
                         label: "Spotify",
                         on: selected == .spotify,
-                        markBg: Color(red: 0.118, green: 0.843, blue: 0.376),
-                        markFg: .black,
-                        markText: "S",
-                        action: { selected = .spotify }
+                        loading: requesting && selected == .spotify,
+                        action: { select(.spotify) }
                     )
-                }
-                RiffStagger(delay: 0.30) {
                     ServiceCard(
                         label: "Apple Music",
                         on: selected == .appleMusic,
-                        markBg: Color(red: 0.98, green: 0.141, blue: 0.235),
-                        markFg: .white,
-                        markText: "♪",
-                        action: { selected = .appleMusic }
+                        loading: requesting && selected == .appleMusic,
+                        action: { select(.appleMusic) }
                     )
                 }
             }
-            .padding(.top, 28)
+            .disabled(requesting)
 
             Spacer(minLength: 0)
         } footer: {
-            RiffStagger(delay: 0.52) {
+            RiffStagger(delay: 0.30) {
                 RiffPrimaryButton(
                     title: requesting ? "Just a sec…" : "Continue",
                     disabled: selected == nil || requesting,
@@ -57,8 +57,15 @@ struct MusicServiceView: View {
         }
     }
 
+    /// Tapping a card only selects it; advancing happens via the Continue
+    /// button so the choice can be reviewed/changed before proceeding.
+    private func select(_ service: MusicService) {
+        guard !requesting else { return }
+        selected = service
+    }
+
     private func handleContinue() {
-        guard let service = selected else { return }
+        guard let service = selected, !requesting else { return }
         appState.preferredMusicService = service
 
         guard service == .appleMusic else {
@@ -81,57 +88,53 @@ struct MusicServiceView: View {
 private struct ServiceCard: View {
     let label: String
     let on: Bool
-    let markBg: Color
-    let markFg: Color
-    let markText: String
+    var loading: Bool = false
     let action: () -> Void
 
     @Environment(\.riffTheme) private var theme
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 14) {
-                ZStack {
-                    if label == "Spotify" {
-                        Circle().fill(markBg)
-                    } else {
-                        RoundedRectangle(cornerRadius: 7).fill(markBg)
-                    }
-                    Text(markText)
-                        .font(.system(size: label == "Spotify" ? 14 : 12, weight: .heavy))
-                        .foregroundStyle(markFg)
-                }
-                .frame(width: 28, height: 28)
-
+            ZStack {
                 Text(label)
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(theme.fg)
+                    .font(.system(size: 17, weight: .semibold))
+                    .tracking(-0.2)
+                    .foregroundStyle(on ? theme.bg : theme.fg)
 
-                Spacer()
-
-                ZStack {
-                    Circle()
-                        .stroke(on ? theme.fg : theme.border, lineWidth: 1.5)
-                        .background(Circle().fill(on ? theme.fg : Color.clear))
-                        .frame(width: 22, height: 22)
-                    if on {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(theme.bg)
+                if loading {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .tint(on ? theme.bg : theme.fg)
                     }
+                    .padding(.trailing, 22)
                 }
             }
-            .padding(.horizontal, 18)
-            .frame(height: 76)
+            .frame(maxWidth: .infinity)
+            .frame(height: 64)
+            .contentShape(RoundedRectangle(cornerRadius: 18))
             .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(on ? theme.softBg : Color.clear)
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(on ? theme.fg : Color.white.opacity(0.04))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(on ? theme.fg : theme.border, lineWidth: 1.5)
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color.white.opacity(on ? 0 : 0.10), lineWidth: 1)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableCardStyle())
+        .animation(.easeInOut(duration: 0.18), value: on)
+    }
+}
+
+/// Minimal press feedback that keeps a stable, full-card hit target (avoids
+/// the "buttons not reliably pressing" feel from default plain-button styling
+/// during entrance animations).
+private struct PressableCardStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .opacity(configuration.isPressed ? 0.92 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }

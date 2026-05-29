@@ -5,6 +5,15 @@ struct SimpleContact: Identifiable, Hashable {
     let firstName: String
     let lastName: String
     let phoneNumber: String
+    let thumbnailData: Data?
+
+    init(id: String, firstName: String, lastName: String, phoneNumber: String, thumbnailData: Data? = nil) {
+        self.id = id
+        self.firstName = firstName
+        self.lastName = lastName
+        self.phoneNumber = phoneNumber
+        self.thumbnailData = thumbnailData
+    }
 
     var fullName: String {
         [firstName, lastName].filter { !$0.isEmpty }.joined(separator: " ")
@@ -36,6 +45,7 @@ final class ContactsService {
             CNContactFamilyNameKey as CNKeyDescriptor,
             CNContactPhoneNumbersKey as CNKeyDescriptor,
             CNContactIdentifierKey as CNKeyDescriptor,
+            CNContactThumbnailImageDataKey as CNKeyDescriptor,
         ]
         let request = CNContactFetchRequest(keysToFetch: keys)
 
@@ -47,7 +57,8 @@ final class ContactsService {
                     id: contact.identifier,
                     firstName: contact.givenName,
                     lastName: contact.familyName,
-                    phoneNumber: phone
+                    phoneNumber: phone,
+                    thumbnailData: contact.thumbnailImageData
                 )
                 results.append(c)
             }

@@ -12,6 +12,7 @@ struct OTPVerifyView: View {
     let onBack: (() -> Void)?
 
     @State private var codeText: String = ""
+    @State private var otpResetToken = 0
     @State private var isVerifying = false
     @State private var errorMessage: String?
     @State private var fieldIsFocused = false
@@ -30,30 +31,25 @@ struct OTPVerifyView: View {
                     RiffSubhead(text: "We sent a 6-digit code to your phone.")
                         .padding(.top, 8)
 
-                    ZStack {
-                        HStack(spacing: 10) {
-                            ForEach(0..<6, id: \.self) { index in
-                                let chars = Array(codeText)
-                                let digit = index < chars.count ? String(chars[index]) : ""
-                                let isCurrent = index == codeText.count && fieldIsFocused
-                                Text(digit)
-                                    .font(.system(size: 24, weight: .bold))
-                                    .foregroundStyle(theme.fg)
-                                    .frame(width: 44, height: 52)
-                                    .background(theme.fg.opacity(isCurrent ? 0.15 : 0.08))
-                                    .clipShape(.rect(cornerRadius: 10))
-                            }
+                    OTPTextField(text: $codeText, shouldFocus: fieldIsFocused, resetToken: otpResetToken) { verifyCode() }
+                        .frame(height: 56)
+                        .padding(.horizontal, 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(theme.fg.opacity(0.06))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(theme.fg.opacity(fieldIsFocused ? 0.22 : 0.10), lineWidth: 1)
+                                )
+                        )
+                        .padding(.top, 24)
+                        .task {
+                            // Brief settle so the field is in a window before
+                            // it claims first responder; OTPTextField gates the
+                            // actual becomeFirstResponder on window presence.
+                            try? await Task.sleep(for: .milliseconds(150))
+                            fieldIsFocused = true
                         }
-                        .allowsHitTesting(false)
-
-                        OTPTextField(text: $codeText) { verifyCode() }
-                            .frame(height: 52)
-                            .task {
-                                try? await Task.sleep(for: .milliseconds(250))
-                                fieldIsFocused = true
-                            }
-                    }
-                    .padding(.top, 24)
 
                     if isVerifying {
                         HStack(spacing: 6) {
@@ -131,6 +127,7 @@ struct OTPVerifyView: View {
             } else {
                 errorMessage = appState.registrationError ?? "Invalid code. Please try again."
                 codeText = ""
+                otpResetToken += 1
             }
         }
     }
@@ -154,6 +151,7 @@ struct OTPVerifyView: View {
             isResending = false
             if success {
                 codeText = ""
+                otpResetToken += 1
                 resendCountThisSession += 1
                 let cooldown = Config.otpResendCooldown(forAttempt: resendCountThisSession)
                 resendConfirmation = "We sent a new code."

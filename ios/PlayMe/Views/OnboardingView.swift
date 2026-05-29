@@ -39,6 +39,7 @@ struct OnboardingView: View {
     @State private var username: String = ""
     @State private var contacts: [SimpleContact] = []
     @State private var contactsStatus: CNAuthorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
+    @State private var isSignInFlow = false
 
     private var isForward: Bool { step.rawValue >= lastStepIndex }
 
@@ -82,8 +83,14 @@ struct OnboardingView: View {
         switch step {
         case .coldOpen:
             ColdOpenSplashView(
-                onContinue: { advance(to: .inviteCodeOnly) },
-                onSignIn: { advance(to: .inviteCodeOnly) }
+                onContinue: {
+                    isSignInFlow = false
+                    advance(to: .inviteCodeOnly)
+                },
+                onSignIn: {
+                    isSignInFlow = true
+                    advance(to: .phoneEntry)
+                }
             )
 
         // Disabled in default graph: re-enable by routing cold open through `.socialProof` first.
@@ -98,7 +105,10 @@ struct OnboardingView: View {
         case .inviteCodeOnly:
             InviteCodeOnlyView(
                 appState: appState,
-                onValidated: { advance(to: .phoneEntry) },
+                onValidated: {
+                    isSignInFlow = false
+                    advance(to: .phoneEntry)
+                },
                 onBack: { advance(to: .coldOpen, isBack: true) }
             )
 
@@ -106,7 +116,7 @@ struct OnboardingView: View {
             PhoneEntryRiffView(
                 appState: appState,
                 onCodeSent: { advance(to: .otpVerify) },
-                onBack: { advance(to: .inviteCodeOnly, isBack: true) }
+                onBack: { advance(to: isSignInFlow ? .coldOpen : .inviteCodeOnly, isBack: true) }
             )
 
         case .otpVerify:
