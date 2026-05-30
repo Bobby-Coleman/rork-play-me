@@ -28,14 +28,6 @@ struct HomeDiscoverView: View {
 
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        Text("For You")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, horizontalPadding)
-                            .padding(.top, 12)
-                            .padding(.bottom, 4)
-
                         if items.isEmpty && isLoading {
                             ProgressView()
                                 .tint(.white)
@@ -44,17 +36,32 @@ struct HomeDiscoverView: View {
                             emptyState
                                 .padding(.top, 80)
                         } else {
-                            PinterestSquareGrid(
-                                items: items,
-                                cellSize: cellSize,
-                                spacing: spacing
-                            ) { song, side in
-                                SongDiscoverGridCell(song: song, side: side)
-                                    .onTapGesture {
-                                        guard let idx = items.firstIndex(where: { $0.id == song.id }) else { return }
-                                        AudioPlayerService.shared.play(song: song)
-                                        fullscreenSeed = FullscreenSeed(songs: items, startIndex: idx)
-                                    }
+                            // The title sits inside the right column's
+                            // half-cell Pinterest offset (the blank space at
+                            // the top of column two) rather than in a
+                            // standalone header row above the grid.
+                            ZStack(alignment: .topTrailing) {
+                                PinterestSquareGrid(
+                                    items: items,
+                                    cellSize: cellSize,
+                                    spacing: spacing
+                                ) { song, side in
+                                    SongDiscoverGridCell(song: song, side: side)
+                                        .onTapGesture {
+                                            guard let idx = items.firstIndex(where: { $0.id == song.id }) else { return }
+                                            AudioPlayerService.shared.play(song: song)
+                                            fullscreenSeed = FullscreenSeed(songs: items, startIndex: idx)
+                                        }
+                                }
+
+                                Text("Discover")
+                                    .font(.system(size: 22, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.trailing, 4)
+                                    // Vertically center the title within the
+                                    // cellSize/2 offset gap at the top of the
+                                    // right column.
+                                    .padding(.top, max(0, (cellSize / 2 - 28) / 2))
                             }
                             .padding(.horizontal, horizontalPadding)
                             .padding(.top, 8)

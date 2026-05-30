@@ -17,6 +17,10 @@ struct TasteView: View {
     @State private var genres: Set<String> = []
     @State private var artists: Set<String> = []
 
+    /// Artist picker is temporarily disabled (genres only for now). Flip to
+    /// `true` to restore the "ARTISTS YOU LOVE" carousel below the genres.
+    private let showArtistPicker = false
+
     private static let genreChips: [String] = [
         "Indie", "Hip-Hop", "Jazz", "Electronic", "Ambient", "Punk", "Folk",
         "R&B", "Experimental", "Soul", "Shoegaze", "House", "Country", "Dub",
@@ -30,7 +34,7 @@ struct TasteView: View {
         "Caroline Polachek", "Yves Tumor", "King Krule", "Sade", "Nick Drake"
     ]
 
-    private var totalSelected: Int { genres.count + artists.count }
+    private var totalSelected: Int { genres.count + (showArtistPicker ? artists.count : 0) }
 
     @Environment(\.riffTheme) private var theme
 
@@ -65,26 +69,28 @@ struct TasteView: View {
                         .padding(.horizontal, 24)
                         .padding(.top, 22)
 
-                        Text("ARTISTS YOU LOVE")
-                            .font(.system(size: 11, weight: .semibold))
-                            .tracking(1.1)
-                            .foregroundStyle(theme.faint)
-                            .padding(.horizontal, 24)
-                            .padding(.top, 24)
-                            .padding(.bottom, 12)
+                        if showArtistPicker {
+                            Text("ARTISTS YOU LOVE")
+                                .font(.system(size: 11, weight: .semibold))
+                                .tracking(1.1)
+                                .foregroundStyle(theme.faint)
+                                .padding(.horizontal, 24)
+                                .padding(.top, 24)
+                                .padding(.bottom, 12)
 
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(Array(Self.featuredArtists.enumerated()), id: \.offset) { idx, artist in
-                                    let on = artists.contains(artist)
-                                    artistTile(artist: artist, seed: 50 + idx, on: on)
-                                        .onTapGesture {
-                                            if on { artists.remove(artist) } else { artists.insert(artist) }
-                                        }
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 10) {
+                                    ForEach(Array(Self.featuredArtists.enumerated()), id: \.offset) { idx, artist in
+                                        let on = artists.contains(artist)
+                                        artistTile(artist: artist, seed: 50 + idx, on: on)
+                                            .onTapGesture {
+                                                if on { artists.remove(artist) } else { artists.insert(artist) }
+                                            }
+                                    }
                                 }
+                                .padding(.horizontal, 24)
+                                .padding(.bottom, 12)
                             }
-                            .padding(.horizontal, 24)
-                            .padding(.bottom, 12)
                         }
                     }
                 }

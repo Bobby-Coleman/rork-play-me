@@ -13,9 +13,6 @@ struct RiffInviteIntroView: View {
 
     var body: some View {
         RiffScreenChrome(stepIdx: stepIdx, totalSteps: totalSteps, onBack: onBack) {
-            RiffStagger(delay: 0.06) {
-                RiffHeadline(text: "Who do you want to discover music with?")
-            }
             VStack(spacing: 26) {
                 Spacer()
                 Offer10Reveal()

@@ -128,10 +128,12 @@ struct PickFriendsView: View {
                     if !searchActive {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(alignment: .firstTextBaseline) {
-                                Text("Invite your \(friendLimit) favorite people")
-                                    .font(.system(size: 24, weight: .semibold))
-                                    .tracking(-0.48)
-                                    .foregroundStyle(theme.fg)
+                                GradientWaveText(
+                                    text: "Invite your \(friendLimit) favorite people",
+                                    font: .system(size: 24, weight: .semibold),
+                                    tracking: -0.48,
+                                    baseColor: theme.fg
+                                )
                                 Spacer()
                                 Counter(count: slotItems.count, limit: friendLimit)
                             }
@@ -571,9 +573,14 @@ struct PickFriendsView: View {
         .padding(.vertical, 7)
         .background(
             Capsule()
-                .fill(disabled ? Color.white.opacity(0.08) : Color.white)
+                .fill(Color.white.opacity(0.08))
+                .overlay {
+                    if !disabled {
+                        Capsule().fill(AppAccentGradient.button)
+                    }
+                }
                 .overlay(Capsule().stroke(Color.white.opacity(disabled ? 0.08 : 0.22), lineWidth: 1))
-                .shadow(color: disabled ? .clear : Color.white.opacity(0.10), radius: 10, y: 4)
+                .shadow(color: disabled ? .clear : AppAccentGradient.pink.opacity(0.25), radius: 10, y: 4)
         )
     }
 

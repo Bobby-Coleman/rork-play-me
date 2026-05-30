@@ -1012,6 +1012,15 @@ private struct MixtapesGridView: View {
         }
     }
 
+    /// True before the user has created any mixtape of their own. The
+    /// synthetic Liked tile is intentionally hidden in this state so the
+    /// "save your first song" empty state reads as a clean, premium start
+    /// screen rather than competing with an empty Liked card.
+    private var showFirstMixtapeState: Bool {
+        appState.mixtapeStore.userMixtapes.isEmpty
+            && searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
         GeometryReader { geo in
             let columnWidth = PinterestGridLayout.columnWidth(
@@ -1030,7 +1039,9 @@ private struct MixtapesGridView: View {
 
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    if filtered.isEmpty {
+                    if showFirstMixtapeState {
+                        FirstMixtapeEmptyState().padding(.top, 48)
+                    } else if filtered.isEmpty {
                         emptyState.padding(.top, 80)
                     } else {
                         LazyVGrid(columns: columns, alignment: .center, spacing: spacing) {
@@ -1082,6 +1093,65 @@ private struct MixtapesGridView: View {
                 .foregroundStyle(.white.opacity(0.3))
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - First mixtape empty state
+
+/// Premium empty state shown on the Mixtapes tab before the user has
+/// created any mixtape of their own. Renders a tasteful "wireframe"
+/// preview of mixtape cards (using the real board mosaic aspect) above a
+/// bookmark icon and copy nudging the user to save their first song.
+private struct FirstMixtapeEmptyState: View {
+    var body: some View {
+        VStack(spacing: 30) {
+            HStack(spacing: 12) {
+                ghostCard
+                ghostCard
+            }
+            .frame(maxWidth: 320)
+            .padding(.horizontal, 28)
+
+            VStack(spacing: 10) {
+                Image(systemName: "bookmark")
+                    .font(.system(size: 30, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.5))
+                Text("Save your first song to start a mixtape")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .multilineTextAlignment(.center)
+                Text("Tap the bookmark on any song to add it.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.3))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 44)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var ghostCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RoundedRectangle(cornerRadius: 14)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.09), Color.white.opacity(0.03)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .aspectRatio(MixtapeBoardCardCover.mosaicAspect, contentMode: .fit)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                )
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.white.opacity(0.10))
+                .frame(width: 64, height: 8)
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.white.opacity(0.05))
+                .frame(width: 40, height: 7)
+        }
     }
 }
 
@@ -1223,10 +1293,19 @@ private struct MixtapesListView: View {
 
     private var mixtapes: [Mixtape] { appState.mixtapeStore.allMixtapes }
 
+    /// Mirrors `MixtapesGridView`: hide the synthetic Liked tile and show
+    /// the "save your first song" empty state until the user creates a
+    /// mixtape of their own.
+    private var showFirstMixtapeState: Bool {
+        appState.mixtapeStore.userMixtapes.isEmpty
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                if mixtapes.isEmpty {
+                if showFirstMixtapeState {
+                    FirstMixtapeEmptyState().padding(.top, 48)
+                } else if mixtapes.isEmpty {
                     emptyState.padding(.top, 60)
                 } else {
                     ForEach(Array(mixtapes.enumerated()), id: \.element.id) { idx, mix in

@@ -6,6 +6,7 @@ struct MessagesListView: View {
 
     @State private var quickSendRecipient: AppUser?
     @State private var navigationPath = NavigationPath()
+    @State private var showAddFriends = false
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -13,17 +14,7 @@ struct MessagesListView: View {
                 Color.black.ignoresSafeArea()
 
                 if appState.conversations.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "bubble.left.and.bubble.right")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.white.opacity(0.15))
-                        Text("No messages yet")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.4))
-                        Text("Reply to a song to start a conversation")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.white.opacity(0.25))
-                    }
+                    emptyState
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
@@ -60,6 +51,47 @@ struct MessagesListView: View {
         .sheet(item: $quickSendRecipient) { recipient in
             QuickSendSongSheet(recipient: recipient, appState: appState)
         }
+        .sheet(isPresented: $showAddFriends) {
+            AddFriendsView(appState: appState)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 40))
+                .foregroundStyle(.white.opacity(0.15))
+
+            VStack(spacing: 8) {
+                Text("No messages yet")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.4))
+                Text("Send your first song to start a conversation")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white.opacity(0.25))
+                    .multilineTextAlignment(.center)
+            }
+
+            Button {
+                showAddFriends = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.badge.plus")
+                        .font(.system(size: 13, weight: .bold))
+                    Text("Add Friends")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .foregroundStyle(.black)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 11)
+                .background(Capsule().fill(AppAccentGradient.button))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 4)
+        }
+        .padding(.horizontal, 40)
     }
 
     private func resetToInbox() {

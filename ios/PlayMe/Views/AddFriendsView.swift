@@ -11,6 +11,11 @@ struct AddFriendsView: View {
     @State private var searchResults: [AppUser] = []
     @State private var isSearching = false
     @State private var addedIds: Set<String> = []
+    /// Username matches are capped to the top few for compactness; the
+    /// contact list below is the longer scroll. Tapping "Show more"
+    /// expands to the full username match list.
+    @State private var showAllUsernameResults = false
+    private let usernameResultCap = 3
 
     @State private var allContacts: [SimpleContact] = []
     @State private var contactsLoaded = false
@@ -19,6 +24,10 @@ struct AddFriendsView: View {
     @State private var messageRecipient: MessageRecipient?
     @State private var shareInvite: ShareInvite?
     @State private var preparingInviteID: String?
+    /// The contact whose SMS invite is currently being composed, so a
+    /// successful send can be recorded in `appState.invitedContacts`. Nil
+    /// for the generic "Messages" / "Other apps" share rows.
+    @State private var invitingContact: SimpleContact?
 
     @State private var showFriendsList: Bool = true
     @State private var reportTarget: ReportTarget?
@@ -139,6 +148,11 @@ struct AddFriendsView: View {
                         if isActive {
                             searchContent
                         } else {
+                            if !appState.invitedContacts.isEmpty {
+                                invitedSection
+                                    .padding(.bottom, 16)
+                            }
+
                             if !appState.incomingRequests.isEmpty {
                                 friendRequestsSection
                                     .padding(.bottom, 16)
@@ -193,7 +207,10 @@ struct AddFriendsView: View {
                 MessageComposeView(
                     recipients: recipient.numbers,
                     body: recipient.body
-                ) { _ in messageRecipient = nil }
+                ) { result in
+                    recordInviteIfSent(result)
+                    messageRecipient = nil
+                }
                 .ignoresSafeArea()
             }
         }
@@ -298,12 +315,35 @@ struct AddFriendsView: View {
             } else if !searchResults.isEmpty {
                 sectionHeader("Add by username", icon: "at")
 
+                let visibleResults = showAllUsernameResults
+                    ? searchResults
+                    : Array(searchResults.prefix(usernameResultCap))
+
                 LazyVStack(spacing: 0) {
-                    ForEach(searchResults) { user in
+                    ForEach(visibleResults) { user in
                         userRow(user)
                     }
                 }
                 .padding(.horizontal, 20)
+
+                if !showAllUsernameResults && searchResults.count > usernameResultCap {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showAllUsernameResults = true
+                        }
+                    } label: {
+                        Text("Show more")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 8)
+                            .background(Color.white.opacity(0.08))
+                            .clipShape(.capsule)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 10)
+                }
             }
 
             if !searchResults.isEmpty && !filteredContacts.isEmpty {
@@ -656,14 +696,16 @@ struct AddFriendsView: View {
                 } label: {
                     Text(atCap ? "Full" : "Accept")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(atCap ? .white : .black)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(
-                            atCap
-                            ? Color.white.opacity(0.15)
-                            : Color(red: 0.76, green: 0.38, blue: 0.35)
-                        )
+                        .background {
+                            if atCap {
+                                Color.white.opacity(0.15)
+                            } else {
+                                AppAccentGradient.button
+                            }
+                        }
                         .clipShape(.capsule)
                 }
                 .buttonStyle(.plain)
@@ -793,31 +835,125 @@ struct AddFriendsView: View {
 
             Spacer()
 
-            Button {
-                prepareMessageInvite(numbers: [contact.phoneNumber], id: contact.id)
-            } label: {
-                if preparingInviteID == contact.id {
-                    ProgressView()
-                        .tint(.white)
-                        .frame(width: 62, height: 28)
-                        .background(Color(red: 0.76, green: 0.38, blue: 0.35))
-                        .clipShape(.capsule)
-                } else {
-                    addButtonLabel("Invite")
+            if isInvited(contact) {
+                invitedTrailing(contact)
+            } else {
+                Button {
+                    prepareMessageInvite(numbers: [contact.phoneNumber], id: contact.id, contact: contact)
+                } label: {
+                    if preparingInviteID == contact.id {
+                        ProgressView()
+                            .tint(.black)
+                            .frame(width: 62, height: 28)
+                            .background(AppAccentGradient.button)
+                            .clipShape(.capsule)
+                    } else {
+                        addButtonLabel("Invite")
+                    }
                 }
+                .disabled(preparingInviteID != nil)
             }
-            .disabled(preparingInviteID != nil)
         }
         .padding(.vertical, 8)
     }
 
-    private func prepareMessageInvite(numbers: [String], id: String) {
+    /// "Invited" status pill + an undo (X) control, shared by the Invited
+    /// section and any contact row that's already been invited.
+    private func invitedTrailing(_ contact: SimpleContact) -> some View {
+        HStack(spacing: 8) {
+            Text("Invited")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.5))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.white.opacity(0.08))
+                .clipShape(.capsule)
+
+            Button {
+                undoInvite(contact)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .frame(width: 28, height: 28)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Undo invite to \(contact.fullName)")
+        }
+    }
+
+    private var invitedSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("Invited", icon: "paperplane.fill")
+
+            LazyVStack(spacing: 0) {
+                ForEach(appState.invitedContacts) { contact in
+                    invitedContactRow(contact)
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    private func invitedContactRow(_ contact: SimpleContact) -> some View {
+        HStack(spacing: 14) {
+            Text(contact.initials)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(Color.white.opacity(0.12))
+                .clipShape(Circle())
+
+            Text(contact.fullName)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+
+            Spacer()
+
+            invitedTrailing(contact)
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func prepareMessageInvite(numbers: [String], id: String, contact: SimpleContact? = nil) {
         guard preparingInviteID == nil else { return }
         preparingInviteID = id
+        invitingContact = contact
         Task {
             let body = await buildFreshInviteBody()
             messageRecipient = MessageRecipient(numbers: numbers, body: body)
             preparingInviteID = nil
+        }
+    }
+
+    /// Records a contact as invited once their SMS compose reports `.sent`,
+    /// so it surfaces in the Invited section and the row flips to "Invited".
+    private func recordInviteIfSent(_ result: MessageComposeResult) {
+        defer { invitingContact = nil }
+        guard result == .sent, let contact = invitingContact else { return }
+        if !isInvited(contact) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                appState.invitedContacts.append(contact)
+            }
+        }
+    }
+
+    private func isInvited(_ contact: SimpleContact) -> Bool {
+        appState.invitedContacts.contains {
+            $0.id == contact.id
+                || (!$0.phoneNumber.isEmpty && $0.phoneNumber == contact.phoneNumber)
+        }
+    }
+
+    private func undoInvite(_ contact: SimpleContact) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            appState.invitedContacts.removeAll {
+                $0.id == contact.id
+                    || (!$0.phoneNumber.isEmpty && $0.phoneNumber == contact.phoneNumber)
+            }
         }
     }
 
@@ -847,10 +983,10 @@ struct AddFriendsView: View {
             Text(text)
                 .font(.system(size: 13, weight: .semibold))
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(.black)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+        .background(AppAccentGradient.button)
         .clipShape(.capsule)
     }
 
@@ -905,6 +1041,7 @@ struct AddFriendsView: View {
             return
         }
         isSearching = true
+        showAllUsernameResults = false
         Task {
             try? await Task.sleep(for: .milliseconds(300))
             guard searchText == query else { return }

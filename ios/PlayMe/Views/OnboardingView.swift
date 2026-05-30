@@ -46,7 +46,9 @@ struct OnboardingView: View {
     /// Steps that participate in the progress dots. Excludes cold open,
     /// social proof, invite, phone, and OTP. `intro` remains an enum case but is not routed.
     private static let progressSteps: [RiffOnboardingStep] = [
-        .firstName, .username, .musicService, .taste, .theme,
+        // .theme (color picker) is temporarily disabled and omitted from the
+        // dots; re-add it here when the step is routed again.
+        .firstName, .username, .musicService, .taste,
         .contactsPermission, .inviteIntro, .pickFriends, .notifications, .widget,
     ]
 
@@ -195,7 +197,9 @@ struct OnboardingView: View {
                 appState: appState,
                 stepIdx: progressIndex(for: .taste) ?? 0,
                 totalSteps: totalProgress,
-                onContinue: { advance(to: .theme) },
+                // Color picker (.theme) is temporarily disabled; skip straight
+                // to contacts permission. Re-enable by routing to .theme.
+                onContinue: { advance(to: .contactsPermission) },
                 onBack: { advance(to: .musicService, isBack: true) }
             )
 
@@ -213,7 +217,7 @@ struct OnboardingView: View {
                 stepIdx: progressIndex(for: .contactsPermission) ?? 0,
                 totalSteps: totalProgress,
                 onContinue: { advance(to: .inviteIntro) },
-                onBack: { advance(to: .theme, isBack: true) },
+                onBack: { advance(to: .taste, isBack: true) },
                 contacts: $contacts,
                 status: $contactsStatus
             )

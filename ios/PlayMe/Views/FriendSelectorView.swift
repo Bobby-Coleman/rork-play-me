@@ -540,10 +540,10 @@ struct FriendSelectorView: View {
             } label: {
                 Text("Add friends")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.black)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
-                    .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                    .background(AppAccentGradient.button)
                     .clipShape(.capsule)
             }
             .buttonStyle(.plain)
