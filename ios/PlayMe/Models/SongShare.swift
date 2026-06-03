@@ -9,6 +9,10 @@ nonisolated struct SongShare: Identifiable, Hashable, Sendable {
     let timestamp: Date
     let recipientListenedAt: Date?
     let recipientListenSources: [String]
+    /// True when the recipient has liked this share. Denormalized onto the
+    /// share doc by a Cloud Function so the SENDER can show the liker's
+    /// avatar + heart on their sent feed card.
+    let recipientLiked: Bool
 
     init(
         id: String = UUID().uuidString,
@@ -18,7 +22,8 @@ nonisolated struct SongShare: Identifiable, Hashable, Sendable {
         note: String? = nil,
         timestamp: Date = Date(),
         recipientListenedAt: Date? = nil,
-        recipientListenSources: [String] = []
+        recipientListenSources: [String] = [],
+        recipientLiked: Bool = false
     ) {
         self.id = id
         self.song = song
@@ -28,6 +33,7 @@ nonisolated struct SongShare: Identifiable, Hashable, Sendable {
         self.timestamp = timestamp
         self.recipientListenedAt = recipientListenedAt
         self.recipientListenSources = recipientListenSources
+        self.recipientLiked = recipientLiked
     }
 }
 
@@ -64,6 +70,12 @@ nonisolated struct SentSongHistoryItem: Identifiable, Hashable, Sendable {
 
     var recipients: [AppUser] {
         shares.map(\.recipient)
+    }
+
+    /// Recipients who liked this song (one per share that was liked),
+    /// newest-like-first is not tracked, so order follows recipient order.
+    var likers: [AppUser] {
+        shares.filter(\.recipientLiked).map(\.recipient)
     }
 }
 

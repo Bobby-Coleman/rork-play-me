@@ -20,7 +20,7 @@ struct ChatBubbleRow: View {
     let currentUID: String
     let friendName: String
 
-    let onTapSong: (Song) -> Void
+    let onTapSong: (ChatMessage) -> Void
     let onTapArtist: (Song) -> Void
     let onTapQuotedReply: (String) -> Void
     let onLongPress: (CGRect) -> Void
@@ -151,7 +151,7 @@ struct ChatBubbleVisuals: View {
     /// Optional callbacks. The reaction-overlay's lifted copy passes nil
     /// for these because in-overlay taps would be ambiguous against the
     /// dismiss-on-tap-outside gesture.
-    var onTapSong: ((Song) -> Void)? = nil
+    var onTapSong: ((ChatMessage) -> Void)? = nil
     var onTapArtist: ((Song) -> Void)? = nil
     var onTapQuotedReply: ((String) -> Void)? = nil
 
@@ -266,7 +266,7 @@ struct ChatBubbleVisuals: View {
         .clipShape(.rect(cornerRadius: 14))
         .contentShape(.rect)
         .onTapGesture {
-            onTapSong?(song)
+            onTapSong?(message)
         }
     }
 }

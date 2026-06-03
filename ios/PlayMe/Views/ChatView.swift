@@ -11,7 +11,7 @@ struct ChatView: View {
     @State private var newMessageText: String = ""
     @State private var listener: ListenerRegistration?
     @State private var isSending: Bool = false
-    @State private var sheetSong: Song?
+    @State private var sheetSong: ChatSongTarget?
     @State private var artistSong: Song?
     @State private var reportTarget: ReportTarget?
     @State private var showReportedToast: Bool = false
@@ -77,6 +77,14 @@ struct ChatView: View {
 
     private var friendUID: String {
         conversation.friendId(currentUserId: currentUID)
+    }
+
+    /// The `shares/{id}` doc id to mark listened when opening this song from
+    /// chat. Only the recipient records a listen, and only sends made through
+    /// the share pipeline carry a share doc (message id `share-{shareId}`).
+    private func listenShareId(for message: ChatMessage) -> String? {
+        guard message.senderId != currentUID, message.id.hasPrefix("share-") else { return nil }
+        return String(message.id.dropFirst("share-".count))
     }
 
     private var friendAsAppUser: AppUser {
@@ -146,7 +154,10 @@ struct ChatView: View {
                         pendingReactionSourceFrame = frame
                         pendingReactionTarget = message
                     },
-                    onTapSong: { song in sheetSong = song },
+                    onTapSong: { message in
+                        guard let song = message.song else { return }
+                        sheetSong = ChatSongTarget(song: song, listenShareId: listenShareId(for: message))
+                    },
                     onTapArtist: { song in artistSong = song },
                     onTapQuotedReply: { parentMessageId in
                         scrollToParent(messageId: parentMessageId)
@@ -263,8 +274,8 @@ struct ChatView: View {
                 }
             }
         }
-        .sheet(item: $sheetSong) { song in
-            SongActionSheet(song: song, appState: appState)
+        .sheet(item: $sheetSong) { target in
+            SongActionSheet(song: target.song, appState: appState, recordListenShareId: target.listenShareId)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
@@ -582,4 +593,12 @@ struct ChatView: View {
             }
         }
     }
+}
+
+/// Identifiable wrapper so a tapped chat song can carry the optional
+/// `shares/{id}` doc id used to record a listen when opened externally.
+private struct ChatSongTarget: Identifiable {
+    let song: Song
+    let listenShareId: String?
+    var id: String { song.id }
 }

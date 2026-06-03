@@ -667,7 +667,11 @@ class AppState {
 
         if let conv = await firebase.getOrCreateConversation(with: friend.id, friendName: friend.firstName) {
             let messageText = cleanedNote ?? ""
-            await firebase.sendMessage(conversationId: conv.id, text: messageText, song: enrichedSong, mutationId: "share-\(shareId)")
+            // A song send already surfaces via its own "New Song" push and the
+            // feed, so it must not also light up the Messages unread badge. The
+            // message still posts to the thread (history + inbox bump), just
+            // silently. Text replies (sendMessage elsewhere) still badge.
+            await firebase.sendMessage(conversationId: conv.id, text: messageText, song: enrichedSong, mutationId: "share-\(shareId)", incrementUnread: false)
             await loadConversations()
         }
 

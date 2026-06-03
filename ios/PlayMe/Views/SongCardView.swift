@@ -277,6 +277,12 @@ struct SongCardView: View {
                 .sensoryFeedback(.impact(weight: .medium), trigger: isLiked)
                 .padding(12)
             }
+            .overlay(alignment: .bottomTrailing) {
+                if let likers = sentHistory?.likers, !likers.isEmpty {
+                    LikerAvatarBadge(likers: likers)
+                        .padding(12)
+                }
+            }
             .overlay(alignment: .topLeading) {
                 if !viewerIsSender {
                     Menu {
@@ -493,6 +499,31 @@ struct SongCardView: View {
         }
     }
 
+}
+
+/// Shown bottom-right on the sender's sent feed card: the recipient(s) who
+/// liked the song, as overlapping avatars with a small heart badge.
+struct LikerAvatarBadge: View {
+    let likers: [AppUser]
+
+    var body: some View {
+        HStack(spacing: -8) {
+            ForEach(Array(likers.prefix(3))) { user in
+                AppUserAvatar(user: user, size: 30, background: Color.white.opacity(0.15))
+                    .overlay(Circle().stroke(Color.black, lineWidth: 2))
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Image(systemName: "heart.fill")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.pink)
+                .padding(4)
+                .background(.black, in: Circle())
+                .overlay(Circle().stroke(Color.black, lineWidth: 1.5))
+                .offset(x: 7, y: 5)
+        }
+        .accessibilityLabel("Liked by \(likers.map(\.firstName).joined(separator: ", "))")
+    }
 }
 
 struct ListenerAvatarStack: View {

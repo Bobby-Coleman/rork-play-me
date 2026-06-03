@@ -375,6 +375,12 @@ exports.onNewMessage = onDocumentCreated(
     const msgData = event.data.data();
     if (!msgData) return;
 
+    // Song sends create a chat message with id `share-{shareId}` AND a
+    // `shares/{shareId}` doc, the latter triggering onNewShare ("New Song").
+    // Skip the duplicate message push for these so a song send produces a
+    // single notification and no Messages badge.
+    if ((event.params.msgId || "").startsWith("share-")) return;
+
     const senderId = msgData.senderId;
     const convId = event.params.convId;
 
@@ -435,6 +441,21 @@ exports.onNewLike = onDocumentCreated(
     if (!shareSnap.exists) return;
 
     const shareData = shareSnap.data();
+
+    // Denormalize the recipient's like onto the share doc so the SENDER's
+    // sent feed card can show the liker's avatar + heart. Recipient is
+    // already embedded on the share, so a boolean flag is enough.
+    if (likerId === shareData.recipientId) {
+      try {
+        await shareSnap.ref.update({
+          recipientLiked: true,
+          recipientLikedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } catch (e) {
+        console.log("onNewLike: failed to denormalize like onto share", e);
+      }
+    }
+
     const senderId = shareData.senderId;
     if (!senderId || senderId === likerId) return;
 
@@ -461,6 +482,31 @@ exports.onNewLike = onDocumentCreated(
       collapseId: `like-${shareId}`,
       threadId: "likes",
     });
+  }
+);
+
+// Mirror of onNewLike: when the recipient unlikes, clear the denormalized
+// flag so the sender's feed card stops showing their like.
+exports.onLikeRemoved = onDocumentDeleted(
+  "users/{userId}/likes/{shareId}",
+  async (event) => {
+    const likerId = event.params.userId;
+    const shareId = event.params.shareId;
+    if (shareId.startsWith("song_")) return;
+
+    const ref = admin.firestore().collection("shares").doc(shareId);
+    const snap = await ref.get();
+    if (!snap.exists) return;
+    if (likerId !== snap.data().recipientId) return;
+
+    try {
+      await ref.update({
+        recipientLiked: false,
+        recipientLikedAt: admin.firestore.FieldValue.delete(),
+      });
+    } catch (e) {
+      console.log("onLikeRemoved: failed to clear like on share", e);
+    }
   }
 );
 

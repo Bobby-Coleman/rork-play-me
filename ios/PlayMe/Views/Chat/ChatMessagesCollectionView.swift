@@ -22,7 +22,7 @@ struct ChatMessagesCollectionView: UIViewControllerRepresentable {
     let isLoadingEarlier: Bool
 
     let onLongPressMessage: (ChatMessage, CGRect) -> Void
-    let onTapSong: (Song) -> Void
+    let onTapSong: (ChatMessage) -> Void
     let onTapArtist: (Song) -> Void
     let onTapQuotedReply: (String) -> Void
     let onReachedTop: () -> Void
@@ -67,7 +67,7 @@ struct ChatMessagesCollectionView: UIViewControllerRepresentable {
         func didLongPressMessage(_ message: ChatMessage, sourceFrame: CGRect) {
             parent.onLongPressMessage(message, sourceFrame)
         }
-        func didTapSong(_ song: Song) { parent.onTapSong(song) }
+        func didTapSong(_ message: ChatMessage) { parent.onTapSong(message) }
         func didTapArtist(_ song: Song) { parent.onTapArtist(song) }
         func didTapQuotedReply(parentMessageId: String) { parent.onTapQuotedReply(parentMessageId) }
         func didReachTopOfList() { parent.onReachedTop() }
@@ -87,7 +87,7 @@ enum ChatScrollAction: Equatable {
 
 protocol ChatMessagesViewControllerDelegate: AnyObject {
     func didLongPressMessage(_ message: ChatMessage, sourceFrame: CGRect)
-    func didTapSong(_ song: Song)
+    func didTapSong(_ message: ChatMessage)
     func didTapArtist(_ song: Song)
     func didTapQuotedReply(parentMessageId: String)
     func didReachTopOfList()
@@ -264,7 +264,7 @@ final class ChatMessagesViewController: UIViewController, UICollectionViewDelega
                     isMostRecentRead: isMostRecentRead,
                     currentUID: self.currentUID,
                     friendName: self.friendName,
-                    onTapSong: { [weak self] song in self?.delegateProxy?.didTapSong(song) },
+                    onTapSong: { [weak self] message in self?.delegateProxy?.didTapSong(message) },
                     onTapArtist: { [weak self] song in self?.delegateProxy?.didTapArtist(song) },
                     onTapQuotedReply: { [weak self] parentId in self?.delegateProxy?.didTapQuotedReply(parentMessageId: parentId) },
                     onLongPress: { [weak self] frameInWindow in

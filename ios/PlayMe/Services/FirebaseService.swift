@@ -2347,7 +2347,8 @@ class FirebaseService {
         text: String,
         song: Song? = nil,
         replyTo: ChatMessage? = nil,
-        mutationId: String = UUID().uuidString
+        mutationId: String = UUID().uuidString,
+        incrementUnread: Bool = true
     ) async {
         guard let uid = firebaseUID else {
             print("FirebaseService: sendMessage - not signed in")
@@ -2426,8 +2427,10 @@ class FirebaseService {
                     "lastMessageText": lastMessageText,
                     "lastMessageTimestamp": FieldValue.serverTimestamp(),
                 ]
-                for p in participants where p != uid {
-                    updates["unreadCount_\(p)"] = FieldValue.increment(Int64(1))
+                if incrementUnread {
+                    for p in participants where p != uid {
+                        updates["unreadCount_\(p)"] = FieldValue.increment(Int64(1))
+                    }
                 }
 
                 if song != nil {
@@ -2822,6 +2825,7 @@ class FirebaseService {
 
         let recipientListenedAt = (data["recipientListenedAt"] as? Timestamp)?.dateValue()
         let recipientListenSources = data["recipientListenSources"] as? [String] ?? []
+        let recipientLiked = data["recipientLiked"] as? Bool ?? false
 
         return SongShare(
             id: doc.documentID,
@@ -2831,7 +2835,8 @@ class FirebaseService {
             note: data["note"] as? String,
             timestamp: timestamp,
             recipientListenedAt: recipientListenedAt,
-            recipientListenSources: recipientListenSources
+            recipientListenSources: recipientListenSources,
+            recipientLiked: recipientLiked
         )
     }
 

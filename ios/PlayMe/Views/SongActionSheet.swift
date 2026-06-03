@@ -21,6 +21,10 @@ struct SongActionSheet: View {
     /// can read it. FriendSelectorView itself doesn't need it today, but
     /// keeping the parameter avoids churning call sites later.
     var share: SongShare? = nil
+    /// When this sheet hosts a song the current user RECEIVED (opened from a
+    /// chat bubble), this carries the `shares/{id}` doc id so opening it in
+    /// Spotify/Apple Music (or playing the preview) records a listen.
+    var recordListenShareId: String? = nil
 
     @Environment(\.dismiss) private var dismiss
 
@@ -30,6 +34,7 @@ struct SongActionSheet: View {
                 item: .song(song),
                 appState: appState,
                 shareId: share?.id,
+                recordListenShareId: recordListenShareId,
                 onBack: { dismiss() },
                 onSent: { dismiss() }
             )

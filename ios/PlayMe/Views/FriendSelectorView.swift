@@ -33,6 +33,10 @@ struct FriendSelectorView: View {
     /// Only meaningful for `.song` payloads — albums and mixtapes use
     /// their own share collections.
     var shareId: String? = nil
+    /// When set, this view is showing a song the current user RECEIVED (via a
+    /// chat tap). Playing the preview or opening it in Spotify/Apple Music
+    /// records a listen against this `shares/{id}` doc, matching the feed.
+    var recordListenShareId: String? = nil
     let onBack: () -> Void
     let onSent: () -> Void
 
@@ -43,6 +47,12 @@ struct FriendSelectorView: View {
         return audioPlayer.currentSongId == song.id
     }
     private var isPlayingThis: Bool { isCurrentSong && audioPlayer.isPlaying }
+
+    private func recordChatListen(source: String) {
+        guard let shareId = recordListenShareId, !recordedListenSources.contains(source) else { return }
+        recordedListenSources.insert(source)
+        Task { await FirebaseService.shared.markShareListened(shareId: shareId, source: source) }
+    }
 
     @State private var selectedFriends: Set<String> = []
     /// Parallel selection set for invited contacts. Lives alongside
@@ -65,6 +75,8 @@ struct FriendSelectorView: View {
     /// Pre-resolved Spotify URL for the "Open in Spotify" button. Only
     /// resolved for `.song` payloads.
     @State private var resolvedSpotifyURL: String?
+    /// Listen sources already recorded this appearance, to avoid duplicate writes.
+    @State private var recordedListenSources: Set<String> = []
     @FocusState private var isNoteFocused: Bool
 
     private var rankedFriends: [AppUser] {
@@ -331,6 +343,9 @@ struct FriendSelectorView: View {
                 HStack(spacing: 10) {
                     Button {
                         audioPlayer.play(song: song)
+                        if song.previewURL != nil {
+                            recordChatListen(source: "preview")
+                        }
                     } label: {
                         ZStack {
                             if isCurrentSong && audioPlayer.isLoading {
@@ -354,7 +369,10 @@ struct FriendSelectorView: View {
                         song: song,
                         service: appState.preferredMusicService,
                         resolvedSpotifyURL: resolvedSpotifyURL,
-                        shareId: shareId
+                        shareId: shareId,
+                        onOpened: {
+                            recordChatListen(source: "external")
+                        }
                     )
                 }
             }
