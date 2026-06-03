@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 private let hasRequestedNotificationPermissionKey = "hasRequestedNotificationPermission"
+private let didShowProfilePhotoAnnouncementKey = "didShowProfilePhotoAnnouncement"
 
 /// Top-level tabs in their visual left-to-right order. Pinning the
 /// underlying `Int` values lets us preserve the existing onboarding /
@@ -60,6 +61,10 @@ struct ContentView: View {
     /// (who installed before this flow existed) never see the first-launch permission prompt
     /// from us; their status is recorded as "already asked" silently.
     @State private var sessionBeganAlreadyOnboarded = UserDefaults.standard.bool(forKey: "isOnboarded")
+    /// One-time "profile pictures are here" announcement for existing users
+    /// who onboarded before the feature shipped and don't have a photo yet.
+    @State private var showProfilePhotoAnnouncement = false
+    @State private var showProfilePhotoEditor = false
 
     init() {
         // Hide tab titles globally so the bar stays icon-only even when iOS
@@ -91,9 +96,28 @@ struct ContentView: View {
                     mainTabView
                         .task {
                             await appState.loadData()
+                            maybeShowProfilePhotoAnnouncement()
                         }
                         .task {
                             await requestNotificationPermissionOnceIfNeeded()
+                        }
+                        .sheet(isPresented: $showProfilePhotoAnnouncement) {
+                            ProfilePhotoAnnouncementView(
+                                initials: announcementInitials,
+                                onAddPhoto: {
+                                    showProfilePhotoAnnouncement = false
+                                    showProfilePhotoEditor = true
+                                },
+                                onDismiss: { showProfilePhotoAnnouncement = false }
+                            )
+                            .presentationBackground(.black)
+                            .presentationDetents([.large])
+                        }
+                        .sheet(isPresented: $showProfilePhotoEditor) {
+                            ProfilePhotoEditorView(appState: appState)
+                                .presentationBackground(.black)
+                                .presentationDetents([.large])
+                                .presentationDragIndicator(.visible)
                         }
                 } else {
                     OnboardingView(appState: appState) {
@@ -160,6 +184,29 @@ struct ContentView: View {
         let allowed = status == .authorized || status == .provisional || status == .ephemeral
         await appState.setNotificationsEnabled(allowed)
         defaults.set(true, forKey: hasRequestedNotificationPermissionKey)
+    }
+
+    /// Initials shown on the announcement's sample avatar.
+    private var announcementInitials: String {
+        profileInitials(
+            firstName: appState.currentUser?.firstName ?? "",
+            lastName: appState.currentUser?.lastName ?? ""
+        )
+    }
+
+    /// Shows the profile-photo announcement exactly once, and only to users
+    /// who installed before the feature existed (`sessionBeganAlreadyOnboarded`)
+    /// and don't already have a photo. Brand-new users set a photo during
+    /// onboarding, so they never see it. The flag is persisted the moment it
+    /// shows so it can't repeat on later launches.
+    private func maybeShowProfilePhotoAnnouncement() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: didShowProfilePhotoAnnouncementKey) else { return }
+        guard sessionBeganAlreadyOnboarded else { return }
+        let avatar = appState.currentUser?.avatarURL?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (avatar ?? "").isEmpty else { return }
+        defaults.set(true, forKey: didShowProfilePhotoAnnouncementKey)
+        showProfilePhotoAnnouncement = true
     }
 
     /// Tab indices that participate in horizontal swipe navigation. Ordered

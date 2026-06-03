@@ -13,27 +13,16 @@ struct ProfilePhotoView: View {
     @State private var selectedID: String?
     @State private var uploadedImage: UIImage?
     @State private var showPhotoPicker = false
-    @State private var cropCandidate: CropCandidate?
     @State private var isSaving = false
     @State private var uploadProgress: Double?
     @State private var errorMessage: String?
 
     private var fullNameInitials: String {
-        let first = firstName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1).uppercased()
-        let last = lastName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1).uppercased()
-        let combined = "\(first)\(last)"
-        return combined.isEmpty ? "?" : combined
-    }
-
-    private var options: [AvatarOption] {
-        var arr: [AvatarOption] = [AvatarOption(id: "upload", kind: .upload)]
-        arr += GradientAvatarPreset.all.map { AvatarOption(id: "g.\($0.id)", kind: .gradient($0)) }
-        arr.append(AvatarOption(id: "plain", kind: .plainInitials))
-        return arr
+        profileInitials(firstName: firstName, lastName: lastName)
     }
 
     private var selectedOption: AvatarOption {
-        options.first { $0.id == selectedID } ?? options[0]
+        makeProfileAvatarOptions().first { $0.id == selectedID } ?? makeProfileAvatarOptions()[0]
     }
 
     private var isUploadSelected: Bool {
@@ -63,22 +52,13 @@ struct ProfilePhotoView: View {
 
                 Spacer(minLength: 0)
 
-                carousel
-                    .frame(height: 280)
-
-                VStack(spacing: 8) {
-                    Text(titleText)
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(.white)
-                    Text(subtitleText)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 18)
-
-                pageDots
-                    .padding(.top, 14)
+                ProfilePhotoPicker(
+                    initials: fullNameInitials,
+                    selectedID: $selectedID,
+                    uploadedImage: $uploadedImage,
+                    showPhotoPicker: $showPhotoPicker,
+                    isSaving: isSaving
+                )
 
                 if let errorMessage {
                     Text(errorMessage)
@@ -106,6 +86,90 @@ struct ProfilePhotoView: View {
         }
         .riffTheme(.black)
         .preferredColorScheme(.dark)
+    }
+
+    private var buttonTitle: String {
+        if isSaving {
+            if let uploadProgress {
+                return "Saving \(Int(uploadProgress * 100))%"
+            }
+            return "Saving..."
+        }
+        if isUploadSelected, uploadedImage == nil {
+            return "Choose Photo"
+        }
+        return "Continue"
+    }
+
+    private func saveSelection() async {
+        errorMessage = nil
+        isSaving = true
+        uploadProgress = nil
+        defer {
+            isSaving = false
+            uploadProgress = nil
+        }
+
+        let imageToSave = renderSelectedAvatarImage(
+            selectedID: selectedID,
+            uploadedImage: uploadedImage,
+            initials: fullNameInitials
+        )
+
+        let ok = await appState.updateProfilePhoto(image: imageToSave) { progress in
+            uploadProgress = progress
+        }
+        if ok {
+            onContinue()
+        } else {
+            errorMessage = appState.registrationError ?? "Could not save your profile picture. Please try again."
+        }
+    }
+}
+
+// MARK: - Reusable picker
+
+/// The shared profile-picture selection surface used by both onboarding
+/// (`ProfilePhotoView`) and the post-onboarding editor
+/// (`ProfilePhotoEditorView`). Owns the swipe carousel, page dots,
+/// title/subtitle, and the photo-pick + circular-crop flow. The parent owns
+/// `selectedID`, `uploadedImage`, and `showPhotoPicker` so it can trigger the
+/// picker from its own primary button and resolve the final image at save
+/// time via `renderSelectedAvatarImage(...)`.
+struct ProfilePhotoPicker: View {
+    let initials: String
+    @Binding var selectedID: String?
+    @Binding var uploadedImage: UIImage?
+    @Binding var showPhotoPicker: Bool
+    var isSaving: Bool = false
+
+    @State private var cropCandidate: CropCandidate?
+
+    private var options: [AvatarOption] { makeProfileAvatarOptions() }
+
+    private var selectedOption: AvatarOption {
+        options.first { $0.id == selectedID } ?? options[0]
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            carousel
+                .frame(height: 280)
+
+            VStack(spacing: 8) {
+                Text(titleText)
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundStyle(.white)
+                Text(subtitleText)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 18)
+
+            pageDots
+                .padding(.top, 14)
+        }
         .sheet(isPresented: $showPhotoPicker) {
             RawPhotoPicker { image in
                 cropCandidate = CropCandidate(image: image)
@@ -118,7 +182,6 @@ struct ProfilePhotoView: View {
                 onCrop: { cropped in
                     uploadedImage = cropped
                     selectedID = "upload"
-                    errorMessage = nil
                     cropCandidate = nil
                 }
             )
@@ -145,19 +208,6 @@ struct ProfilePhotoView: View {
         case .plainInitials:
             return "your first and last initial"
         }
-    }
-
-    private var buttonTitle: String {
-        if isSaving {
-            if let uploadProgress {
-                return "Saving \(Int(uploadProgress * 100))%"
-            }
-            return "Saving..."
-        }
-        if isUploadSelected, uploadedImage == nil {
-            return "Choose Photo"
-        }
-        return "Continue"
     }
 
     private var carousel: some View {
@@ -240,57 +290,21 @@ struct ProfilePhotoView: View {
                 }
             }
         case .gradient(let preset):
-            GradientInitialsContent(preset: preset, initials: fullNameInitials)
+            GradientInitialsContent(preset: preset, initials: initials)
         case .plainInitials:
             ZStack {
                 Color.white
-                Text(fullNameInitials)
+                Text(initials)
                     .font(.system(size: 58, weight: .black))
                     .foregroundStyle(.black)
             }
         }
     }
-
-    private func saveSelection() async {
-        errorMessage = nil
-        isSaving = true
-        uploadProgress = nil
-        defer {
-            isSaving = false
-            uploadProgress = nil
-        }
-
-        let imageToSave: UIImage?
-        switch selectedOption.kind {
-        case .upload:
-            imageToSave = uploadedImage
-        case .gradient(let preset):
-            imageToSave = renderGradientAvatar(preset)
-        case .plainInitials:
-            imageToSave = nil
-        }
-
-        let ok = await appState.updateProfilePhoto(image: imageToSave) { progress in
-            uploadProgress = progress
-        }
-        if ok {
-            onContinue()
-        } else {
-            errorMessage = appState.registrationError ?? "Could not save your profile picture. Please try again."
-        }
-    }
-
-    @MainActor
-    private func renderGradientAvatar(_ preset: GradientAvatarPreset, size: CGFloat = 512) -> UIImage? {
-        let content = GradientInitialsContent(preset: preset, initials: fullNameInitials, fontSize: size * 0.42)
-            .frame(width: size, height: size)
-        let renderer = ImageRenderer(content: content)
-        renderer.scale = 1
-        return renderer.uiImage
-    }
 }
 
-private struct AvatarOption: Identifiable {
+// MARK: - Shared option model + helpers
+
+struct AvatarOption: Identifiable {
     enum Kind {
         case upload
         case gradient(GradientAvatarPreset)
@@ -298,6 +312,48 @@ private struct AvatarOption: Identifiable {
     }
     let id: String
     let kind: Kind
+}
+
+/// Canonical ordered option list shared by the picker UI and the
+/// save-time image resolution so they never drift.
+func makeProfileAvatarOptions() -> [AvatarOption] {
+    var arr: [AvatarOption] = [AvatarOption(id: "upload", kind: .upload)]
+    arr += GradientAvatarPreset.all.map { AvatarOption(id: "g.\($0.id)", kind: .gradient($0)) }
+    arr.append(AvatarOption(id: "plain", kind: .plainInitials))
+    return arr
+}
+
+/// Two-letter uppercase initials from a first/last name, falling back to "?".
+func profileInitials(firstName: String, lastName: String) -> String {
+    let first = firstName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1).uppercased()
+    let last = lastName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1).uppercased()
+    let combined = "\(first)\(last)"
+    return combined.isEmpty ? "?" : combined
+}
+
+/// Resolves the currently selected option into the image that should be
+/// uploaded. `nil` means "use plain initials" (clears any stored photo).
+@MainActor
+func renderSelectedAvatarImage(selectedID: String?, uploadedImage: UIImage?, initials: String) -> UIImage? {
+    let options = makeProfileAvatarOptions()
+    let option = options.first { $0.id == selectedID } ?? options[0]
+    switch option.kind {
+    case .upload:
+        return uploadedImage
+    case .gradient(let preset):
+        return renderGradientAvatar(preset, initials: initials)
+    case .plainInitials:
+        return nil
+    }
+}
+
+@MainActor
+func renderGradientAvatar(_ preset: GradientAvatarPreset, initials: String, size: CGFloat = 512) -> UIImage? {
+    let content = GradientInitialsContent(preset: preset, initials: initials, fontSize: size * 0.42)
+        .frame(width: size, height: size)
+    let renderer = ImageRenderer(content: content)
+    renderer.scale = 1
+    return renderer.uiImage
 }
 
 /// A solid gradient fill with the user's initials centered on top. Reused for

@@ -2203,6 +2203,7 @@ private struct AddSongsToMixtapeSheet: View {
 struct ProfileDetailsView: View {
     let appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @State private var showPhotoEditor = false
 
     private var user: AppUser? { appState.currentUser }
 
@@ -2211,8 +2212,42 @@ struct ProfileDetailsView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 VStack(spacing: 16) {
-                    AppUserAvatar(user: user, size: 96, background: Color.white.opacity(0.12))
-                        .padding(.top, 32)
+                    Button {
+                        showPhotoEditor = true
+                    } label: {
+                        AppUserAvatar(user: user, size: 96, background: Color.white.opacity(0.12))
+                            .overlay(alignment: .bottomTrailing) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.black)
+                                        .frame(width: 32, height: 32)
+                                    Circle()
+                                        .fill(AppAccentGradient.button)
+                                        .frame(width: 28, height: 28)
+                                    Image(systemName: "camera.fill")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundStyle(.black)
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 32)
+
+                    Button {
+                        showPhotoEditor = true
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("Edit")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .foregroundStyle(.white.opacity(0.9))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Color.white.opacity(0.12), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
 
                     Text(user?.firstName ?? "")
                         .font(.system(size: 24, weight: .bold))
@@ -2245,6 +2280,12 @@ struct ProfileDetailsView: View {
             .toolbarBackground(.hidden, for: .navigationBar)
         }
         .preferredColorScheme(.dark)
+        .sheet(isPresented: $showPhotoEditor) {
+            ProfilePhotoEditorView(appState: appState)
+                .presentationBackground(.black)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
     }
 }
 
