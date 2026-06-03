@@ -1437,6 +1437,24 @@ class AppState {
     /// needed.
     var friendCap: FirebaseService.FriendCapStatus?
 
+    /// Current user's friend limit. Sourced from the server `friendLimit`
+    /// field (via `friendCap`), falling back to the default of 8 before the
+    /// first cap refresh lands.
+    var friendLimit: Int { friendCap?.limit ?? 8 }
+
+    /// Live friend count for display and the cap gate. Derived from the
+    /// real-time `friends` listener rather than the eventually-consistent
+    /// server `friendCount` field. The server field is decremented by the
+    /// `onFriendDeleted` Cloud Function asynchronously, so reading it right
+    /// after a remove/add briefly returns a stale value — which previously
+    /// made the counter drop and then pop back up. The local friends list
+    /// reflects the change instantly and stays correct.
+    var friendCountDisplay: Int { friends.count }
+
+    /// Whether the user is at their friend limit, derived from the live
+    /// friend count so it never flickers against a stale server count.
+    var isAtFriendCap: Bool { friendCountDisplay >= friendLimit }
+
     /// User-facing toast surfaced when an accept attempt fails because
     /// of the friend cap. Auto-cleared after a few seconds.
     var friendCapMessage: String?

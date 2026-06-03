@@ -76,25 +76,19 @@ struct AddFriendsView: View {
                         // Header now includes the friend cap so users always
                         // know how many slots they have left. When the cap is
                         // reached we also show a soft toast on accept attempts.
-                        let cap = appState.friendCap
-                        let countText: String = {
-                            if let cap {
-                                return "\(cap.count) of \(cap.limit) friends"
-                            }
-                            return "\(appState.friends.count) friends"
-                        }()
-                        Text(countText)
+                        let atCap = appState.isAtFriendCap
+                        Text("\(appState.friendCountDisplay) of \(appState.friendLimit) friends")
                             .font(.system(size: 24, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.top, 4)
                             .padding(.bottom, 2)
 
-                        Text(cap?.isAtCap == true
+                        Text(atCap
                              ? "You've reached your friend limit"
                              : "Add your friends")
                             .font(.system(size: 14))
-                            .foregroundStyle(.white.opacity(cap?.isAtCap == true ? 0.7 : 0.5))
+                            .foregroundStyle(.white.opacity(atCap ? 0.7 : 0.5))
                             .frame(maxWidth: .infinity)
                             .padding(.bottom, 16)
 
@@ -532,25 +526,22 @@ struct AddFriendsView: View {
 
     private func removeFriend(_ friend: AppUser) {
         let previousFriends = appState.friends
-        let previousCap = appState.friendCap
+        // Optimistically drop the friend. The displayed count is derived from
+        // appState.friends (live via the friends listener), so this is the
+        // single source of truth — no separate server `friendCount` read,
+        // which used to pop the counter back up before the onFriendDeleted
+        // Cloud Function had decremented it.
         withAnimation(.easeInOut(duration: 0.2)) {
             appState.friends.removeAll { $0.id == friend.id }
-            if let previousCap {
-                appState.friendCap = FirebaseService.FriendCapStatus(
-                    count: max(previousCap.count - 1, 0),
-                    limit: previousCap.limit
-                )
-            }
         }
         Task {
             let ok = await FirebaseService.shared.removeFriend(friendUID: friend.id)
             if ok {
-                try? await Task.sleep(for: .seconds(1))
+                // Refresh only to keep the server-backed friend limit fresh.
                 await appState.refreshFriendCap()
             } else {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     appState.friends = previousFriends
-                    appState.friendCap = previousCap
                 }
                 unfriendErrorMessage = "We couldn't remove \(friend.firstName). Check your connection and try again."
             }
@@ -677,7 +668,7 @@ struct AddFriendsView: View {
             Spacer()
 
             HStack(spacing: 8) {
-                let atCap = appState.friendCap?.isAtCap == true
+                let atCap = appState.isAtFriendCap
                 Button {
                     Task { await appState.acceptFriendRequest(user) }
                 } label: {
