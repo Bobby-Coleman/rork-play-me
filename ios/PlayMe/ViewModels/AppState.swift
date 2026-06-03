@@ -118,6 +118,12 @@ class AppState {
     /// last-message preview) without requiring a manual `loadConversations`
     /// refresh call. Detached on logout.
     private var conversationsListener: ListenerRegistration?
+    /// Firestore listener for the current user's friends collection. Keeps
+    /// the Friends screen live when requests are accepted or friends removed.
+    private var friendsListener: ListenerRegistration?
+    /// Firestore listener for the current user's global send stats
+    /// (unique songs sent + send-day streak) shown in the Friends header.
+    private var userStatsListener: ListenerRegistration?
     /// Debounce task used to coalesce bursts of widget reloads. When a batch
     /// of `receivedShares` updates lands in the same run loop (e.g. three
     /// back-to-back pushes), `syncWidgetWithLatestReceivedShare` cancels
@@ -133,6 +139,16 @@ class AppState {
     /// on `loadData()` and bumped optimistically inside `sendSong` so ordering
     /// updates without a refetch.
     var sendStats: [String: SendStat] = [:]
+    /// Global all-time count of UNIQUE songs this user has sent (one song
+    /// sent to 10 friends counts as 1). Server-maintained on `users/{uid}`
+    /// via a Cloud Function; hydrated on `loadData()` and kept fresh by a
+    /// snapshot listener on the user doc.
+    var uniqueSongsSentCount: Int = 0
+    /// Global consecutive-day send streak (sent at least one song on a local
+    /// calendar day). Server-maintained; `sendDayStreakLastDay` is the
+    /// `yyyy-MM-dd` of the last send that advanced it.
+    var sendDayStreakCount: Int = 0
+    var sendDayStreakLastDay: String? = nil
     var notificationsEnabled: Bool = true
     var songs: [Song] = []
     /// Bucketed search response for the current query, pre-ranked by
@@ -572,6 +588,12 @@ class AppState {
         startOutgoingRequestsListener()
         startReceivedSharesListener()
         startConversationsListener()
+        startFriendsListener()
+        startUserStatsListener()
+        // Load the server-authoritative friend cap up front so the "X of Y
+        // friends" label and the at-cap accept gate are correct on cold
+        // launch (previously nil until the first accept/remove).
+        Task { await refreshFriendCap() }
 
         async let notificationsFetch = firebase.loadNotificationsEnabled()
         async let receivedFetch = firebase.loadReceivedShares()
@@ -672,7 +694,8 @@ class AppState {
             // message still posts to the thread (history + inbox bump), just
             // silently. Text replies (sendMessage elsewhere) still badge.
             await firebase.sendMessage(conversationId: conv.id, text: messageText, song: enrichedSong, mutationId: "share-\(shareId)", incrementUnread: false)
-            await loadConversations()
+            // The `listenConversations` listener pushes the inbox update; no
+            // manual refetch needed.
         }
 
         showSentToast = true
@@ -1000,19 +1023,47 @@ class AppState {
         }
     }
 
+    /// Snapchat-style active streak: the stored streak counts only if the
+    /// last send was today or yesterday (local time); otherwise a day was
+    /// missed and the displayed streak is 0 until the next send.
+    var effectiveSendDayStreak: Int {
+        guard sendDayStreakCount > 0,
+              let last = sendDayStreakLastDay, !last.isEmpty else { return 0 }
+        let today = Self.localDayString(0)
+        let yesterday = Self.localDayString(-1)
+        return (last == today || last == yesterday) ? sendDayStreakCount : 0
+    }
+
+    static func localDayString(_ dayOffset: Int) -> String {
+        let calendar = Calendar.current
+        let date = calendar.date(byAdding: .day, value: dayOffset, to: Date()) ?? Date()
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
     func sendMessage(
         conversationId: String,
         text: String,
         song: Song? = nil,
-        replyTo: ChatMessage? = nil
+        replyTo: ChatMessage? = nil,
+        mutationId: String = UUID().uuidString
     ) async {
+        // No post-send `loadConversations()`: the `listenConversations`
+        // snapshot listener already pushes the inbox update (last message,
+        // ordering, unread) in real time, and the chat thread shows the
+        // message optimistically. A manual refetch here only added latency
+        // and could briefly race the listener.
         await FirebaseService.shared.sendMessage(
             conversationId: conversationId,
             text: text,
             song: song,
-            replyTo: replyTo
+            replyTo: replyTo,
+            mutationId: mutationId
         )
-        await loadConversations()
     }
 
     /// MusicKit catalog search. Apple Music's own ranking model drives
@@ -1200,6 +1251,33 @@ class AppState {
     /// one-shot `loadConversations` poll model, so inbox rows reflect
     /// unread-count flips, new threads, and last-message previews the
     /// instant they happen server-side. Idempotent.
+    /// Attach (or reattach) the snapshot listener that keeps the friends
+    /// list in sync with Firestore in real time. Idempotent.
+    private func startFriendsListener() {
+        friendsListener?.remove()
+        friendsListener = FirebaseService.shared.listenFriends { [weak self] friends in
+            Task { @MainActor in
+                guard let self else { return }
+                self.friends = friends.filter { !self.blockedUserIds.contains($0.id) }
+            }
+        }
+    }
+
+    /// Attach (or reattach) the snapshot listener for the user's global
+    /// send stats so the Friends header pills update in real time as the
+    /// onNewShare Cloud Function increments them. Idempotent.
+    private func startUserStatsListener() {
+        userStatsListener?.remove()
+        userStatsListener = FirebaseService.shared.listenUserStats { [weak self] unique, streak, lastDay in
+            Task { @MainActor in
+                guard let self else { return }
+                self.uniqueSongsSentCount = unique
+                self.sendDayStreakCount = streak
+                self.sendDayStreakLastDay = lastDay
+            }
+        }
+    }
+
     private func startConversationsListener() {
         conversationsListener?.remove()
         conversationsListener = FirebaseService.shared.listenConversations { [weak self] convos in
@@ -1328,6 +1406,16 @@ class AppState {
         switch result {
         case .success:
             incomingRequests.removeAll { $0.id == user.id }
+            // Optimistically reflect the new friend immediately so the list
+            // and count update without waiting for the refetch / server-side
+            // friendCount increment. The friends listener + refreshFriendCap
+            // reconcile the authoritative values right after.
+            if !friends.contains(where: { $0.id == user.id }) {
+                friends.append(user)
+            }
+            if let cap = friendCap {
+                friendCap = FirebaseService.FriendCapStatus(count: cap.count + 1, limit: cap.limit)
+            }
             await refreshFriends()
             await refreshFriendCap()
         case .atCap(let limit):
@@ -1556,6 +1644,10 @@ class AppState {
         receivedAlbumSharesListener = nil
         conversationsListener?.remove()
         conversationsListener = nil
+        friendsListener?.remove()
+        friendsListener = nil
+        userStatsListener?.remove()
+        userStatsListener = nil
         widgetReloadTask?.cancel()
         widgetReloadTask = nil
         currentUser = nil

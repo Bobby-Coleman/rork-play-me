@@ -489,11 +489,35 @@ struct ChatView: View {
         }
         newMessageText = ""
 
+        // iMessage-style optimistic send: the message id we generate here is
+        // reused as the Firestore message doc id (sendMessage writes the doc
+        // at `mutationId`), so when the tail listener echoes it back it merges
+        // by id and replaces this optimistic copy instead of duplicating.
+        let mutationId = UUID().uuidString
+        let optimistic = ChatMessage(
+            id: mutationId,
+            senderId: currentUID,
+            text: text,
+            timestamp: Date(),
+            song: nil,
+            replyToMessageId: replyTo?.id,
+            replyToPreview: replyTo.map {
+                ReplyPreview(
+                    messageId: $0.id,
+                    senderId: $0.senderId,
+                    textSnippet: String($0.text.prefix(80)),
+                    songTitle: $0.song?.title
+                )
+            }
+        )
+        mergeIntoMessages([optimistic])
+
         Task {
             await appState.sendMessage(
                 conversationId: conversation.id,
                 text: text,
-                replyTo: replyTo
+                replyTo: replyTo,
+                mutationId: mutationId
             )
             isSending = false
         }

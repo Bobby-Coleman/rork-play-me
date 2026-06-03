@@ -177,6 +177,14 @@ service cloud.firestore {
         allow update: if false;
       }
 
+      // Index of unique song IDs the user has ever sent, used by the
+      // onNewShare Cloud Function to maintain uniqueSongsSentCount. Owner
+      // may read for diagnostics; all writes are Cloud Function only.
+      match /sentSongIndex/{songId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
+      }
+
       // User-owned mixtapes (Pinterest-style boards of saved songs). Each
       // mixtape doc owns an embedded `songs` subcollection that mirrors
       // the same Song shape used by shares and chat messages, so cover

@@ -369,6 +369,9 @@ class FirebaseService {
             "recipientUsername": share.recipient.username,
             "note": share.note as Any,
             "timestamp": FieldValue.serverTimestamp(),
+            // Sender's local calendar day, so the global send-day streak
+            // Cloud Function can compute streaks in the sender's timezone.
+            "senderLocalDay": Self.localDateString(),
             "song": [
                 "id": share.song.id,
                 "title": share.song.title,
@@ -416,6 +419,10 @@ class FirebaseService {
             "pairKey": pairKey,
             "note": share.note as Any,
             "createdAt": FieldValue.serverTimestamp(),
+            // Captured at queue time so the global send-day streak counts the
+            // day the sender actually picked the song, carried onto the
+            // delivered share when the friendship is later accepted.
+            "senderLocalDay": Self.localDateString(),
             "song": [
                 "id": share.song.id,
                 "title": share.song.title,
@@ -2517,6 +2524,46 @@ class FirebaseService {
                 guard let self, let docs = snapshot?.documents else { return }
                 let convos = docs.compactMap { self.parseConversation(id: $0.documentID, data: $0.data()) }
                 onChange(convos)
+            }
+    }
+
+    /// Live listener for the current user's friends collection. Mirrors
+    /// `listenConversations` so the Friends screen updates the instant
+    /// someone accepts your request (or you accept theirs / a friend is
+    /// removed) without a manual refetch. Returns `nil` when not signed in.
+    func listenFriends(onChange: @escaping @Sendable ([AppUser]) -> Void) -> ListenerRegistration? {
+        guard let uid = firebaseUID else { return nil }
+        return db.collection("users").document(uid).collection("friends")
+            .addSnapshotListener { snapshot, _ in
+                guard let docs = snapshot?.documents else { return }
+                let friends = docs.compactMap { doc -> AppUser? in
+                    let data = doc.data()
+                    guard let username = data["username"] as? String,
+                          let firstName = data["firstName"] as? String else { return nil }
+                    let lastName = data["lastName"] as? String ?? ""
+                    let avatarURL = data["avatarURL"] as? String
+                    return AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: "", avatarURL: avatarURL)
+                }
+                onChange(friends)
+            }
+    }
+
+    /// Live listener for the current user's global send stats stored on the
+    /// user doc: `uniqueSongsSentCount`, `sendDayStreakCount`, and
+    /// `sendDayStreakLastDay` (all maintained server-side by `onNewShare`).
+    /// Drives the Friends-screen header pills in real time. Returns `nil`
+    /// when not signed in.
+    func listenUserStats(
+        onChange: @escaping @Sendable (_ uniqueSongs: Int, _ streakCount: Int, _ streakLastDay: String?) -> Void
+    ) -> ListenerRegistration? {
+        guard let uid = firebaseUID else { return nil }
+        return db.collection("users").document(uid)
+            .addSnapshotListener { snapshot, _ in
+                guard let data = snapshot?.data() else { return }
+                let unique = data["uniqueSongsSentCount"] as? Int ?? 0
+                let streak = data["sendDayStreakCount"] as? Int ?? 0
+                let lastDay = data["sendDayStreakLastDay"] as? String
+                onChange(unique, streak, lastDay)
             }
     }
 

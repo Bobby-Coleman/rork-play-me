@@ -325,6 +325,71 @@ async function consumeRateLimitToken(namespace, key, opts = {}) {
 
 // --------------- Notification Triggers ---------------
 
+// Returns the yyyy-MM-dd one calendar day before the given yyyy-MM-dd string.
+function previousLocalDayString(day) {
+  if (!day || typeof day !== "string") return null;
+  const parts = day.split("-").map(Number);
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return null;
+  const [y, m, d] = parts;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+// Maintains the sender's global stats on a share create:
+//  - uniqueSongsSentCount: incremented only the first time a given song.id is
+//    sent (one song to 10 friends counts as 1) via users/{uid}/sentSongIndex.
+//  - sendDayStreakCount / sendDayStreakLastDay: consecutive local-day streak,
+//    using the sender-provided senderLocalDay (their timezone).
+// Idempotent for the unique count; safe to run once per share create.
+async function applySenderSendStats(senderId, songId, senderLocalDay) {
+  if (!senderId || !songId) return;
+  const db = admin.firestore();
+  const userRef = db.collection("users").doc(senderId);
+  const indexRef = userRef.collection("sentSongIndex").doc(songId);
+  try {
+    await db.runTransaction(async (tx) => {
+      const [userSnap, indexSnap] = await Promise.all([
+        tx.get(userRef),
+        tx.get(indexRef),
+      ]);
+      const updates = {
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (!indexSnap.exists) {
+        tx.set(indexRef, {
+          firstSentAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        updates.uniqueSongsSentCount =
+          admin.firestore.FieldValue.increment(1);
+      }
+      if (senderLocalDay) {
+        const data = userSnap.exists ? userSnap.data() : {};
+        const lastDay = data.sendDayStreakLastDay;
+        const count =
+          typeof data.sendDayStreakCount === "number"
+            ? data.sendDayStreakCount
+            : 0;
+        if (lastDay !== senderLocalDay) {
+          let newCount;
+          if (!lastDay) newCount = 1;
+          else if (lastDay === previousLocalDayString(senderLocalDay))
+            newCount = count + 1;
+          else newCount = 1;
+          updates.sendDayStreakCount = newCount;
+          updates.sendDayStreakLastDay = senderLocalDay;
+        }
+      }
+      tx.set(userRef, updates, { merge: true });
+    });
+  } catch (err) {
+    logError("apply_sender_send_stats_failed", err, { senderId, songId });
+  }
+}
+
 exports.onNewShare = onDocumentCreated("shares/{shareId}", async (event) => {
   const data = event.data.data();
   if (!data) return;
@@ -333,6 +398,12 @@ exports.onNewShare = onDocumentCreated("shares/{shareId}", async (event) => {
   if (!recipientId) return;
 
   const senderId = data.senderId || data.sender?.id;
+
+  // Update the sender's global stats first, before any notification gating
+  // so counters advance even when the recipient has pushes disabled or has
+  // blocked the sender.
+  await applySenderSendStats(senderId, data.song?.id, data.senderLocalDay);
+
   if (senderId && (await isBlockedBy(recipientId, senderId))) {
     console.log(
       `onNewShare: skipping push \u2014 ${senderId} is blocked by ${recipientId}`
@@ -1092,6 +1163,9 @@ async function deliverPendingFriendSharesForPair(uidA, uidB) {
       recipientUsername: recipient.username || data.recipientUsername || "",
       note,
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      // Carry the sender's local day from the queued pending share so the
+      // onNewShare counter logic credits the global send-day streak.
+      senderLocalDay: data.senderLocalDay || null,
       song,
       sender: {
         id: senderId,

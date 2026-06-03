@@ -50,11 +50,14 @@ struct ChatBubbleRow: View {
                                 reactions: message.reactions,
                                 currentUserUID: currentUID
                             )
-                            .offset(x: isMe ? -10 : 10, y: 10)
+                            // Tuck the cluster onto the bubble's bottom corner
+                            // (overlapping inward, iMessage-style) instead of
+                            // floating off to the side.
+                            .offset(x: isMe ? 12 : -12, y: 6)
                             .zIndex(1)
                         }
                     }
-                    .padding(.bottom, message.reactions.isEmpty ? 0 : 14)
+                    .padding(.bottom, message.reactions.isEmpty ? 0 : 12)
                     .background(
                         GeometryReader { proxy in
                             // Publish the bubble's frame in window

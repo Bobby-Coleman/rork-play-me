@@ -12,8 +12,8 @@ struct ReactionBadgeCluster: View {
     /// `[uid: emoji]` map straight from `ChatMessage.reactions`.
     let reactions: [String: String]
 
-    /// Highlights the current user's reaction with a subtle ring so
-    /// they can quickly see what they've already picked.
+    /// When the current user is among the reactors, the pill gets a subtle
+    /// accent tint so they can see they've reacted.
     let currentUserUID: String
 
     /// Order-stable, deduped list of distinct emojis. Sorted by first
@@ -45,13 +45,6 @@ struct ReactionBadgeCluster: View {
                 ForEach(distinctEmojis, id: \.self) { emoji in
                     Text(emoji)
                         .font(.system(size: 13))
-                        .overlay {
-                            if emoji == currentUserEmoji {
-                                Circle()
-                                    .stroke(Color(red: 0.76, green: 0.38, blue: 0.35), lineWidth: 1.5)
-                                    .padding(-2)
-                            }
-                        }
                 }
                 if totalCount > 1 {
                     Text("\(totalCount)")
@@ -66,8 +59,16 @@ struct ReactionBadgeCluster: View {
                 Capsule()
                     .fill(Color.black.opacity(0.85))
                     .overlay(
+                        // Subtle accent tint on the pill when one of the
+                        // reactions is your own, instead of a ring around the
+                        // emoji glyph.
                         Capsule()
-                            .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+                            .stroke(
+                                currentUserEmoji != nil
+                                    ? AppAccentGradient.lilac.opacity(0.7)
+                                    : Color.white.opacity(0.1),
+                                lineWidth: currentUserEmoji != nil ? 1 : 0.5
+                            )
                     )
             )
             .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
