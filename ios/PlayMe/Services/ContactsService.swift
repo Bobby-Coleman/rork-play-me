@@ -67,6 +67,13 @@ final class ContactsService {
         }
         return results.suggestedInviteOrder()
     }
+
+    func fetchMeContactPhotoData() -> Data? {
+        // iOS does not expose the user's "Me" contact to third-party apps.
+        // The onboarding profile-photo screen falls back to matching the
+        // verified phone number against the already fetched contacts list.
+        nil
+    }
 }
 
 extension Array where Element == SimpleContact {

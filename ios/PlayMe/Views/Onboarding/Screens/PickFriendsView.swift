@@ -767,15 +767,13 @@ private struct UserAvatar: View {
     @Environment(\.riffTheme) private var theme
 
     var body: some View {
-        Text(user.initials)
-            .font(.system(size: side > 40 ? 13 : 12, weight: .bold))
-            .foregroundStyle(inverted ? theme.bg : theme.fg)
-            .frame(width: side, height: side)
-            .background(
-                Circle()
-                    .fill(inverted ? theme.fg : Color.white.opacity(0.08))
-                    .overlay(Circle().stroke(Color.white.opacity(0.10), lineWidth: 1))
-            )
+        AppUserAvatar(
+            user: user,
+            size: side,
+            foreground: inverted ? theme.bg : theme.fg,
+            background: inverted ? theme.fg : Color.white.opacity(0.08),
+            border: Color.white.opacity(0.10)
+        )
     }
 }
 
@@ -813,8 +811,16 @@ private struct SlotAvatar: View {
 
     var body: some View {
         Group {
-            if let data = item.thumbnailData,
-               let image = UIImage(data: data) {
+            if case .user(let user, _) = item {
+                AppUserAvatar(
+                    user: user,
+                    size: side,
+                    foreground: theme.bg,
+                    background: theme.fg,
+                    border: Color.white.opacity(0.12)
+                )
+            } else if let data = item.thumbnailData,
+                      let image = UIImage(data: data) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()

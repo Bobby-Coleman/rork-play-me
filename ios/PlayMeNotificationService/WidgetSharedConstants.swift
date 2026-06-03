@@ -10,11 +10,13 @@ import Foundation
 enum WidgetSharedConstants {
     static let appGroup = "group.app.rork.playme.shared"
     static let albumArtFilename = "widgetAlbumArt.jpg"
+    static let senderAvatarFilename = "widgetSenderAvatar.jpg"
 
     enum Key {
         static let songTitle        = "widgetSongTitle"
         static let songArtist       = "widgetSongArtist"
         static let senderFirstName  = "widgetSenderFirstName"
+        static let senderAvatarURL  = "widgetSenderAvatarURL"
         static let note             = "widgetNote"
         static let shareId          = "widgetShareId"
     }
@@ -23,6 +25,7 @@ enum WidgetSharedConstants {
         Key.songTitle,
         Key.songArtist,
         Key.senderFirstName,
+        Key.senderAvatarURL,
         Key.note,
         Key.shareId,
     ]
@@ -32,5 +35,12 @@ enum WidgetSharedConstants {
             forSecurityApplicationGroupIdentifier: appGroup
         ) else { return nil }
         return containerURL.appendingPathComponent(albumArtFilename)
+    }
+
+    static func senderAvatarFileURL() -> URL? {
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroup
+        ) else { return nil }
+        return containerURL.appendingPathComponent(senderAvatarFilename)
     }
 }

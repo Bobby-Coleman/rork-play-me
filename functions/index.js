@@ -140,6 +140,7 @@ function publicUserPayload(uid, data = {}) {
     username: data.username || "",
     firstName: data.firstName || "",
     lastName: data.lastName || "",
+    avatarURL: data.avatarURL || "",
   };
 }
 
@@ -359,6 +360,7 @@ exports.onNewShare = onDocumentCreated("shares/{shareId}", async (event) => {
       widgetSongTitle: songTitle,
       widgetSongArtist: data.song?.artist || "",
       widgetSenderFirstName: senderName,
+      widgetSenderAvatarURL: data.sender?.avatarURL || "",
       widgetNote: data.note || "",
       widgetAlbumArtURL: data.song?.albumArtURL || "",
     },
@@ -836,6 +838,7 @@ async function cascadeDeleteUser(uid) {
         "sender.firstName": DELETED_USER_NAME,
         "sender.lastName": "",
         "sender.username": DELETED_USERNAME_LABEL,
+        "sender.avatarURL": admin.firestore.FieldValue.delete(),
       })
     );
     await commitBatched(db, sentOps);
@@ -849,6 +852,7 @@ async function cascadeDeleteUser(uid) {
         "recipient.firstName": DELETED_USER_NAME,
         "recipient.lastName": "",
         "recipient.username": DELETED_USERNAME_LABEL,
+        "recipient.avatarURL": admin.firestore.FieldValue.delete(),
         recipientUsername: DELETED_USERNAME_LABEL,
       })
     );
@@ -877,7 +881,14 @@ async function cascadeDeleteUser(uid) {
     );
   }
 
-  // 9) Delete private profile metadata and then the public user profile doc.
+  // 9) Delete profile photo storage objects.
+  try {
+    await admin.storage().bucket().deleteFiles({ prefix: `profile-photos/${uid}/` });
+  } catch (err) {
+    console.error("cascadeDeleteUser: profile photo delete failed:", err.message);
+  }
+
+  // 10) Delete private profile metadata and then the public user profile doc.
   try {
     await userRef.collection("private").doc("profile").delete().catch(() => {});
     await userRef.delete();
@@ -1032,12 +1043,14 @@ async function deliverPendingFriendSharesForPair(uidA, uidB) {
         firstName: sender.firstName || "",
         lastName: sender.lastName || "",
         username: sender.username || "",
+        avatarURL: sender.avatarURL || "",
       },
       recipient: {
         id: recipientId,
         firstName: recipient.firstName || "",
         lastName: recipient.lastName || "",
         username: recipient.username || "",
+        avatarURL: recipient.avatarURL || "",
       },
       queuedFromPendingFriendRequest: true,
       pendingFriendShareId: doc.id,
@@ -1092,6 +1105,7 @@ async function deliverPendingFriendSharesForPair(uidA, uidB) {
               widgetSongTitle: song.title || "",
               widgetSongArtist: song.artist || "",
               widgetSenderFirstName: sender.firstName || "",
+              widgetSenderAvatarURL: sender.avatarURL || "",
               widgetNote: note || "",
               widgetAlbumArtURL: song.albumArtURL || "",
             },
@@ -1154,6 +1168,7 @@ async function claimPendingSharesForUser(uid, phoneE164) {
   const myUsername = me.username || "";
   const myFirstName = me.firstName || "";
   const myLastName = me.lastName || "";
+  const myAvatarURL = me.avatarURL || "";
 
   let claimed = 0;
   const pushPromises = [];
@@ -1177,6 +1192,7 @@ async function claimPendingSharesForUser(uid, phoneE164) {
     const senderFirstName = data.senderFirstName || "";
     const senderLastName = data.senderLastName || "";
     const senderUsername = data.senderUsername || "";
+    const senderAvatarURL = data.senderAvatarURL || "";
     const note = typeof data.note === "string" ? data.note : null;
 
     const song = {
@@ -1199,6 +1215,7 @@ async function claimPendingSharesForUser(uid, phoneE164) {
         username: senderUsername,
         firstName: senderFirstName,
         lastName: senderLastName,
+        avatarURL: senderAvatarURL,
         createdAt: ts,
       },
       { merge: true }
@@ -1209,6 +1226,7 @@ async function claimPendingSharesForUser(uid, phoneE164) {
         username: myUsername,
         firstName: myFirstName,
         lastName: myLastName,
+        avatarURL: myAvatarURL,
         createdAt: ts,
       },
       { merge: true }
@@ -1228,12 +1246,14 @@ async function claimPendingSharesForUser(uid, phoneE164) {
           firstName: senderFirstName,
           lastName: senderLastName,
           username: senderUsername,
+          avatarURL: senderAvatarURL,
         },
         recipient: {
           id: uid,
           firstName: myFirstName,
           lastName: myLastName,
           username: myUsername,
+          avatarURL: myAvatarURL,
         },
         claimedFromPhoneInvite: true,
       },

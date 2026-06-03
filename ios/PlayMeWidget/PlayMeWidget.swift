@@ -9,6 +9,7 @@ nonisolated struct SongEntry: TimelineEntry {
     let songArtist: String
     let albumImage: UIImage?
     let senderFirstName: String
+    let senderAvatarImage: UIImage?
     let note: String?
     let shareId: String?
     /// False before the first real song is received. Drives the
@@ -24,6 +25,7 @@ nonisolated struct SongProvider: TimelineProvider {
             songArtist: "Kita Alexander",
             albumImage: nil,
             senderFirstName: "Molly",
+            senderAvatarImage: nil,
             note: "this song reminds me of you",
             shareId: nil,
             hasSong: true
@@ -54,9 +56,12 @@ nonisolated struct SongProvider: TimelineProvider {
         let shareId = defaults?.string(forKey: "widgetShareId")
 
         var albumImage: UIImage? = nil
+        var senderAvatarImage: UIImage? = nil
         if let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: widgetAppGroupId) {
             let imageFile = containerURL.appendingPathComponent("widgetAlbumArt.jpg")
             albumImage = UIImage(contentsOfFile: imageFile.path)
+            let avatarFile = containerURL.appendingPathComponent("widgetSenderAvatar.jpg")
+            senderAvatarImage = UIImage(contentsOfFile: avatarFile.path)
         }
 
         return SongEntry(
@@ -65,6 +70,7 @@ nonisolated struct SongProvider: TimelineProvider {
             songArtist: artist,
             albumImage: albumImage,
             senderFirstName: firstName,
+            senderAvatarImage: senderAvatarImage,
             note: note,
             shareId: shareId,
             hasSong: hasSong
@@ -169,16 +175,24 @@ struct PlayMeWidgetView: View {
     }
 
     private var senderBubble: some View {
-        Text(entry.senderFirstName.prefix(1).uppercased())
-            .font(.system(size: bubbleSize * 0.5, weight: .bold, design: .rounded))
-            .foregroundStyle(.white)
-            .frame(width: bubbleSize, height: bubbleSize)
-            .background(Color.black.opacity(0.7))
-            .clipShape(Circle())
-            .overlay {
-                Circle()
-                    .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
+        ZStack {
+            Circle().fill(Color.black.opacity(0.7))
+            if let avatar = entry.senderAvatarImage {
+                Image(uiImage: avatar)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Text(entry.senderFirstName.prefix(1).uppercased())
+                    .font(.system(size: bubbleSize * 0.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
             }
+        }
+        .frame(width: bubbleSize, height: bubbleSize)
+        .clipShape(Circle())
+        .overlay {
+            Circle()
+                .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
+        }
     }
 }
 

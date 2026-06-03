@@ -308,12 +308,7 @@ struct OnboardingInviteView: View {
         let requested = appState.outgoingRequestUIDs.contains(user.id)
 
         return HStack(spacing: 14) {
-            Text(user.initials)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 38, height: 38)
-                .background(Color.white.opacity(0.12))
-                .clipShape(Circle())
+            AppUserAvatar(user: user, size: 38, background: Color.white.opacity(0.12))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(user.firstName)

@@ -22,10 +22,9 @@ struct TasteView: View {
     private let showArtistPicker = false
 
     private static let genreChips: [String] = [
-        "Indie", "Hip-Hop", "Jazz", "Electronic", "Ambient", "Punk", "Folk",
-        "R&B", "Experimental", "Soul", "Shoegaze", "House", "Country", "Dub",
-        "Techno", "Pop", "Rock", "Classical", "Reggae", "Metal", "Disco",
-        "Funk", "Bossa Nova", "Trip-Hop"
+        "Pop", "Hip-Hop", "R&B", "Rock", "Alternative", "Indie", "Electronic",
+        "Dance", "Country", "Latin", "Jazz", "Classical", "Metal", "Folk",
+        "Punk", "Soul", "Funk", "Reggae", "Blues", "Gospel", "K-Pop", "Afrobeats"
     ]
 
     private static let featuredArtists: [String] = [

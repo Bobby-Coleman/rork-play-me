@@ -252,6 +252,28 @@ class FirebaseService {
         }
     }
 
+    func updateCurrentUserAvatarURL(_ avatarURL: String?) async -> Bool {
+        guard let uid = firebaseUID else { return false }
+        let ref = db.collection("users").document(uid)
+        let cleanURL = avatarURL?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var data: [String: Any] = [
+            "updatedAt": FieldValue.serverTimestamp(),
+        ]
+        if let cleanURL, !cleanURL.isEmpty {
+            data["avatarURL"] = cleanURL
+        } else {
+            data["avatarURL"] = FieldValue.delete()
+        }
+
+        do {
+            try await ref.updateData(data)
+            return true
+        } catch {
+            print("FirebaseService: avatar update failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     func isUsernameTaken(_ username: String) async -> Bool? {
         let lowered = username.lowercased()
         do {
@@ -267,7 +289,7 @@ class FirebaseService {
         }
     }
 
-    func loadUserProfile() async -> (username: String, firstName: String, lastName: String, phone: String)? {
+    func loadUserProfile() async -> (username: String, firstName: String, lastName: String, phone: String, avatarURL: String?)? {
         guard let uid = firebaseUID else { return nil }
 
         do {
@@ -276,25 +298,27 @@ class FirebaseService {
             let username = data["username"] as? String ?? ""
             let firstName = data["firstName"] as? String ?? username
             let lastName = data["lastName"] as? String ?? ""
+            let avatarURL = data["avatarURL"] as? String
             let privateDoc = try? await db.collection("users").document(uid)
                 .collection("private").document("profile")
                 .getDocument()
             let phone = privateDoc?.data()?["phone"] as? String ?? data["phone"] as? String ?? ""
-            return (username: username, firstName: firstName, lastName: lastName, phone: phone)
+            return (username: username, firstName: firstName, lastName: lastName, phone: phone, avatarURL: avatarURL)
         } catch {
             print("FirebaseService: profile load failed: \(error.localizedDescription)")
             return nil
         }
     }
 
-    func fetchUserProfile(uid: String) async -> (username: String, firstName: String, lastName: String)? {
+    func fetchUserProfile(uid: String) async -> (username: String, firstName: String, lastName: String, avatarURL: String?)? {
         do {
             let doc = try await db.collection("users").document(uid).getDocument()
             guard let data = doc.data() else { return nil }
             let username = data["username"] as? String ?? ""
             let firstName = data["firstName"] as? String ?? username
             let lastName = data["lastName"] as? String ?? ""
-            return (username: username, firstName: firstName, lastName: lastName)
+            let avatarURL = data["avatarURL"] as? String
+            return (username: username, firstName: firstName, lastName: lastName, avatarURL: avatarURL)
         } catch {
             print("FirebaseService: fetch user profile failed: \(error.localizedDescription)")
             return nil
@@ -357,18 +381,8 @@ class FirebaseService {
                 "artistId": share.song.artistId as Any,
                 "albumId": share.song.albumId as Any,
             ],
-            "sender": [
-                "id": uid,
-                "firstName": share.sender.firstName,
-                "lastName": share.sender.lastName,
-                "username": share.sender.username,
-            ],
-            "recipient": [
-                "id": share.recipient.id,
-                "firstName": share.recipient.firstName,
-                "lastName": share.recipient.lastName,
-                "username": share.recipient.username,
-            ],
+            "sender": Self.embedUser(share.sender, id: uid),
+            "recipient": Self.embedUser(share.recipient),
         ]
 
         do {
@@ -414,18 +428,8 @@ class FirebaseService {
                 "artistId": share.song.artistId as Any,
                 "albumId": share.song.albumId as Any,
             ],
-            "sender": [
-                "id": uid,
-                "firstName": share.sender.firstName,
-                "lastName": share.sender.lastName,
-                "username": share.sender.username,
-            ],
-            "recipient": [
-                "id": share.recipient.id,
-                "firstName": share.recipient.firstName,
-                "lastName": share.recipient.lastName,
-                "username": share.recipient.username,
-            ],
+            "sender": Self.embedUser(share.sender, id: uid),
+            "recipient": Self.embedUser(share.recipient),
         ]
 
         do {
@@ -682,18 +686,8 @@ class FirebaseService {
                 "updatedAt": Timestamp(date: share.mixtape.updatedAt),
                 "songs": share.mixtape.songs.map(Self.embedSong),
             ],
-            "sender": [
-                "id": uid,
-                "firstName": share.sender.firstName,
-                "lastName": share.sender.lastName,
-                "username": share.sender.username,
-            ],
-            "recipient": [
-                "id": share.recipient.id,
-                "firstName": share.recipient.firstName,
-                "lastName": share.recipient.lastName,
-                "username": share.recipient.username,
-            ],
+            "sender": Self.embedUser(share.sender, id: uid),
+            "recipient": Self.embedUser(share.recipient),
         ]
         do {
             let shareId = mixtapeShareDocumentId(senderId: uid, recipientId: share.recipient.id, mixtapeId: share.mixtape.id)
@@ -787,18 +781,8 @@ class FirebaseService {
                 "artistName": share.album.artistName as Any,
             ],
             "songs": share.songs.map(Self.embedSong),
-            "sender": [
-                "id": uid,
-                "firstName": share.sender.firstName,
-                "lastName": share.sender.lastName,
-                "username": share.sender.username,
-            ],
-            "recipient": [
-                "id": share.recipient.id,
-                "firstName": share.recipient.firstName,
-                "lastName": share.recipient.lastName,
-                "username": share.recipient.username,
-            ],
+            "sender": Self.embedUser(share.sender, id: uid),
+            "recipient": Self.embedUser(share.recipient),
         ]
         do {
             let shareId = albumShareDocumentId(senderId: uid, recipientId: share.recipient.id, albumId: share.album.id)
@@ -889,6 +873,30 @@ class FirebaseService {
         ]
     }
 
+    private static func embedUser(_ user: AppUser, id: String? = nil) -> [String: Any] {
+        var payload: [String: Any] = [
+            "id": id ?? user.id,
+            "firstName": user.firstName,
+            "lastName": user.lastName,
+            "username": user.username,
+        ]
+        if let avatarURL = user.avatarURL?.trimmingCharacters(in: .whitespacesAndNewlines), !avatarURL.isEmpty {
+            payload["avatarURL"] = avatarURL
+        }
+        return payload
+    }
+
+    private static func parseEmbeddedUser(_ data: [String: Any]) -> AppUser {
+        AppUser(
+            id: data["id"] as? String ?? "",
+            firstName: data["firstName"] as? String ?? "",
+            lastName: data["lastName"] as? String ?? "",
+            username: data["username"] as? String ?? "",
+            phone: "",
+            avatarURL: data["avatarURL"] as? String
+        )
+    }
+
     private static func parseMixtapeShare(from doc: QueryDocumentSnapshot) -> MixtapeShare? {
         let data = doc.data()
         guard let mixtapeData = data["mixtape"] as? [String: Any],
@@ -896,20 +904,8 @@ class FirebaseService {
               let recipientData = data["recipient"] as? [String: Any] else { return nil }
 
         let mixtape = parseMixtapeFromShare(mixtapeData)
-        let sender = AppUser(
-            id: senderData["id"] as? String ?? "",
-            firstName: senderData["firstName"] as? String ?? "",
-            lastName: senderData["lastName"] as? String ?? "",
-            username: senderData["username"] as? String ?? "",
-            phone: ""
-        )
-        let recipient = AppUser(
-            id: recipientData["id"] as? String ?? "",
-            firstName: recipientData["firstName"] as? String ?? "",
-            lastName: recipientData["lastName"] as? String ?? "",
-            username: recipientData["username"] as? String ?? "",
-            phone: ""
-        )
+        let sender = parseEmbeddedUser(senderData)
+        let recipient = parseEmbeddedUser(recipientData)
         let timestamp = (data["timestamp"] as? Timestamp)?.dateValue() ?? Date()
 
         return MixtapeShare(
@@ -964,20 +960,8 @@ class FirebaseService {
         let rawSongs = data["songs"] as? [[String: Any]] ?? []
         let songs = rawSongs.compactMap { parseEmbeddedSong(from: $0) }
 
-        let sender = AppUser(
-            id: senderData["id"] as? String ?? "",
-            firstName: senderData["firstName"] as? String ?? "",
-            lastName: senderData["lastName"] as? String ?? "",
-            username: senderData["username"] as? String ?? "",
-            phone: ""
-        )
-        let recipient = AppUser(
-            id: recipientData["id"] as? String ?? "",
-            firstName: recipientData["firstName"] as? String ?? "",
-            lastName: recipientData["lastName"] as? String ?? "",
-            username: recipientData["username"] as? String ?? "",
-            phone: ""
-        )
+        let sender = parseEmbeddedUser(senderData)
+        let recipient = parseEmbeddedUser(recipientData)
         let timestamp = (data["timestamp"] as? Timestamp)?.dateValue() ?? Date()
 
         return AlbumShare(
@@ -1040,22 +1024,30 @@ class FirebaseService {
         }
     }
 
-    func addFriend(friendUID: String, friendUsername: String, friendFirstName: String, friendLastName: String = "") async {
+    func addFriend(friendUID: String, friendUsername: String, friendFirstName: String, friendLastName: String = "", friendAvatarURL: String? = nil) async {
         guard let uid = firebaseUID else { return }
         do {
             let batch = db.batch()
-            batch.setData([
+            var friendData: [String: Any] = [
                 "username": friendUsername,
                 "firstName": friendFirstName,
                 "lastName": friendLastName,
                 "addedAt": FieldValue.serverTimestamp(),
-            ], forDocument: db.collection("users").document(uid).collection("friends").document(friendUID))
-            batch.setData([
+            ]
+            if let friendAvatarURL, !friendAvatarURL.isEmpty {
+                friendData["avatarURL"] = friendAvatarURL
+            }
+            var currentUserData: [String: Any] = [
                 "username": UserDefaults.standard.string(forKey: "currentUserUsername") ?? "",
                 "firstName": UserDefaults.standard.string(forKey: "currentUserFirstName") ?? "",
                 "lastName": UserDefaults.standard.string(forKey: "currentUserLastName") ?? "",
                 "addedAt": FieldValue.serverTimestamp(),
-            ], forDocument: db.collection("users").document(friendUID).collection("friends").document(uid))
+            ]
+            if let avatarURL = UserDefaults.standard.string(forKey: "currentUserAvatarURL"), !avatarURL.isEmpty {
+                currentUserData["avatarURL"] = avatarURL
+            }
+            batch.setData(friendData, forDocument: db.collection("users").document(uid).collection("friends").document(friendUID))
+            batch.setData(currentUserData, forDocument: db.collection("users").document(friendUID).collection("friends").document(uid))
             try await batch.commit()
         } catch {
             print("FirebaseService: add friend failed: \(error.localizedDescription)")
@@ -1071,7 +1063,8 @@ class FirebaseService {
                 guard let username = data["username"] as? String,
                       let firstName = data["firstName"] as? String else { return nil }
                 let lastName = data["lastName"] as? String ?? ""
-                return AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: "")
+                let avatarURL = data["avatarURL"] as? String
+                return AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: "", avatarURL: avatarURL)
             }
         } catch {
             print("FirebaseService: load friends failed: \(error.localizedDescription)")
@@ -1089,9 +1082,11 @@ class FirebaseService {
         username: String,
         firstName: String,
         lastName: String = "",
+        avatarURL: String? = nil,
         targetUsername: String,
         targetFirstName: String,
-        targetLastName: String = ""
+        targetLastName: String = "",
+        targetAvatarURL: String? = nil
     ) async -> Bool {
         guard let uid = firebaseUID, uid != toUID else { return false }
         let myUsername = username.isEmpty ? (UserDefaults.standard.string(forKey: "currentUserUsername") ?? "") : username
@@ -1110,19 +1105,28 @@ class FirebaseService {
             let outgoingRef = db.collection("users").document(uid)
                 .collection("outgoingFriendRequests").document(toUID)
 
-            batch.setData([
+            var incomingData: [String: Any] = [
                 "username": myUsername,
                 "firstName": myFirst,
                 "lastName": myLast,
                 "createdAt": FieldValue.serverTimestamp(),
-            ], forDocument: incomingRef)
+            ]
+            if let avatarURL, !avatarURL.isEmpty {
+                incomingData["avatarURL"] = avatarURL
+            }
 
-            batch.setData([
+            var outgoingData: [String: Any] = [
                 "username": targetUsername,
                 "firstName": targetFirstName,
                 "lastName": targetLastName,
                 "createdAt": FieldValue.serverTimestamp(),
-            ], forDocument: outgoingRef)
+            ]
+            if let targetAvatarURL, !targetAvatarURL.isEmpty {
+                outgoingData["avatarURL"] = targetAvatarURL
+            }
+
+            batch.setData(incomingData, forDocument: incomingRef)
+            batch.setData(outgoingData, forDocument: outgoingRef)
 
             try await batch.commit()
             return true
@@ -1172,20 +1176,28 @@ class FirebaseService {
         }
         do {
             let batch = db.batch()
-            batch.setData([
+            var friendData: [String: Any] = [
                 "username": user.username,
                 "firstName": user.firstName,
                 "lastName": user.lastName,
                 "acceptedBy": uid,
                 "addedAt": FieldValue.serverTimestamp(),
-            ], forDocument: db.collection("users").document(uid).collection("friends").document(user.id))
-            batch.setData([
+            ]
+            if let avatarURL = user.avatarURL, !avatarURL.isEmpty {
+                friendData["avatarURL"] = avatarURL
+            }
+            var currentUserData: [String: Any] = [
                 "username": UserDefaults.standard.string(forKey: "currentUserUsername") ?? "",
                 "firstName": UserDefaults.standard.string(forKey: "currentUserFirstName") ?? "",
                 "lastName": UserDefaults.standard.string(forKey: "currentUserLastName") ?? "",
                 "acceptedBy": uid,
                 "addedAt": FieldValue.serverTimestamp(),
-            ], forDocument: db.collection("users").document(user.id).collection("friends").document(uid))
+            ]
+            if let avatarURL = UserDefaults.standard.string(forKey: "currentUserAvatarURL"), !avatarURL.isEmpty {
+                currentUserData["avatarURL"] = avatarURL
+            }
+            batch.setData(friendData, forDocument: db.collection("users").document(uid).collection("friends").document(user.id))
+            batch.setData(currentUserData, forDocument: db.collection("users").document(user.id).collection("friends").document(uid))
             batch.deleteDocument(
                 db.collection("users").document(uid)
                     .collection("friendRequests").document(user.id)
@@ -1208,20 +1220,28 @@ class FirebaseService {
         guard let uid = firebaseUID else { return }
         do {
             let batch = db.batch()
-            batch.setData([
+            var friendData: [String: Any] = [
                 "username": user.username,
                 "firstName": user.firstName,
                 "lastName": user.lastName,
                 "acceptedBy": uid,
                 "addedAt": FieldValue.serverTimestamp(),
-            ], forDocument: db.collection("users").document(uid).collection("friends").document(user.id))
-            batch.setData([
+            ]
+            if let avatarURL = user.avatarURL, !avatarURL.isEmpty {
+                friendData["avatarURL"] = avatarURL
+            }
+            var currentUserData: [String: Any] = [
                 "username": UserDefaults.standard.string(forKey: "currentUserUsername") ?? "",
                 "firstName": UserDefaults.standard.string(forKey: "currentUserFirstName") ?? "",
                 "lastName": UserDefaults.standard.string(forKey: "currentUserLastName") ?? "",
                 "acceptedBy": uid,
                 "addedAt": FieldValue.serverTimestamp(),
-            ], forDocument: db.collection("users").document(user.id).collection("friends").document(uid))
+            ]
+            if let avatarURL = UserDefaults.standard.string(forKey: "currentUserAvatarURL"), !avatarURL.isEmpty {
+                currentUserData["avatarURL"] = avatarURL
+            }
+            batch.setData(friendData, forDocument: db.collection("users").document(uid).collection("friends").document(user.id))
+            batch.setData(currentUserData, forDocument: db.collection("users").document(user.id).collection("friends").document(uid))
             batch.deleteDocument(
                 db.collection("users").document(uid)
                     .collection("friendRequests").document(user.id)
@@ -1409,7 +1429,8 @@ class FirebaseService {
         let username = data["username"] as? String ?? ""
         let firstName = data["firstName"] as? String ?? username
         let lastName = data["lastName"] as? String ?? ""
-        return AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: "")
+        let avatarURL = data["avatarURL"] as? String
+        return AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: "", avatarURL: avatarURL)
     }
 
     func searchUsers(query: String) async -> [AppUser] {
@@ -1437,7 +1458,8 @@ class FirebaseService {
                 let username = data["username"] as? String ?? ""
                 let firstName = data["firstName"] as? String ?? username
                 let lastName = data["lastName"] as? String ?? ""
-                results.append(AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: ""))
+                let avatarURL = data["avatarURL"] as? String
+                results.append(AppUser(id: doc.documentID, firstName: firstName, lastName: lastName, username: username, phone: "", avatarURL: avatarURL))
                 seen.insert(doc.documentID)
             }
         } catch {
@@ -1455,7 +1477,8 @@ class FirebaseService {
                         firstName: profile.firstName,
                         lastName: profile.lastName,
                         username: profile.username.isEmpty ? q : profile.username,
-                        phone: ""
+                        phone: "",
+                        avatarURL: profile.avatarURL
                     ))
                     seen.insert(uid)
                 }
@@ -1535,7 +1558,8 @@ class FirebaseService {
                                 firstName: profile.firstName,
                                 lastName: profile.lastName,
                                 username: profile.username,
-                                phone: ""
+                                phone: "",
+                                avatarURL: profile.avatarURL
                             ))
                         }
                         return (index, AppUser(
@@ -1793,7 +1817,8 @@ class FirebaseService {
             return nil
         }
         let lastName = dict["lastName"] as? String ?? ""
-        return AppUser(id: id, firstName: firstName, lastName: lastName, username: username, phone: "")
+        let avatarURL = dict["avatarURL"] as? String
+        return AppUser(id: id, firstName: firstName, lastName: lastName, username: username, phone: "", avatarURL: avatarURL)
     }
 
     /// Matches the user's local contacts against private profile phone
@@ -2149,6 +2174,7 @@ class FirebaseService {
         let senderFirst = UserDefaults.standard.string(forKey: "currentUserFirstName") ?? ""
         let senderLast = UserDefaults.standard.string(forKey: "currentUserLastName") ?? ""
         let senderUsername = UserDefaults.standard.string(forKey: "currentUserUsername") ?? ""
+        let senderAvatarURL = UserDefaults.standard.string(forKey: "currentUserAvatarURL") ?? ""
 
         let collection = db.collection("pendingShares")
             .document(phoneE164)
@@ -2157,7 +2183,7 @@ class FirebaseService {
         // function mirrors this ID onto shares/{id} for end-to-end idempotency.
         let ref = collection.document()
 
-        let data: [String: Any] = [
+        var data: [String: Any] = [
             "senderId": uid,
             "senderFirstName": senderFirst,
             "senderLastName": senderLast,
@@ -2179,6 +2205,9 @@ class FirebaseService {
                 "albumId": song.albumId as Any,
             ],
         ]
+        if !senderAvatarURL.isEmpty {
+            data["senderAvatarURL"] = senderAvatarURL
+        }
 
         do {
             try await ref.setData(data)
@@ -2781,21 +2810,8 @@ class FirebaseService {
             albumId: songData["albumId"] as? String
         )
 
-        let sender = AppUser(
-            id: senderData["id"] as? String ?? "",
-            firstName: senderData["firstName"] as? String ?? "",
-            lastName: senderData["lastName"] as? String ?? "",
-            username: senderData["username"] as? String ?? "",
-            phone: ""
-        )
-
-        let recipient = AppUser(
-            id: recipientData["id"] as? String ?? "",
-            firstName: recipientData["firstName"] as? String ?? "",
-            lastName: recipientData["lastName"] as? String ?? "",
-            username: recipientData["username"] as? String ?? "",
-            phone: ""
-        )
+        let sender = Self.parseEmbeddedUser(senderData)
+        let recipient = Self.parseEmbeddedUser(recipientData)
 
         let timestamp: Date
         if let ts = data["timestamp"] as? Timestamp {

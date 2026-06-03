@@ -620,9 +620,7 @@ struct FriendSelectorView: View {
             }
         } label: {
             chipLayout(label: friend.firstName, status: status, selected: isSelected) {
-                Text(friend.initials)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white)
+                AppUserAvatar(user: friend, size: 56, background: Color.white.opacity(0.14), border: .clear)
             }
         }
         .buttonStyle(.plain)
@@ -639,9 +637,7 @@ struct FriendSelectorView: View {
                 }
             } label: {
                 chipLayout(label: friend.firstName, status: isSelected ? "Queues on accept" : "Pending", selected: isSelected) {
-                    Text(friend.initials)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
+                    AppUserAvatar(user: friend, size: 56, background: Color.white.opacity(0.14), border: .clear)
                 }
             }
             .buttonStyle(.plain)

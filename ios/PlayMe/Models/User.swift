@@ -6,13 +6,15 @@ nonisolated struct AppUser: Identifiable, Hashable, Sendable {
     let lastName: String
     let username: String
     let phone: String
+    let avatarURL: String?
 
-    init(id: String, firstName: String, lastName: String = "", username: String, phone: String) {
+    init(id: String, firstName: String, lastName: String = "", username: String, phone: String, avatarURL: String? = nil) {
         self.id = id
         self.firstName = firstName
         self.lastName = lastName
         self.username = username
         self.phone = phone
+        self.avatarURL = avatarURL
     }
 
     var initials: String {

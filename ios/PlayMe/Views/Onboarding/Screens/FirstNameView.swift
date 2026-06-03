@@ -1,12 +1,9 @@
 import SwiftUI
 
-/// Screen 6 — First name.
-///
-/// Replaces the legacy `NameEntryView` (last-name field is dropped per
-/// the Claude design — the app only ever surfaces first name in feeds,
-/// shares, and DMs).
+/// Screen 6 — Name.
 struct FirstNameView: View {
     @Binding var firstName: String
+    @Binding var lastName: String
     let stepIdx: Int
     let totalSteps: Int
     let onContinue: () -> Void
@@ -14,6 +11,7 @@ struct FirstNameView: View {
 
     private var canContinue: Bool {
         !firstName.trimmingCharacters(in: .whitespaces).isEmpty
+            && !lastName.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     var body: some View {
@@ -35,6 +33,19 @@ struct FirstNameView: View {
                         }
                     )
                     .padding(.top, 24)
+
+                    RiffFieldInput(
+                        text: $lastName,
+                        placeholder: "Last name",
+                        contentType: .familyName,
+                        capitalization: .words,
+                        autocorrection: false,
+                        maxLength: 32,
+                        onSubmit: {
+                            if canContinue { onContinue() }
+                        }
+                    )
+                    .padding(.top, 18)
 
                     Spacer(minLength: 0)
                 }

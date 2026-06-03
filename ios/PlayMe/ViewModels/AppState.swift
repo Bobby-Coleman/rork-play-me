@@ -51,6 +51,11 @@ class AppState {
                 UserDefaults.standard.set(user.lastName, forKey: "currentUserLastName")
                 UserDefaults.standard.set(user.username, forKey: "currentUserUsername")
                 UserDefaults.standard.set(user.phone, forKey: "currentUserPhone")
+                if let avatarURL = user.avatarURL, !avatarURL.isEmpty {
+                    UserDefaults.standard.set(avatarURL, forKey: "currentUserAvatarURL")
+                } else {
+                    UserDefaults.standard.removeObject(forKey: "currentUserAvatarURL")
+                }
             }
         }
     }
@@ -358,7 +363,8 @@ class AppState {
            let username = UserDefaults.standard.string(forKey: "currentUserUsername") {
             let lastName = UserDefaults.standard.string(forKey: "currentUserLastName") ?? ""
             let phone = UserDefaults.standard.string(forKey: "currentUserPhone") ?? ""
-            currentUser = AppUser(id: id, firstName: firstName, lastName: lastName, username: username, phone: phone)
+            let avatarURL = UserDefaults.standard.string(forKey: "currentUserAvatarURL")
+            currentUser = AppUser(id: id, firstName: firstName, lastName: lastName, username: username, phone: phone, avatarURL: avatarURL)
         }
     }
 
@@ -429,7 +435,8 @@ class AppState {
         isBackendAvailable = true
         currentUser = AppUser(id: uid, firstName: profile.firstName,
                               lastName: profile.lastName,
-                              username: profile.username, phone: profile.phone)
+                              username: profile.username, phone: profile.phone,
+                              avatarURL: profile.avatarURL)
 
         // Ask the server to fan out any pending-shares waiting on this phone.
         // The Cloud Function reads users/{uid}.phone and runs the claim.
@@ -486,6 +493,39 @@ class AppState {
         return true
     }
 
+    @discardableResult
+    func updateProfilePhoto(image: UIImage?, progress: ((Double) -> Void)? = nil) async -> Bool {
+        guard let user = currentUser else { return false }
+        registrationError = nil
+
+        let avatarURL: String?
+        if let image {
+            do {
+                avatarURL = try await ProfilePhotoUploader.shared.uploadPickedImage(image, progress: progress)
+            } catch {
+                registrationError = error.localizedDescription
+                return false
+            }
+        } else {
+            avatarURL = nil
+        }
+
+        guard await FirebaseService.shared.updateCurrentUserAvatarURL(avatarURL) else {
+            registrationError = "Could not save your profile picture. Please try again."
+            return false
+        }
+
+        currentUser = AppUser(
+            id: user.id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            username: user.username,
+            phone: user.phone,
+            avatarURL: avatarURL
+        )
+        return true
+    }
+
     func loadData() async {
         guard currentUser != nil else { return }
         isLoading = true
@@ -503,7 +543,7 @@ class AppState {
 
         if let uid = firebase.firebaseUID, currentUser?.id != uid {
             let oldUser = currentUser!
-            currentUser = AppUser(id: uid, firstName: oldUser.firstName, lastName: oldUser.lastName, username: oldUser.username, phone: oldUser.phone)
+            currentUser = AppUser(id: uid, firstName: oldUser.firstName, lastName: oldUser.lastName, username: oldUser.username, phone: oldUser.phone, avatarURL: oldUser.avatarURL)
         }
 
         if let profile = await firebase.loadUserProfile() {
@@ -513,7 +553,8 @@ class AppState {
                 firstName: profile.firstName,
                 lastName: profile.lastName,
                 username: profile.username,
-                phone: profile.phone
+                phone: profile.phone,
+                avatarURL: profile.avatarURL
             )
         }
 
@@ -602,7 +643,7 @@ class AppState {
         let share = SongShare(
             id: shareId,
             song: enrichedSong,
-            sender: AppUser(id: user.id, firstName: user.firstName, lastName: user.lastName, username: user.username, phone: user.phone),
+            sender: AppUser(id: user.id, firstName: user.firstName, lastName: user.lastName, username: user.username, phone: user.phone, avatarURL: user.avatarURL),
             recipient: friend,
             note: cleanedNote
         )
@@ -646,7 +687,7 @@ class AppState {
         let cleanedNote = (trimmedNote?.isEmpty ?? true) ? nil : trimmedNote
         let share = SongShare(
             song: enrichedSong,
-            sender: AppUser(id: sender.id, firstName: sender.firstName, lastName: sender.lastName, username: sender.username, phone: sender.phone),
+            sender: AppUser(id: sender.id, firstName: sender.firstName, lastName: sender.lastName, username: sender.username, phone: sender.phone, avatarURL: sender.avatarURL),
             recipient: user,
             note: cleanedNote
         )
@@ -700,7 +741,7 @@ class AppState {
 
         let me = AppUser(
             id: user.id, firstName: user.firstName, lastName: user.lastName,
-            username: user.username, phone: user.phone
+            username: user.username, phone: user.phone, avatarURL: user.avatarURL
         )
         var locallyInserted: [MixtapeShare] = []
         for friend in friends {
@@ -777,7 +818,7 @@ class AppState {
 
         let me = AppUser(
             id: user.id, firstName: user.firstName, lastName: user.lastName,
-            username: user.username, phone: user.phone
+            username: user.username, phone: user.phone, avatarURL: user.avatarURL
         )
         var locallyInserted: [AlbumShare] = []
         for friend in friends {
@@ -1179,9 +1220,11 @@ class AppState {
             username: me.username,
             firstName: me.firstName,
             lastName: me.lastName,
+            avatarURL: me.avatarURL,
             targetUsername: user.username,
             targetFirstName: user.firstName,
-            targetLastName: user.lastName
+            targetLastName: user.lastName,
+            targetAvatarURL: user.avatarURL
         )
         if ok {
             if !isOnboarded {
@@ -1551,6 +1594,7 @@ class AppState {
         UserDefaults.standard.removeObject(forKey: "currentUserLastName")
         UserDefaults.standard.removeObject(forKey: "currentUserUsername")
         UserDefaults.standard.removeObject(forKey: "currentUserPhone")
+        UserDefaults.standard.removeObject(forKey: "currentUserAvatarURL")
         UserDefaults.standard.removeObject(forKey: "likedShareIds")
         UserDefaults.standard.removeObject(forKey: "preferredMusicService")
         clearWidgetSharedState()
@@ -1661,6 +1705,11 @@ class AppState {
         defaults?.set(latest.song.title, forKey: WidgetSharedConstants.Key.songTitle)
         defaults?.set(latest.song.artist, forKey: WidgetSharedConstants.Key.songArtist)
         defaults?.set(latest.sender.firstName, forKey: WidgetSharedConstants.Key.senderFirstName)
+        if let avatarURL = latest.sender.avatarURL, !avatarURL.isEmpty {
+            defaults?.set(avatarURL, forKey: WidgetSharedConstants.Key.senderAvatarURL)
+        } else {
+            defaults?.removeObject(forKey: WidgetSharedConstants.Key.senderAvatarURL)
+        }
         if let note = latest.note, !note.isEmpty {
             defaults?.set(note, forKey: WidgetSharedConstants.Key.note)
         } else {
@@ -1669,12 +1718,13 @@ class AppState {
         defaults?.set(latest.id, forKey: WidgetSharedConstants.Key.shareId)
 
         Task.detached {
-            await Self.downloadWidgetAlbumArt(urlString: latest.song.albumArtURL)
+            await Self.downloadWidgetImage(urlString: latest.song.albumArtURL, fileURL: WidgetSharedConstants.albumArtFileURL(), label: "album art")
+            await Self.downloadWidgetImage(urlString: latest.sender.avatarURL ?? "", fileURL: WidgetSharedConstants.senderAvatarFileURL(), label: "sender avatar")
         }
     }
 
-    private static func downloadWidgetAlbumArt(urlString: String) async {
-        guard let imageFile = WidgetSharedConstants.albumArtFileURL() else { return }
+    private static func downloadWidgetImage(urlString: String, fileURL: URL?, label: String) async {
+        guard let imageFile = fileURL else { return }
 
         guard let url = URL(string: urlString), !urlString.isEmpty else {
             try? FileManager.default.removeItem(at: imageFile)
@@ -1686,7 +1736,7 @@ class AppState {
             let (data, _) = try await URLSession.shared.data(from: url)
             try data.write(to: imageFile, options: .atomic)
         } catch {
-            print("Widget album art download failed: \(error.localizedDescription)")
+            print("Widget \(label) download failed: \(error.localizedDescription)")
         }
         await MainActor.run { WidgetCenter.shared.reloadAllTimelines() }
     }
@@ -1701,6 +1751,9 @@ class AppState {
         WidgetSharedConstants.allKeys.forEach { defaults?.removeObject(forKey: $0) }
         if let imageFile = WidgetSharedConstants.albumArtFileURL() {
             try? FileManager.default.removeItem(at: imageFile)
+        }
+        if let avatarFile = WidgetSharedConstants.senderAvatarFileURL() {
+            try? FileManager.default.removeItem(at: avatarFile)
         }
     }
 }

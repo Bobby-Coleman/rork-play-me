@@ -102,6 +102,9 @@ struct MessagesListView: View {
     private func recipientAppUser(for conversation: Conversation) -> AppUser {
         let uid = FirebaseService.shared.firebaseUID ?? ""
         let fid = conversation.friendId(currentUserId: uid)
+        if let friend = appState.friends.first(where: { $0.id == fid }) {
+            return friend
+        }
         let name = conversation.friendName(currentUserId: uid)
         return AppUser(id: fid, firstName: name, lastName: "", username: "", phone: "")
     }
@@ -109,16 +112,12 @@ struct MessagesListView: View {
     private func conversationRow(_ conversation: Conversation) -> some View {
         let uid = FirebaseService.shared.firebaseUID ?? ""
         let friendName = conversation.friendName(currentUserId: uid)
+        let friend = recipientAppUser(for: conversation)
 
         return HStack(alignment: .center, spacing: 8) {
             NavigationLink(value: conversation) {
                 HStack(spacing: 12) {
-                    Text(String(friendName.prefix(1)).uppercased())
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(Color.white.opacity(0.1))
-                        .clipShape(Circle())
+                    AppUserAvatar(user: friend, size: 44, background: Color.white.opacity(0.1))
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text(friendName)

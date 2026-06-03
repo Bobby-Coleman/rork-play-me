@@ -97,12 +97,7 @@ struct MixtapesView: View {
                     Button {
                         showProfileDetails = true
                     } label: {
-                        Text(user?.initials ?? "?")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 30, height: 30)
-                            .background(Color.white.opacity(0.15))
-                            .clipShape(Circle())
+                        AppUserAvatar(user: user, size: 30, background: Color.white.opacity(0.15))
                     }
                     .accessibilityLabel("Profile")
                 }
@@ -2216,12 +2211,7 @@ struct ProfileDetailsView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 VStack(spacing: 16) {
-                    Text(user?.initials ?? "?")
-                        .font(.system(size: 32, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 96, height: 96)
-                        .background(Color.white.opacity(0.12))
-                        .clipShape(Circle())
+                    AppUserAvatar(user: user, size: 96, background: Color.white.opacity(0.12))
                         .padding(.top, 32)
 
                     Text(user?.firstName ?? "")

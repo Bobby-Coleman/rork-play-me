@@ -23,6 +23,7 @@ enum RiffOnboardingStep: Int, CaseIterable {
     case contactsPermission
     case inviteIntro
     case pickFriends
+    case profilePhoto
     case notifications
     case widget
     case sendFirstSong
@@ -36,6 +37,7 @@ struct OnboardingView: View {
     @State private var lastStepIndex: Int = 0
 
     @State private var firstName: String = ""
+    @State private var lastName: String = ""
     @State private var username: String = ""
     @State private var contacts: [SimpleContact] = []
     @State private var contactsStatus: CNAuthorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
@@ -48,7 +50,7 @@ struct OnboardingView: View {
     private static let progressSteps: [RiffOnboardingStep] = [
         // .theme (color picker) is temporarily disabled and omitted from the
         // dots; re-add it here when the step is routed again.
-        .firstName, .username, .musicService, .taste,
+        .firstName, .username, .profilePhoto, .musicService, .taste,
         .contactsPermission, .inviteIntro, .pickFriends, .notifications, .widget,
     ]
 
@@ -156,6 +158,7 @@ struct OnboardingView: View {
         case .firstName:
             FirstNameView(
                 firstName: $firstName,
+                lastName: $lastName,
                 stepIdx: progressIndex(for: .firstName) ?? 0,
                 totalSteps: totalProgress,
                 onContinue: { advance(to: .username) },
@@ -173,10 +176,11 @@ struct OnboardingView: View {
                     Task {
                         let ok = await appState.register(
                             username: username,
-                            firstName: firstName.trimmingCharacters(in: .whitespaces)
+                            firstName: firstName.trimmingCharacters(in: .whitespaces),
+                            lastName: lastName.trimmingCharacters(in: .whitespaces)
                         )
                         if ok {
-                            await MainActor.run { advance(to: .musicService) }
+                            await MainActor.run { advance(to: .profilePhoto) }
                         }
                     }
                 },
@@ -189,7 +193,7 @@ struct OnboardingView: View {
                 stepIdx: progressIndex(for: .musicService) ?? 0,
                 totalSteps: totalProgress,
                 onContinue: { advance(to: .taste) },
-                onBack: { advance(to: .username, isBack: true) }
+                onBack: { advance(to: .profilePhoto, isBack: true) }
             )
 
         case .taste:
@@ -239,6 +243,17 @@ struct OnboardingView: View {
                 onSkip: { advance(to: .notifications) },
                 onBack: { advance(to: .inviteIntro, isBack: true) },
                 contacts: $contacts
+            )
+
+        case .profilePhoto:
+            ProfilePhotoView(
+                appState: appState,
+                firstName: firstName,
+                lastName: lastName,
+                stepIdx: progressIndex(for: .profilePhoto) ?? 0,
+                totalSteps: totalProgress,
+                onContinue: { advance(to: .musicService) },
+                onBack: { advance(to: .username, isBack: true) }
             )
 
         case .notifications:

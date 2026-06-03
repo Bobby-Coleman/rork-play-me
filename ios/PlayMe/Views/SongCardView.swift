@@ -521,11 +521,7 @@ private struct InitialsAvatar: View {
     let size: CGFloat
 
     var body: some View {
-        Text(user.initials.isEmpty ? "?" : user.initials)
-            .font(.system(size: size * 0.36, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(width: size, height: size)
-            .background(Color.white.opacity(0.16), in: Circle())
+        AppUserAvatar(user: user, size: size, background: Color.white.opacity(0.16), border: .clear)
     }
 }
 

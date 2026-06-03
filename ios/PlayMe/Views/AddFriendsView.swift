@@ -485,16 +485,13 @@ struct AddFriendsView: View {
 
     private func friendRow(_ friend: AppUser) -> some View {
         HStack(spacing: 14) {
-            Text(friend.initials)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 42, height: 42)
-                .background(Color.white.opacity(0.12))
-                .clipShape(Circle())
-                .overlay(
-                    Circle()
-                        .stroke(Color(red: 0.96, green: 0.62, blue: 0.14), lineWidth: 2)
-                )
+            AppUserAvatar(
+                user: friend,
+                size: 42,
+                background: Color.white.opacity(0.12),
+                border: Color(red: 0.96, green: 0.62, blue: 0.14),
+                borderWidth: 2
+            )
 
             Text(friend.firstName)
                 .font(.system(size: 15, weight: .semibold))
@@ -602,12 +599,7 @@ struct AddFriendsView: View {
         let requested = appState.outgoingRequestUIDs.contains(user.id)
 
         return HStack(spacing: 14) {
-            Text(user.initials)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 38, height: 38)
-                .background(Color.white.opacity(0.12))
-                .clipShape(Circle())
+            AppUserAvatar(user: user, size: 38, background: Color.white.opacity(0.12))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(user.firstName)
@@ -669,12 +661,7 @@ struct AddFriendsView: View {
 
     private func friendRequestRow(_ user: AppUser) -> some View {
         HStack(spacing: 14) {
-            Text(user.initials)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 38, height: 38)
-                .background(Color.white.opacity(0.12))
-                .clipShape(Circle())
+            AppUserAvatar(user: user, size: 38, background: Color.white.opacity(0.12))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayName(for: user))
@@ -745,12 +732,7 @@ struct AddFriendsView: View {
 
     private func sentRequestRow(_ user: AppUser) -> some View {
         HStack(spacing: 14) {
-            Text(user.initials)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 38, height: 38)
-                .background(Color.white.opacity(0.12))
-                .clipShape(Circle())
+            AppUserAvatar(user: user, size: 38, background: Color.white.opacity(0.12))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayName(for: user))

@@ -38,8 +38,10 @@ final class NotificationService: UNNotificationServiceExtension {
         persistWidgetFields(from: info)
 
         let urlString = (info["widgetAlbumArtURL"] as? String) ?? ""
+        let avatarURLString = (info["widgetSenderAvatarURL"] as? String) ?? ""
         Task {
             await downloadAlbumArt(from: urlString)
+            await downloadSenderAvatar(from: avatarURLString)
             await MainActor.run {
                 WidgetCenter.shared.reloadAllTimelines()
             }
@@ -66,6 +68,12 @@ final class NotificationService: UNNotificationServiceExtension {
         defaults.set(string(info, "widgetSongTitle"),       forKey: WidgetSharedConstants.Key.songTitle)
         defaults.set(string(info, "widgetSongArtist"),      forKey: WidgetSharedConstants.Key.songArtist)
         defaults.set(string(info, "widgetSenderFirstName"), forKey: WidgetSharedConstants.Key.senderFirstName)
+        let senderAvatarURL = string(info, "widgetSenderAvatarURL")
+        if senderAvatarURL.isEmpty {
+            defaults.removeObject(forKey: WidgetSharedConstants.Key.senderAvatarURL)
+        } else {
+            defaults.set(senderAvatarURL, forKey: WidgetSharedConstants.Key.senderAvatarURL)
+        }
 
         let note = string(info, "widgetNote")
         if note.isEmpty {
@@ -86,7 +94,15 @@ final class NotificationService: UNNotificationServiceExtension {
 
     private func downloadAlbumArt(from urlString: String) async {
         guard let fileURL = WidgetSharedConstants.albumArtFileURL() else { return }
+        await downloadImage(from: urlString, to: fileURL, quality: 0.85)
+    }
 
+    private func downloadSenderAvatar(from urlString: String) async {
+        guard let fileURL = WidgetSharedConstants.senderAvatarFileURL() else { return }
+        await downloadImage(from: urlString, to: fileURL, quality: 0.82)
+    }
+
+    private func downloadImage(from urlString: String, to fileURL: URL, quality: CGFloat) async {
         guard let url = URL(string: urlString), !urlString.isEmpty else {
             try? FileManager.default.removeItem(at: fileURL)
             return
@@ -101,7 +117,7 @@ final class NotificationService: UNNotificationServiceExtension {
             // guarantees the widget's `UIImage(contentsOfFile:)` read
             // won't choke on an unexpected image format.
             if let image = UIImage(data: data),
-               let jpeg = image.jpegData(compressionQuality: 0.85) {
+               let jpeg = image.jpegData(compressionQuality: quality) {
                 try jpeg.write(to: fileURL, options: .atomic)
             } else {
                 try data.write(to: fileURL, options: .atomic)
