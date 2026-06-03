@@ -662,7 +662,8 @@ exports.onFriendCreated = onDocumentCreated(
     const userRef = db.collection("users").doc(userId);
 
     // Increment first so the soft cap on the NEXT write sees the
-    // post-increment count.
+    // post-increment count. A failure here must NOT abort the function:
+    // queued songs still need to be delivered once the friendship exists.
     try {
       await userRef.set(
         {
@@ -673,7 +674,6 @@ exports.onFriendCreated = onDocumentCreated(
       );
     } catch (err) {
       console.error("onFriendCreated: friendCount increment failed:", err.message);
-      return;
     }
 
     // Hard cap check. Re-read the user doc and, if the count now
@@ -1025,7 +1025,16 @@ async function deliverPendingFriendSharesForPair(uidA, uidB) {
     db.collection("users").doc(uidA).collection("friends").doc(uidB).get(),
     db.collection("users").doc(uidB).collection("friends").doc(uidA).get(),
   ]);
-  if (!aFriend.exists || !bFriend.exists) return { count: 0 };
+  if (!aFriend.exists || !bFriend.exists) {
+    logEvent("pending_delivery_skipped_no_friendship", {
+      pairKey,
+      uidA,
+      uidB,
+      aFriendExists: aFriend.exists,
+      bFriendExists: bFriend.exists,
+    });
+    return { count: 0 };
+  }
 
   const [aQueued, bQueued] = await Promise.all([
     db
@@ -2071,6 +2080,58 @@ exports.cleanupPushDedupe = onSchedule(
     if (totalDeleted > 0) {
       console.log(`cleanupPushDedupe: deleted ${totalDeleted} expired entries`);
     }
+  }
+);
+
+// Recovery sweep for queued songs that should have been delivered when a
+// friendship was accepted but weren't (functions not live at accept time, a
+// transient read miss, or an early return in onFriendCreated). The single
+// onFriendCreated delivery attempt has no retry, so this periodically scans
+// pendingFriendShares and re-runs the idempotent pair delivery for any pair
+// whose friendship now exists. On its first run after deploy this also
+// backfills songs that were stuck before this fix shipped.
+exports.retryPendingFriendShares = onSchedule(
+  {
+    schedule: "every 10 minutes",
+    timeZone: "Etc/UTC",
+    memory: "256MiB",
+  },
+  async () => {
+    const db = admin.firestore();
+    const snap = await db
+      .collectionGroup("pendingFriendShares")
+      .limit(500)
+      .get();
+    if (snap.empty) return;
+
+    // Collapse to unique sender/recipient pairs; deliverPendingFriendSharesForPair
+    // handles every queued doc for the pair in one call and is idempotent.
+    const pairs = new Map();
+    for (const doc of snap.docs) {
+      const senderId = doc.ref.parent.parent && doc.ref.parent.parent.id;
+      const recipientId = (doc.data() || {}).recipientId;
+      if (!senderId || !recipientId || senderId === recipientId) continue;
+      pairs.set(friendPairKey(senderId, recipientId), { senderId, recipientId });
+    }
+
+    let delivered = 0;
+    for (const { senderId, recipientId } of pairs.values()) {
+      try {
+        const res = await deliverPendingFriendSharesForPair(senderId, recipientId);
+        delivered += (res && res.count) || 0;
+      } catch (err) {
+        logError("retry_pending_friend_shares_failed", err, {
+          senderId,
+          recipientId,
+        });
+      }
+    }
+
+    logEvent("retry_pending_friend_shares_swept", {
+      scanned: snap.size,
+      pairs: pairs.size,
+      delivered,
+    });
   }
 );
 
