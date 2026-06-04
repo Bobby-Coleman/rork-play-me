@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		845755382FD11E7900975957 /* RiffShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8457552E2FD11E7800975957 /* RiffShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		8491A0A32F8841230088392D /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 8491A0A22F8841230088392D /* FirebaseMessaging */; };
 		84B7E0312F91B95F00B59DD6 /* ChottuLinkSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 84B7E0302F91B95F00B59DD6 /* ChottuLinkSDK */; };
 		APPCHK020000000000000002 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = APPCHK010000000000000001 /* FirebaseAppCheck */; };
@@ -35,6 +36,13 @@
 			remoteGlobalIDString = 105FC5792E9EAD3100EA8BCF;
 			remoteInfo = PlayMe;
 		};
+		845755362FD11E7900975957 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 105FC5722E9EAD3100EA8BCF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8457552D2FD11E7800975957;
+			remoteInfo = RiffShare;
+		};
 		NS01A5E3C4D5B6A7F8E9B004 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 105FC5722E9EAD3100EA8BCF /* Project object */;
@@ -59,6 +67,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				XX3DF24C364CC9BFC26E41XX /* PlayMeWidget.appex in Embed Foundation Extensions */,
+				845755382FD11E7900975957 /* RiffShare.appex in Embed Foundation Extensions */,
 				NS01A5E3C4D5B6A7F8E9B003 /* PlayMeNotificationService.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
@@ -70,11 +79,19 @@
 		105FC57A2E9EAD3100EA8BCF /* PlayMe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PlayMe.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		105FC5892E9EAD3200EA8BCF /* PlayMeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PlayMeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		105FC5932E9EAD3200EA8BCF /* PlayMeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PlayMeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8457552E2FD11E7800975957 /* RiffShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RiffShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		NS01A5E3C4D5B6A7F8E9B002 /* PlayMeNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PlayMeNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		XX8D76BE4CCED1AB217465XX /* PlayMeWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PlayMeWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		8457553C2FD11E7900975957 /* Exceptions for "RiffShare" folder in "RiffShare" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 8457552D2FD11E7800975957 /* RiffShare */;
+		};
 		NS01A5E3C4D5B6A7F8E9B00A /* Exceptions for "PlayMeNotificationService" folder in "PlayMeNotificationService" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -116,6 +133,14 @@
 		105FC5962E9EAD3200EA8BCF /* PlayMeUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = PlayMeUITests;
+			sourceTree = "<group>";
+		};
+		8457552F2FD11E7800975957 /* RiffShare */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				8457553C2FD11E7900975957 /* Exceptions for "RiffShare" folder in "RiffShare" target */,
+			);
+			path = RiffShare;
 			sourceTree = "<group>";
 		};
 		NS01A5E3C4D5B6A7F8E9B009 /* PlayMeNotificationService */ = {
@@ -167,6 +192,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		8457552B2FD11E7800975957 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		NS01A5E3C4D5B6A7F8E9B006 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -190,6 +222,7 @@
 				105FC57C2E9EAD3100EA8BCF /* PlayMe */,
 				105FC58C2E9EAD3200EA8BCF /* PlayMeTests */,
 				105FC5962E9EAD3200EA8BCF /* PlayMeUITests */,
+				8457552F2FD11E7800975957 /* RiffShare */,
 				105FC57B2E9EAD3100EA8BCF /* Products */,
 				XX7DD80A4CD0ED2A772BF9XX /* PlayMeWidget */,
 				NS01A5E3C4D5B6A7F8E9B009 /* PlayMeNotificationService */,
@@ -205,6 +238,7 @@
 				105FC5932E9EAD3200EA8BCF /* PlayMeUITests.xctest */,
 				XX8D76BE4CCED1AB217465XX /* PlayMeWidget.appex */,
 				NS01A5E3C4D5B6A7F8E9B002 /* PlayMeNotificationService.appex */,
+				8457552E2FD11E7800975957 /* RiffShare.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -233,6 +267,7 @@
 			dependencies = (
 				XX2F3E74E0BCB99A2F367BXX /* PBXTargetDependency */,
 				NS01A5E3C4D5B6A7F8E9B005 /* PBXTargetDependency */,
+				845755372FD11E7900975957 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				105FC57C2E9EAD3100EA8BCF /* PlayMe */,
@@ -299,6 +334,28 @@
 			productReference = 105FC5932E9EAD3200EA8BCF /* PlayMeUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		8457552D2FD11E7800975957 /* RiffShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 845755392FD11E7900975957 /* Build configuration list for PBXNativeTarget "RiffShare" */;
+			buildPhases = (
+				8457552A2FD11E7800975957 /* Sources */,
+				8457552B2FD11E7800975957 /* Frameworks */,
+				8457552C2FD11E7800975957 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				8457552F2FD11E7800975957 /* RiffShare */,
+			);
+			name = RiffShare;
+			packageProductDependencies = (
+			);
+			productName = RiffShare;
+			productReference = 8457552E2FD11E7800975957 /* RiffShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		NS01A5E3C4D5B6A7F8E9B001 /* PlayMeNotificationService */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = NS01A5E3C4D5B6A7F8E9B00B /* Build configuration list for PBXNativeTarget "PlayMeNotificationService" */;
@@ -346,7 +403,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2600;
+				LastSwiftUpdateCheck = 2650;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					105FC5792E9EAD3100EA8BCF = {
@@ -359,6 +416,9 @@
 					105FC5922E9EAD3200EA8BCF = {
 						CreatedOnToolsVersion = 26.0;
 						TestTargetID = 105FC5792E9EAD3100EA8BCF;
+					};
+					8457552D2FD11E7800975957 = {
+						CreatedOnToolsVersion = 26.5;
 					};
 				};
 			};
@@ -386,6 +446,7 @@
 				105FC5922E9EAD3200EA8BCF /* PlayMeUITests */,
 				XX24E7FAEAE6D286D45D0AXX /* PlayMeWidget */,
 				NS01A5E3C4D5B6A7F8E9B001 /* PlayMeNotificationService */,
+				8457552D2FD11E7800975957 /* RiffShare */,
 			);
 		};
 /* End PBXProject section */
@@ -406,6 +467,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		105FC5912E9EAD3200EA8BCF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8457552C2FD11E7800975957 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -450,6 +518,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		8457552A2FD11E7800975957 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		NS01A5E3C4D5B6A7F8E9B008 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -476,6 +551,11 @@
 			isa = PBXTargetDependency;
 			target = 105FC5792E9EAD3100EA8BCF /* PlayMe */;
 			targetProxy = 105FC5942E9EAD3200EA8BCF /* PBXContainerItemProxy */;
+		};
+		845755372FD11E7900975957 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8457552D2FD11E7800975957 /* RiffShare */;
+			targetProxy = 845755362FD11E7900975957 /* PBXContainerItemProxy */;
 		};
 		NS01A5E3C4D5B6A7F8E9B005 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -779,6 +859,68 @@
 			};
 			name = Release;
 		};
+		8457553A2FD11E7900975957 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = RiffShare/RiffShare.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 7;
+				DEVELOPMENT_TEAM = Y8LFBVELVR;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RiffShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Riff;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.4;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rork.6lps4bdet5kkzmhqjyurh.RiffShare;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		8457553B2FD11E7900975957 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = RiffShare/RiffShare.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 7;
+				DEVELOPMENT_TEAM = Y8LFBVELVR;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RiffShare/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Riff;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.4;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rork.6lps4bdet5kkzmhqjyurh.RiffShare;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		NS01A5E3C4D5B6A7F8E9B00C /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -926,6 +1068,15 @@
 			buildConfigurations = (
 				105FC5A42E9EAD3200EA8BCF /* Debug */,
 				105FC5A52E9EAD3200EA8BCF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		845755392FD11E7900975957 /* Build configuration list for PBXNativeTarget "RiffShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8457553A2FD11E7900975957 /* Debug */,
+				8457553B2FD11E7900975957 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -23,6 +23,14 @@ enum WidgetSharedConstants {
         static let senderAvatarURL  = "widgetSenderAvatarURL"
         static let note             = "widgetNote"
         static let shareId          = "widgetShareId"
+
+        /// Written by the Share Extension (RiffShare) when the user shares a
+        /// Spotify/Apple Music track into Riff: the raw track URL plus the
+        /// epoch timestamp of when it was captured. The main app reads these
+        /// on `playme://share-song` deep links and on foreground (freshness
+        /// window) to resolve + present the send flow.
+        static let pendingShareSongURL   = "pendingShareSongURL"
+        static let pendingShareSongURLAt = "pendingShareSongURLAt"
     }
 
     /// All `UserDefaults` keys owned by the widget in a single array. Useful

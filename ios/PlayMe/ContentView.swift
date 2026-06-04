@@ -50,13 +50,10 @@ struct ContentView: View {
     @State private var sendSheetIntent: SendSheetIntent?
     @State private var showAddFriends = false
     @State private var selectedTab: Int = MainTab.discovery.rawValue
-    /// Which inner page the Library (Mixtapes) tab is showing. Owned here so
-    /// the global swipe gesture only lets a swipe escape to Search from the
-    /// Mixtapes page (the Songs calendar keeps its swipes for paging).
+    /// Which inner page the Library (Mixtapes) tab is showing. Bound into
+    /// `MixtapesView` so the top segment control and the inner `LibraryPager`
+    /// stay in sync; the pager itself owns swipe handling.
     @State private var librarySegment: MixtapesSegment = .songs
-    /// Inner Library page captured at the start of a drag, so a settled
-    /// inner page-swipe can't race the gesture's `.onEnded` read.
-    @State private var dragStartLibrarySegment: MixtapesSegment?
     @State private var messagesNavigationResetToken: Int = 0
     @State private var miniPlayerSong: Song?
     /// Tracks whether the Discovery tab is currently showing its hero page
@@ -72,6 +69,12 @@ struct ContentView: View {
     /// who onboarded before the feature shipped and don't have a photo yet.
     @State private var showProfilePhotoAnnouncement = false
     @State private var showProfilePhotoEditor = false
+    /// True while a song shared in from Spotify/Apple Music (via the RiffShare
+    /// Share Extension) is being resolved into a catalog `Song`. Drives the
+    /// brief "Adding song…" HUD so the wait doesn't feel like a dead tap.
+    @State private var isResolvingSharedSong = false
+    /// Shown when a shared link couldn't be mapped to a sendable song.
+    @State private var sharedSongImportFailed = false
 
     init() {
         // Hide tab titles globally so the bar stays icon-only even when iOS
@@ -104,6 +107,11 @@ struct ContentView: View {
                         .task {
                             await appState.loadData()
                             maybeShowProfilePhotoAnnouncement()
+                            // Cold-launch case: a share link may have arrived
+                            // (deep link or App Group) before the main UI was
+                            // ready to resolve it.
+                            consumePendingSharedSong(maxAgeSeconds: 60)
+                            processPendingSharedSongIfPossible()
                         }
                         .task {
                             await requestNotificationPermissionOnceIfNeeded()
@@ -143,12 +151,55 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active, appState.isOnboarded else { return }
+            guard newPhase == .active else { return }
+            // Foreground fallback: if the Share Extension's `openURL` was
+            // throttled, the link still lands in the App Group. Pick it up
+            // only when fresh (< 60 s) so we never replay a stale share.
+            consumePendingSharedSong(maxAgeSeconds: 60)
+            processPendingSharedSongIfPossible()
+            guard appState.isOnboarded else { return }
             Task { await appState.refreshShares(force: false) }
         }
         .onOpenURL { url in
             handleIncomingURL(url)
         }
+        .onChange(of: appState.pendingExternalShareURL) { _, _ in
+            processPendingSharedSongIfPossible()
+        }
+        .onChange(of: appState.isOnboarded) { _, isOn in
+            // A link shared before sign-in is held until the user lands in the
+            // app; process it the moment onboarding completes.
+            if isOn { processPendingSharedSongIfPossible() }
+        }
+        .overlay {
+            if isResolvingSharedSong {
+                sharedSongLoadingHUD
+            }
+        }
+        .alert("Couldn't add that song", isPresented: $sharedSongImportFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("We couldn't find that track. Try sharing it again, or search for it in Riff.")
+        }
+    }
+
+    /// Lightweight blocking HUD shown while a shared link resolves. Kept
+    /// minimal (dimmed scrim + spinner) since resolution is usually < 1 s.
+    private var sharedSongLoadingHUD: some View {
+        ZStack {
+            Color.black.opacity(0.55).ignoresSafeArea()
+            VStack(spacing: 14) {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.white)
+                Text("Adding song…")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+            .padding(28)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+        }
+        .transition(.opacity)
     }
 
     /// Routes incoming custom-scheme URLs. Currently handles the widget
@@ -159,18 +210,72 @@ struct ContentView: View {
     /// auth), so other deep links are unaffected.
     private func handleIncomingURL(_ url: URL) {
         guard url.scheme?.lowercased() == "playme" else { return }
-        guard url.host?.lowercased() == "share" else { return }
-        // URL.pathComponents starts with "/"; drop it to isolate the id.
-        let id = url.pathComponents.filter { $0 != "/" }.first
-            ?? url.lastPathComponent
-        let trimmed = id.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        // Force Discovery tab so the scroll target actually renders. The
-        // feed observer in DiscoveryView picks up the pending id and
-        // animates the scroll — this works whether the share list is
-        // already hydrated or arrives a moment later on cold launch.
-        selectedTab = MainTab.discovery.rawValue
-        appState.pendingDiscoveryShareId = trimmed
+
+        switch url.host?.lowercased() {
+        case "share-song":
+            // Sent by the RiffShare Share Extension after it stashes the
+            // shared track link in the App Group. Pick it up regardless of
+            // age (the deep link itself is the freshness signal), then
+            // resolve + present the send sheet.
+            consumePendingSharedSong(maxAgeSeconds: nil)
+            processPendingSharedSongIfPossible()
+
+        case "share":
+            // URL.pathComponents starts with "/"; drop it to isolate the id.
+            let id = url.pathComponents.filter { $0 != "/" }.first
+                ?? url.lastPathComponent
+            let trimmed = id.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { return }
+            // Force Discovery tab so the scroll target actually renders. The
+            // feed observer in DiscoveryView picks up the pending id and
+            // animates the scroll — this works whether the share list is
+            // already hydrated or arrives a moment later on cold launch.
+            selectedTab = MainTab.discovery.rawValue
+            appState.pendingDiscoveryShareId = trimmed
+
+        default:
+            return
+        }
+    }
+
+    /// Moves a pending shared track link out of the App Group container and
+    /// into `appState.pendingExternalShareURL`. Clears the App Group keys
+    /// immediately so a given share is only ever processed once. When
+    /// `maxAgeSeconds` is set, links older than the window are ignored (used
+    /// by the foreground fallback to avoid replaying stale shares).
+    private func consumePendingSharedSong(maxAgeSeconds: TimeInterval?) {
+        guard let defaults = UserDefaults(suiteName: WidgetSharedConstants.appGroup) else { return }
+        guard let urlString = defaults.string(forKey: WidgetSharedConstants.Key.pendingShareSongURL),
+              !urlString.isEmpty else { return }
+        if let maxAgeSeconds {
+            let at = defaults.double(forKey: WidgetSharedConstants.Key.pendingShareSongURLAt)
+            guard at > 0, Date().timeIntervalSince1970 - at <= maxAgeSeconds else { return }
+        }
+        defaults.removeObject(forKey: WidgetSharedConstants.Key.pendingShareSongURL)
+        defaults.removeObject(forKey: WidgetSharedConstants.Key.pendingShareSongURLAt)
+        appState.pendingExternalShareURL = urlString
+    }
+
+    /// Resolves a pending shared link to a `Song` and opens the normal send
+    /// sheet (reusing the Shazam intent path that skips the search step). No-op
+    /// until the user is onboarded, so a link tapped before sign-in is held
+    /// and processed once they reach the main app.
+    private func processPendingSharedSongIfPossible() {
+        guard appState.isOnboarded else { return }
+        guard let raw = appState.pendingExternalShareURL, !raw.isEmpty else { return }
+        guard !isResolvingSharedSong else { return }
+        isResolvingSharedSong = true
+        Task { @MainActor in
+            let song = await ShareURLResolver.resolveSong(fromShareURL: raw)
+            isResolvingSharedSong = false
+            appState.pendingExternalShareURL = nil
+            if let song {
+                selectedTab = MainTab.discovery.rawValue
+                sendSheetIntent = .sendShazamMatch(song)
+            } else {
+                sharedSongImportFailed = true
+            }
+        }
     }
 
     /// Fallback path that asks for notification permission once after a
@@ -289,22 +394,6 @@ struct ContentView: View {
         appState.discoveryScrollToTopCounter &+= 1
     }
 
-    /// Swipe handling while on the Library tab. The inner pager owns
-    /// Songs <-> Mixtapes paging; the only swipe that escapes Library is a
-    /// left-swipe from the Mixtapes page, which advances to Search. This
-    /// keeps the calendar's swipes for paging and prevents the accidental
-    /// jump-to-Search the old global gesture caused.
-    private func handleLibrarySwipe(translationWidth: CGFloat, startSegment: MixtapesSegment) {
-        // Strip: Search | Songs | Mixtapes. From the Songs page a back-swipe
-        // (finger right) escapes to Search; a forward-swipe (finger left) is
-        // owned by the inner pager and pages to Mixtapes. From Mixtapes the
-        // inner pager owns paging back to Songs and nothing escapes.
-        guard startSegment == .songs, translationWidth > 60 else { return }
-        withAnimation(.easeInOut(duration: 0.28)) {
-            selectTab(MainTab.discovery.rawValue)
-        }
-    }
-
     private func navigateTabBySwipe(translationWidth: CGFloat) {
         let horizontal = translationWidth
         let ordered = Self.swipeableTabs
@@ -363,7 +452,8 @@ struct ContentView: View {
                 MixtapesView(
                     appState: appState,
                     selectedSegment: $librarySegment,
-                    onSendSong: { sendSheetIntent = .search }
+                    onSendSong: { sendSheetIntent = .search },
+                    onSwipeToSearch: { selectTab(MainTab.discovery.rawValue) }
                 )
             } label: {
                 Image(systemName: "rectangle.stack.fill")
@@ -373,22 +463,16 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .simultaneousGesture(
             DragGesture(minimumDistance: 50)
-                .onChanged { _ in
-                    if dragStartLibrarySegment == nil {
-                        dragStartLibrarySegment = librarySegment
-                    }
-                }
                 .onEnded { value in
-                    let startSegment = dragStartLibrarySegment
-                    dragStartLibrarySegment = nil
+                    // The Library tab's inner `LibraryPager` owns its own
+                    // swipes (Songs<->Mixtapes paging and the Songs->Search
+                    // hand-off), so the global gesture must stay out of its
+                    // way to avoid the old double-animation clunk.
+                    guard selectedTab != MainTab.mixtapes.rawValue else { return }
                     let h = value.translation.width
                     let v = value.translation.height
                     guard abs(h) > max(72, abs(v) * 1.25) else { return }
-                    if selectedTab == MainTab.mixtapes.rawValue {
-                        handleLibrarySwipe(translationWidth: h, startSegment: startSegment ?? librarySegment)
-                    } else {
-                        navigateTabBySwipe(translationWidth: h)
-                    }
+                    navigateTabBySwipe(translationWidth: h)
                 }
         )
         .onChange(of: selectedTab) { _, newValue in

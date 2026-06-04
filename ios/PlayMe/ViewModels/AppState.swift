@@ -97,6 +97,14 @@ class AppState {
     /// On a cold launch the share list may not be hydrated yet, so
     /// `DiscoveryView` also re-checks when `receivedShares` changes.
     var pendingDiscoveryShareId: String? = nil
+    /// A music link shared into Riff from another app (Spotify / Apple Music)
+    /// via the RiffShare Share Extension, awaiting resolution + send. Set by
+    /// `ContentView`'s `playme://share-song` handler (and its foreground
+    /// App-Group fallback); `ContentView` observes it, resolves the link to a
+    /// `Song`, presents the send sheet, and clears it back to nil. Persists
+    /// across an onboarding gate so a logged-out tap still sends once the user
+    /// reaches the main app.
+    var pendingExternalShareURL: String? = nil
     /// Firestore listener for incoming friend requests. Retained so we can
     /// detach on logout and reattach on sign-in.
     private var incomingRequestsListener: ListenerRegistration?

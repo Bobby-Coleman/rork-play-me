@@ -38,6 +38,32 @@ nonisolated struct SonglinkPlatformLink: Codable, Sendable {
     let url: String?
 }
 
+/// Richer Odesli decode used for the **reverse** direction (an externally
+/// shared Spotify URL → Apple Music). Carries the platform link's entity
+/// pointer plus the per-entity title/artist so the caller can fall back to
+/// a catalog text search when the Apple Music link itself lacks a track id.
+nonisolated struct SonglinkFullResponse: Codable, Sendable {
+    let entitiesByUniqueId: [String: SonglinkEntity]?
+    let linksByPlatform: [String: SonglinkPlatformLinkFull]?
+}
+
+nonisolated struct SonglinkPlatformLinkFull: Codable, Sendable {
+    let url: String?
+    let entityUniqueId: String?
+}
+
+nonisolated struct SonglinkEntity: Codable, Sendable {
+    let title: String?
+    let artistName: String?
+}
+
+/// Result of mapping a shared Spotify URL onto Apple Music via Odesli.
+nonisolated struct AppleMusicLinkLookup: Sendable {
+    let appleMusicURL: String?
+    let title: String?
+    let artist: String?
+}
+
 /// Decoded response from our `resolveSpotifyTrack` Cloud Function.
 nonisolated struct CloudFunctionResolutionResponse: Codable, Sendable {
     let trackId: String?
@@ -138,6 +164,54 @@ actor MusicSearchService {
         }
 
         return nil
+    }
+
+    // MARK: - Reverse resolution (shared Spotify URL → Apple Music)
+
+    /// Maps an externally shared Spotify track URL to its Apple Music
+    /// counterpart via Odesli. The Share Extension intake path uses this to
+    /// turn a `https://open.spotify.com/track/...` (or `spotify:track:...`)
+    /// link into something `AppleMusicSearchService` can resolve into a full
+    /// `Song`. Returns `nil` only on hard network/decoding failure; the
+    /// returned struct may still have a `nil` `appleMusicURL` (with usable
+    /// `title`/`artist`) which the caller can use for a catalog text search.
+    func appleMusicLink(forSpotifyURL spotifyURL: String) async -> AppleMusicLinkLookup? {
+        guard var components = URLComponents(string: "https://api.song.link/v1-alpha.1/links") else {
+            return nil
+        }
+        var queryItems: [URLQueryItem] = [URLQueryItem(name: "url", value: spotifyURL)]
+        let apiKey = Config.SONGLINK_API_KEY
+        if !apiKey.isEmpty {
+            queryItems.append(URLQueryItem(name: "key", value: apiKey))
+        }
+        components.queryItems = queryItems
+        guard let url = components.url else { return nil }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let http = response as? HTTPURLResponse,
+                  (200...299).contains(http.statusCode) else {
+                print("event=share_import resolve_result source=songlink_reverse status=http_\((response as? HTTPURLResponse)?.statusCode ?? -1) spotifyURL=\"\(spotifyURL)\"")
+                return nil
+            }
+            let decoded = try JSONDecoder().decode(SonglinkFullResponse.self, from: data)
+            let appleLink = decoded.linksByPlatform?["appleMusic"]
+            var title: String?
+            var artist: String?
+            if let entityId = appleLink?.entityUniqueId,
+               let entity = decoded.entitiesByUniqueId?[entityId] {
+                title = entity.title
+                artist = entity.artistName
+            } else if let any = decoded.entitiesByUniqueId?.values.first {
+                title = any.title
+                artist = any.artistName
+            }
+            print("event=share_import resolve_result source=songlink_reverse status=ok appleMusicURL=\"\(appleLink?.url ?? "")\" spotifyURL=\"\(spotifyURL)\"")
+            return AppleMusicLinkLookup(appleMusicURL: appleLink?.url, title: title, artist: artist)
+        } catch {
+            print("event=share_import resolve_result source=songlink_reverse status=error error=\"\(error.localizedDescription)\" spotifyURL=\"\(spotifyURL)\"")
+            return nil
+        }
     }
 
     // MARK: - URL normalization

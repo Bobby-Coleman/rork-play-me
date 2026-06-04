@@ -52,4 +52,39 @@ enum SpotifyDeepLinkResolver {
         let trackID = parts[trackIndex + 1]
         return trackID.isEmpty ? nil : trackID
     }
+
+    /// Extracts the Apple Music catalog **track** id from a shared Apple
+    /// Music URL. Apple's "Share Song" produces an album URL with the track
+    /// selected via a `?i=<trackId>` query item, e.g.
+    /// `https://music.apple.com/us/album/name/1440841363?i=1440841376`.
+    /// Some links instead use a `/song/<id>` path. We prefer `i=` (the
+    /// track), then fall back to a `song` path segment, then a trailing
+    /// numeric path component. Returns `nil` for album-only links with no
+    /// track selector, since those don't identify a single song.
+    static func appleMusicTrackID(fromAppleMusicURL urlString: String?) -> String? {
+        guard let urlString,
+              let components = URLComponents(string: urlString) else { return nil }
+
+        // Preferred: `?i=<trackId>` selects the track inside an album link.
+        if let i = components.queryItems?.first(where: { $0.name == "i" })?.value,
+           !i.isEmpty {
+            return i
+        }
+
+        let parts = components.path.split(separator: "/").map(String.init)
+        // `/song/<id>` form.
+        if let songIndex = parts.firstIndex(of: "song"),
+           songIndex + 1 < parts.count {
+            let id = parts[songIndex + 1]
+            if !id.isEmpty { return id }
+        }
+        // Trailing numeric component as a last resort (only when it isn't an
+        // album path, which would be a collection id, not a track id).
+        if parts.contains("album") == false,
+           let last = parts.last,
+           last.allSatisfy(\.isNumber), !last.isEmpty {
+            return last
+        }
+        return nil
+    }
 }
