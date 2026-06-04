@@ -119,9 +119,9 @@ struct DiscoveryView: View {
                                     case .received(let share):
                                         SongCardView(
                                             share: share,
-                                            isLiked: appState.isLiked(shareId: share.id),
+                                            isLiked: appState.isLikedSong(share.song.id),
                                             appState: appState,
-                                            onToggleLike: { appState.toggleLike(shareId: share.id) }
+                                            onToggleLike: { appState.toggleLikeSong(share.song, share: share) }
                                         )
                                         .frame(width: pagerSize.width, height: pagerSize.height)
                                         .clipped()
@@ -132,9 +132,9 @@ struct DiscoveryView: View {
                                             SongCardView(
                                                 share: share,
                                                 sentHistory: sentItem,
-                                                isLiked: appState.isLiked(shareId: share.id),
+                                                isLiked: appState.isLikedSong(share.song.id),
                                                 appState: appState,
-                                                onToggleLike: { appState.toggleLike(shareId: share.id) }
+                                                onToggleLike: { appState.toggleLikeSong(share.song, share: share) }
                                             )
                                             .frame(width: pagerSize.width, height: pagerSize.height)
                                             .clipped()
@@ -424,7 +424,7 @@ struct DiscoveryView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 17))
-                        .foregroundStyle(.green)
+                        .foregroundStyle(AppAccentGradient.button)
                     Text("Sent!")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(.white.opacity(0.85))

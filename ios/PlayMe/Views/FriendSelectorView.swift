@@ -157,7 +157,7 @@ struct FriendSelectorView: View {
                         VStack(spacing: 16) {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 64))
-                                .foregroundStyle(.green)
+                                .foregroundStyle(AppAccentGradient.button)
                                 .symbolEffect(.bounce, value: showSentAnimation)
                             Text("Sent!")
                                 .font(.system(size: 24, weight: .bold))
@@ -249,12 +249,36 @@ struct FriendSelectorView: View {
         .frame(maxWidth: 280)
         .clipShape(.rect(cornerRadius: 20))
         .shadow(color: .black.opacity(0.4), radius: 16, x: 0, y: 8)
+        .overlay(alignment: .topTrailing) {
+            if let song {
+                Button {
+                    appState.toggleLikeSong(song, share: contextShare)
+                } label: {
+                    Image(systemName: appState.isLikedSong(song.id) ? "heart.fill" : "heart")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(appState.isLikedSong(song.id) ? AnyShapeStyle(AppAccentGradient.button) : AnyShapeStyle(Color.white.opacity(0.85)))
+                        .padding(10)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                }
+                .sensoryFeedback(.impact(weight: .medium), trigger: appState.isLikedSong(song.id))
+                .padding(12)
+            }
+        }
         .overlay(alignment: .bottom) {
             notePill
                 .padding(.horizontal, 16)
                 .padding(.bottom, 20)
         }
         .padding(.horizontal, 40)
+    }
+
+    /// The share this song card was opened from (a chat tap / feed tap), if
+    /// any. Lets a like fire the per-share social signal back to the sender.
+    private var contextShare: SongShare? {
+        guard let id = shareId ?? recordListenShareId else { return nil }
+        return appState.receivedShares.first { $0.id == id }
+            ?? appState.sentShares.first { $0.id == id }
     }
 
     /// Renders a server-side artwork URL with the same placeholder fill
@@ -394,7 +418,7 @@ struct FriendSelectorView: View {
             } label: {
                 ZStack {
                     Circle()
-                        .fill(canSend && !isCheckingDuplicateSends ? Color(red: 0.76, green: 0.38, blue: 0.35) : Color.white.opacity(0.1))
+                        .fill(canSend && !isCheckingDuplicateSends ? AnyShapeStyle(AppAccentGradient.bubble) : AnyShapeStyle(Color.white.opacity(0.1)))
                         .frame(width: 72, height: 72)
 
                     if isCheckingDuplicateSends {
@@ -738,8 +762,9 @@ struct FriendSelectorView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
                     .background(
-                        (appState.queuedContactError == nil ? Color.green : Color(red: 0.78, green: 0.22, blue: 0.22))
-                            .opacity(0.95),
+                        appState.queuedContactError == nil
+                            ? AnyShapeStyle(AppAccentGradient.bubble.opacity(0.95))
+                            : AnyShapeStyle(Color(red: 0.78, green: 0.22, blue: 0.22).opacity(0.95)),
                         in: Capsule()
                     )
                     .padding(.horizontal, 20)
@@ -768,12 +793,12 @@ struct FriendSelectorView: View {
 
                 if selected {
                     Circle()
-                        .stroke(Color(red: 0.76, green: 0.38, blue: 0.35), lineWidth: 2.5)
+                        .stroke(AppAccentGradient.button, lineWidth: 2.5)
                         .frame(width: 56, height: 56)
 
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 20))
-                        .foregroundStyle(.white, Color(red: 0.76, green: 0.38, blue: 0.35))
+                        .foregroundStyle(.white, AppAccentGradient.deepPink)
                         .background(Circle().fill(Color.black).frame(width: 18, height: 18))
                         .offset(x: 20, y: 20)
                 }

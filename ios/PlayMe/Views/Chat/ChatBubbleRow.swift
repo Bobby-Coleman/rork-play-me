@@ -180,7 +180,13 @@ struct ChatBubbleVisuals: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
-                    .background(isMe ? Color(red: 0.76, green: 0.38, blue: 0.35) : Color.white.opacity(0.1))
+                    .background {
+                        if isMe {
+                            AppAccentGradient.bubble
+                        } else {
+                            Color.white.opacity(0.1)
+                        }
+                    }
                     .clipShape(.rect(cornerRadius: 18))
                     .frame(maxWidth: 280, alignment: isMe ? .trailing : .leading)
             }

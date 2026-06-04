@@ -131,8 +131,8 @@ struct MessagesListView: View {
                 icon: "flame.fill",
                 text: "\(appState.effectiveSendDayStreak)d streak"
             )
-            Spacer()
         }
+        .frame(maxWidth: .infinity, alignment: .center)
         .padding(.horizontal, 20)
         .padding(.top, 10)
         .padding(.bottom, 14)
@@ -292,7 +292,7 @@ struct MessagesListView: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                            .background(AppAccentGradient.bubble)
                             .clipShape(.capsule)
                     }
                 }

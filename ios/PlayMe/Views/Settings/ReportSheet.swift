@@ -66,7 +66,7 @@ struct ReportSheet: View {
                                 HStack(spacing: 12) {
                                     Image(systemName: selectedReason == reason ? "largecircle.fill.circle" : "circle")
                                         .font(.system(size: 18))
-                                        .foregroundStyle(selectedReason == reason ? Color(red: 0.76, green: 0.38, blue: 0.35) : .white.opacity(0.3))
+                                        .foregroundStyle(selectedReason == reason ? AnyShapeStyle(AppAccentGradient.button) : AnyShapeStyle(Color.white.opacity(0.3)))
                                     Text(reason)
                                         .font(.system(size: 15))
                                         .foregroundStyle(.white)
@@ -114,7 +114,7 @@ struct ReportSheet: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                        .background(AppAccentGradient.bubble)
                         .clipShape(.rect(cornerRadius: 12))
                     }
                     .disabled(isSubmitting)

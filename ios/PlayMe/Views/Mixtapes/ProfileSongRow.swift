@@ -101,7 +101,7 @@ struct ProfileSongRow: View {
             } label: {
                 Image(systemName: isLiked ? "heart.fill" : "heart")
                     .font(.system(size: 16))
-                    .foregroundStyle(isLiked ? .pink : .white.opacity(0.25))
+                    .foregroundStyle(isLiked ? AnyShapeStyle(AppAccentGradient.button) : AnyShapeStyle(Color.white.opacity(0.25)))
             }
             .sensoryFeedback(.impact(weight: .light), trigger: isLiked)
 

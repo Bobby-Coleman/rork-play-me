@@ -466,7 +466,7 @@ struct ChatView: View {
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 30))
-                        .foregroundStyle(Color(red: 0.76, green: 0.38, blue: 0.35))
+                        .foregroundStyle(AppAccentGradient.button)
                 }
                 .disabled(isSending)
             }

@@ -39,7 +39,7 @@ struct SettingsView: View {
                 Toggle(isOn: notificationsBinding) {
                     labelRow(icon: "bell.fill", title: "Allow notifications", tint: .orange)
                 }
-                .tint(.green)
+                .tint(AppAccentGradient.lilac)
             }
 
             Section("Privacy & safety") {

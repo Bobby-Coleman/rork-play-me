@@ -188,7 +188,7 @@ struct ReactionMenuOverlay<BubbleContent: View>: View {
                 .background(
                     Circle()
                         .fill(isActive
-                              ? Color(red: 0.76, green: 0.38, blue: 0.35).opacity(0.55)
+                              ? AppAccentGradient.deepLilac.opacity(0.55)
                               : Color.clear)
                 )
         }

@@ -17,6 +17,21 @@ enum AppAccentGradient {
         endPoint: .bottomTrailing
     )
 
+    /// Deeper members of the same hue family, used for filled surfaces that
+    /// carry WHITE text (e.g. the sender's chat bubbles). The pastel
+    /// `button` palette is too light for legible white text, so these are
+    /// darkened versions of lilac/pink that keep the brand feel while
+    /// staying high-contrast against white.
+    static let deepLilac = Color(red: 0.45, green: 0.33, blue: 0.66)
+    static let deepPink = Color(red: 0.67, green: 0.33, blue: 0.50)
+
+    /// Diagonal fill for white-text surfaces (sender chat bubbles).
+    static let bubble = LinearGradient(
+        colors: [deepLilac, deepPink],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
     /// Horizontal stops used for the moving highlight band in
     /// `GradientWaveText`. Transparent on both ends so the band fades in
     /// and out as it sweeps across the glyphs.

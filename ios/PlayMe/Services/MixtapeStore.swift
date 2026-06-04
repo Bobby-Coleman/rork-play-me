@@ -36,6 +36,12 @@ final class MixtapeStore {
     /// about the entire app graph.
     var likedSharesProvider: (@MainActor () -> [SongShare])?
 
+    /// Closure that returns the current user's song-level liked songs,
+    /// newest-first. This is the source of truth for the Liked mixtape;
+    /// `likedSharesProvider` is only a legacy fallback for likes that have
+    /// not been migrated into the song-level store yet.
+    var likedSongsProvider: (@MainActor () -> [Song])?
+
     /// Combined list shown in the Mixtapes grid: synthetic "Liked"
     /// mixtape pinned first, then user-owned mixtapes in
     /// most-recently-updated order. Recomputed on access so the synthetic
@@ -223,9 +229,15 @@ final class MixtapeStore {
     /// without a separate listener.
     private func buildSyntheticLikedMixtape() -> Mixtape {
         let firebaseUID = FirebaseService.shared.firebaseUID ?? ""
-        let liked = likedSharesProvider?() ?? []
         var seen = Set<String>()
         var songs: [Song] = []
+        // Song-level likes are the source of truth (already newest-first).
+        for song in (likedSongsProvider?() ?? []) where seen.insert(song.id).inserted {
+            songs.append(song)
+        }
+        // Legacy fallback: fold in any share-derived likes not yet migrated
+        // into the song-level store so existing users keep their Liked list.
+        let liked = likedSharesProvider?() ?? []
         for share in liked where seen.insert(share.song.id).inserted {
             songs.append(share.song)
         }

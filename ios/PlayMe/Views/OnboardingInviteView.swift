@@ -357,7 +357,7 @@ struct OnboardingInviteView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color(red: 0.76, green: 0.38, blue: 0.35))
+                    .background(AppAccentGradient.bubble)
                     .clipShape(.capsule)
                 }
                 .buttonStyle(.plain)
@@ -516,8 +516,8 @@ struct OnboardingInviteView: View {
                 .padding(.vertical, 6)
                 .background(
                     alreadyInvited(contact)
-                        ? Color.white.opacity(0.18)
-                        : Color(red: 0.76, green: 0.38, blue: 0.35)
+                        ? AnyShapeStyle(Color.white.opacity(0.18))
+                        : AnyShapeStyle(AppAccentGradient.bubble)
                 )
                 .clipShape(.capsule)
             }

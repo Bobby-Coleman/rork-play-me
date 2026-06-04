@@ -483,7 +483,7 @@ struct AddFriendsView: View {
                 user: friend,
                 size: 42,
                 background: Color.white.opacity(0.12),
-                border: Color(red: 0.96, green: 0.62, blue: 0.14),
+                border: AppAccentGradient.pink,
                 borderWidth: 2
             )
 
@@ -974,8 +974,9 @@ struct AddFriendsView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(
-            (isError ? Color(red: 0.78, green: 0.22, blue: 0.22) : Color(red: 0.18, green: 0.55, blue: 0.32))
-                .opacity(0.95)
+            isError
+                ? AnyShapeStyle(Color(red: 0.78, green: 0.22, blue: 0.22).opacity(0.95))
+                : AnyShapeStyle(AppAccentGradient.bubble.opacity(0.95))
         )
         .clipShape(.capsule)
         .padding(.top, 50)

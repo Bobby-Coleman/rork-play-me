@@ -269,7 +269,7 @@ struct SongCardView: View {
                 } label: {
                     Image(systemName: isLiked ? "heart.fill" : "heart")
                         .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(isLiked ? .pink : .white.opacity(0.8))
+                        .foregroundStyle(isLiked ? AnyShapeStyle(AppAccentGradient.button) : AnyShapeStyle(Color.white.opacity(0.8)))
                         .padding(10)
                         .background(.ultraThinMaterial)
                         .clipShape(Circle())

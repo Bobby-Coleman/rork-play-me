@@ -13,10 +13,10 @@ import SwiftUI
 /// weight so the action row reads "primary CTA + supporting actions"
 /// rather than "four equal pills".
 ///
-/// The Like overlay (heart) only renders when the page was seeded from a
-/// `SongShare` so the action stays tied to the existing per-share like
-/// model. Song-only sources (Discover feed, Mixtapes Songs grid) hide it
-/// — those songs don't have a share id to like against.
+/// The Like overlay (heart) always renders and is bound to the song-level
+/// like store (`appState.isLikedSong`). When the page was seeded from a
+/// `SongShare` the like also fires the per-share social signal (sender gets
+/// notified + sees the avatar/heart on their feed card).
 struct SongFullScreenPage: View {
     let song: Song
     let pageSize: CGSize
@@ -38,10 +38,7 @@ struct SongFullScreenPage: View {
     private var isCurrentSong: Bool { audioPlayer.currentSongId == song.id }
     private var isPlayingThis: Bool { isCurrentSong && audioPlayer.isPlaying }
     private var isSaved: Bool { saveService.isSaved(songId: song.id) }
-    private var shareIsLiked: Bool {
-        guard let id = share?.id else { return false }
-        return appState.isLiked(shareId: id)
-    }
+    private var isLiked: Bool { appState.isLikedSong(song.id) }
 
     private var trimmedShareNote: String? {
         let note = (share?.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -173,20 +170,18 @@ struct SongFullScreenPage: View {
         AlbumArtSquare(url: song.albumArtURL, showsShadow: false)
             .frame(width: size, height: size)
             .overlay(alignment: .topTrailing) {
-                if let shareId = share?.id {
-                    Button {
-                        appState.toggleLike(shareId: shareId)
-                    } label: {
-                        Image(systemName: shareIsLiked ? "heart.fill" : "heart")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundStyle(shareIsLiked ? .pink : .white.opacity(0.8))
-                            .padding(10)
-                            .background(.ultraThinMaterial)
-                            .clipShape(Circle())
-                    }
-                    .sensoryFeedback(.impact(weight: .medium), trigger: shareIsLiked)
-                    .padding(12)
+                Button {
+                    appState.toggleLikeSong(song, share: share)
+                } label: {
+                    Image(systemName: isLiked ? "heart.fill" : "heart")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(isLiked ? AnyShapeStyle(AppAccentGradient.button) : AnyShapeStyle(Color.white.opacity(0.8)))
+                        .padding(10)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
                 }
+                .sensoryFeedback(.impact(weight: .medium), trigger: isLiked)
+                .padding(12)
             }
             .shadow(color: .white.opacity(0.05), radius: 20, y: 10)
     }

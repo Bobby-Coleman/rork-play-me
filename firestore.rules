@@ -80,6 +80,12 @@ service cloud.firestore {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
 
+      // Song-level likes (the heart on any song card + the Liked mixtape).
+      // Fully owner-scoped, same posture as `likes`.
+      match /likedSongs/{songId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
       // Private account metadata. Keep tokens/phone out of the public profile
       // doc, which remains readable for username search and display.
       match /private/{docId} {

@@ -30,7 +30,7 @@ struct OTPCodeField: UIViewRepresentable {
         tf.keyboardType = .numberPad
         tf.textContentType = .oneTimeCode
         tf.textColor = textColor
-        tf.tintColor = UIColor(red: 0.98, green: 0.78, blue: 0.13, alpha: 1)
+        tf.tintColor = UIColor(red: 0.80, green: 0.69, blue: 0.96, alpha: 1)
         tf.font = .monospacedDigitSystemFont(ofSize: 28, weight: .semibold)
         tf.defaultTextAttributes[.kern] = 6
         tf.textAlignment = .left

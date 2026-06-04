@@ -358,6 +358,48 @@ class FirebaseService {
         }
     }
 
+    // MARK: - Liked songs (song-level)
+
+    /// Song-level likes are keyed by `song.id` and store the full song
+    /// payload so the Liked mixtape can render songs that have no share
+    /// (e.g. liked straight from search). The per-share `likes` collection
+    /// above is kept separately for the social signal (recipientLiked +
+    /// notify the sender) when the liked song was one sent to you.
+    func saveLikedSong(_ song: Song) async {
+        guard let uid = firebaseUID else { return }
+        var payload = Self.embedSong(song)
+        payload["likedAt"] = FieldValue.serverTimestamp()
+        do {
+            try await db.collection("users").document(uid).collection("likedSongs")
+                .document(song.id).setData(payload)
+        } catch {
+            print("FirebaseService: save liked song failed: \(error.localizedDescription)")
+        }
+    }
+
+    func removeLikedSong(songId: String) async {
+        guard let uid = firebaseUID else { return }
+        do {
+            try await db.collection("users").document(uid).collection("likedSongs")
+                .document(songId).delete()
+        } catch {
+            print("FirebaseService: remove liked song failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Loads the user's song-level likes, newest-first by `likedAt`.
+    func loadLikedSongs() async -> [Song] {
+        guard let uid = firebaseUID else { return [] }
+        do {
+            let snapshot = try await db.collection("users").document(uid).collection("likedSongs")
+                .order(by: "likedAt", descending: true).getDocuments()
+            return snapshot.documents.compactMap { Self.parseEmbeddedSong(from: $0.data()) }
+        } catch {
+            print("FirebaseService: load liked songs failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
     // MARK: - Shares
 
     func saveShare(_ share: SongShare) async -> String? {
@@ -663,6 +705,59 @@ class FirebaseService {
                 let shares = docs.compactMap { self.parseShare(from: $0) }
                 onChange(shares)
             }
+    }
+
+    // MARK: - Full Share History (calendar)
+
+    /// Page size used when walking the full share history. Kept modest so a
+    /// single power user with thousands of sends doesn't fetch one giant
+    /// snapshot; pages are stitched together client-side.
+    private static let shareHistoryPageSize = 300
+
+    /// Loads the current user's ENTIRE sent-share history (newest first),
+    /// paging in `shareHistoryPageSize` chunks. Unlike `loadSentShares`
+    /// (capped at 50 for the feed), this backs the Songs calendar which
+    /// needs every day a song was sent. Reuses the existing
+    /// `senderId + timestamp` index — no composite index required.
+    func loadAllSentShares() async -> [SongShare] {
+        guard let uid = firebaseUID else { return [] }
+        return await loadAllShares(field: "senderId", value: uid)
+    }
+
+    /// Loads the current user's ENTIRE received-share history (newest
+    /// first). Backs the per-friend calendar scope (songs a friend sent
+    /// you) and the bidirectional "top person" count.
+    func loadAllReceivedShares() async -> [SongShare] {
+        guard let uid = firebaseUID else { return [] }
+        return await loadAllShares(field: "recipientId", value: uid)
+    }
+
+    private func loadAllShares(field: String, value: String) async -> [SongShare] {
+        var results: [SongShare] = []
+        var cursor: DocumentSnapshot?
+        // Hard ceiling so a runaway loop can't fetch unbounded reads.
+        let maxPages = 50
+        for _ in 0..<maxPages {
+            do {
+                var query: Query = db.collection("shares")
+                    .whereField(field, isEqualTo: value)
+                    .order(by: "timestamp", descending: true)
+                    .limit(to: Self.shareHistoryPageSize)
+                if let cursor {
+                    query = query.start(afterDocument: cursor)
+                }
+                let snapshot = try await query.getDocuments()
+                let docs = snapshot.documents
+                if docs.isEmpty { break }
+                results.append(contentsOf: docs.compactMap { parseShare(from: $0) })
+                if docs.count < Self.shareHistoryPageSize { break }
+                cursor = docs.last
+            } catch {
+                print("FirebaseService: loadAllShares(\(field)) failed: \(error.localizedDescription)")
+                break
+            }
+        }
+        return results
     }
 
     // MARK: - Mixtape Shares

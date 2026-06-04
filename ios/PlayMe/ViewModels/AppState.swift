@@ -169,6 +169,20 @@ class AppState {
     var isMusicSearchDenied: Bool { musicAuthStatus == .denied }
     var receivedShares: [SongShare] = []
     var sentShares: [SongShare] = []
+
+    /// Full (uncapped) sent-share history backing the Songs calendar. Loaded
+    /// lazily the first time the calendar appears via `loadCalendarHistory`,
+    /// separate from the 50-capped `sentShares` feed window so cold launch
+    /// stays cheap.
+    var calendarSentShares: [SongShare] = []
+    /// Full (uncapped) received-share history backing the per-friend calendar
+    /// scope and the bidirectional "top person" count.
+    var calendarReceivedShares: [SongShare] = []
+    /// True once a calendar history load has completed at least once.
+    var didLoadCalendarHistory: Bool = false
+    /// True while a calendar history load is in flight (drives a spinner).
+    var isLoadingCalendarHistory: Bool = false
+
     var discoveryFeedItems: [DiscoveryFeedItem] {
         let receivedItems = receivedShares.map(DiscoveryFeedItem.received)
         let sentItems = Dictionary(grouping: sentShares, by: { $0.song.id })
@@ -204,6 +218,18 @@ class AppState {
             UserDefaults.standard.set(Array(likedShareIds), forKey: "likedShareIds")
         }
     }
+    /// Song-level likes — the source of truth for the heart on every song
+    /// card and for the synthetic Liked mixtape. A song can be liked from
+    /// anywhere (search, feed, a chat message), not just from a share you
+    /// received. Persisted to Firestore (`users/{uid}/likedSongs`) and
+    /// mirrored to UserDefaults for instant cold-start state.
+    var likedSongIds: Set<String> = [] {
+        didSet {
+            UserDefaults.standard.set(Array(likedSongIds), forKey: "likedSongIds")
+        }
+    }
+    /// Resolved liked songs, newest-first, used to build the Liked mixtape.
+    var likedSongs: [Song] = []
     /// Index of which user-owned mixtapes contain a given `song.id`. Used
     /// by every Save UI in the app to render the "Save" / "Saved" toggle
     /// without per-cell scans of the mixtape graph. Source of truth for
@@ -360,12 +386,14 @@ class AppState {
     init() {
         loadSavedUser()
         likedShareIds = Set(UserDefaults.standard.stringArray(forKey: "likedShareIds") ?? [])
+        likedSongIds = Set(UserDefaults.standard.stringArray(forKey: "likedSongIds") ?? [])
         // Wire MixtapeStore ↔ SaveService now (before any async load), and
         // give the store a closure for `likedShares` so the synthetic
         // Liked mixtape stays reactive to per-share like toggles without
         // a separate observer hookup.
         mixtapeStore.saveService = saveService
         mixtapeStore.likedSharesProvider = { [weak self] in self?.likedShares ?? [] }
+        mixtapeStore.likedSongsProvider = { [weak self] in self?.likedSongs ?? [] }
         // Fire-and-forget: cache MusicKit's current status without prompting.
         Task { [weak self] in
             let status = await AppleMusicSearchService.shared.refreshCachedAuthorizationStatus()
@@ -577,6 +605,10 @@ class AppState {
         let serverLikes = await firebase.loadLikedShareIds()
         likedShareIds = serverLikes
 
+        let serverLikedSongs = await firebase.loadLikedSongs()
+        likedSongs = serverLikedSongs
+        likedSongIds = Set(serverLikedSongs.map(\.id))
+
         async let friendsFetch = firebase.loadFriends()
         async let blockedFetch = firebase.loadBlockedUserIds()
         let (serverFriends, blocked) = await (friendsFetch, blockedFetch)
@@ -622,6 +654,11 @@ class AppState {
 
         let serverSent = await firebase.loadSentShares()
         sentShares = serverSent
+
+        // One-time migration: fold any legacy per-share likes that predate
+        // the song-level store into `likedSongs` (and persist them) so
+        // existing users keep their Liked list and a consistent heart state.
+        migrateLegacyLikesIntoSongStore()
 
         // Initial paint of mixtape/album shares before the listener
         // delivers its first snapshot. Filter `blockedUserIds` so a
@@ -1037,12 +1074,95 @@ class AppState {
     static func localDayString(_ dayOffset: Int) -> String {
         let calendar = Calendar.current
         let date = calendar.date(byAdding: .day, value: dayOffset, to: Date()) ?? Date()
+        return localDayString(for: date)
+    }
+
+    /// `yyyy-MM-dd` for an arbitrary date in the device timezone. Used to
+    /// bucket shares into calendar days.
+    static func localDayString(for date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.calendar = calendar
+        formatter.calendar = Calendar.current
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = .current
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
+    }
+
+    // MARK: - Songs Calendar
+
+    /// Lazily load the full sent + received share history that backs the
+    /// Songs calendar. Cheap to call repeatedly: skips the network if it
+    /// already loaded (unless `force`) and coalesces concurrent calls.
+    func loadCalendarHistory(force: Bool = false) async {
+        if isLoadingCalendarHistory { return }
+        if didLoadCalendarHistory && !force { return }
+        isLoadingCalendarHistory = true
+        let firebase = FirebaseService.shared
+        async let sent = firebase.loadAllSentShares()
+        async let received = firebase.loadAllReceivedShares()
+        let (sentResult, receivedResult) = await (sent, received)
+        // Preserve the no-clobber behavior used elsewhere: an empty fetch
+        // (e.g. transient failure) shouldn't wipe a populated calendar.
+        if !sentResult.isEmpty || !didLoadCalendarHistory {
+            calendarSentShares = sentResult
+        }
+        let filteredReceived = receivedResult.filter { !blockedUserIds.contains($0.sender.id) }
+        if !filteredReceived.isEmpty || !didLoadCalendarHistory {
+            calendarReceivedShares = filteredReceived
+        }
+        didLoadCalendarHistory = true
+        isLoadingCalendarHistory = false
+    }
+
+    /// Songs bucketed by local calendar day for the calendar.
+    /// - `friendId == nil`: every song YOU sent (to anyone), by day sent.
+    /// - `friendId != nil`: every song that friend sent YOU, by day.
+    func calendarSongsByDay(friendId: String?) -> [String: [SongShare]] {
+        let shares: [SongShare]
+        if let friendId {
+            shares = calendarReceivedShares.filter { $0.sender.id == friendId }
+        } else {
+            shares = calendarSentShares
+        }
+        var byDay: [String: [SongShare]] = [:]
+        for share in shares {
+            byDay[Self.localDayString(for: share.timestamp), default: []].append(share)
+        }
+        // Newest-first within each day so the stacked cell shows the most
+        // recent album art on top.
+        for key in byDay.keys {
+            byDay[key]?.sort { $0.timestamp > $1.timestamp }
+        }
+        return byDay
+    }
+
+    /// Date the current user sent their very first song (across all of
+    /// history), or `nil` if they've never sent one.
+    var firstSongSentDate: Date? {
+        calendarSentShares.map(\.timestamp).min()
+    }
+
+    /// The friend the current user has exchanged the most songs with
+    /// (sent to them + received from them), all-time. Returns the friend
+    /// and the combined total.
+    func topPersonBetween() -> (friend: AppUser, total: Int)? {
+        var counts: [String: Int] = [:]
+        var users: [String: AppUser] = [:]
+        for share in calendarSentShares {
+            counts[share.recipient.id, default: 0] += 1
+            users[share.recipient.id] = share.recipient
+        }
+        for share in calendarReceivedShares {
+            counts[share.sender.id, default: 0] += 1
+            users[share.sender.id] = share.sender
+        }
+        // Prefer richer profile data from the live friends list when present.
+        for friend in friends { users[friend.id] = friend }
+        guard let best = counts.max(by: { lhs, rhs in
+            if lhs.value == rhs.value { return lhs.key > rhs.key }
+            return lhs.value < rhs.value
+        }), let user = users[best.key], best.value > 0 else { return nil }
+        return (user, best.value)
     }
 
     func sendMessage(
@@ -1647,6 +1767,70 @@ class AppState {
         likedShareIds.contains(shareId)
     }
 
+    // MARK: - Song-level likes
+
+    /// Whether the given song is in the user's Liked list. Drives the heart
+    /// on every song card, regardless of where the song came from.
+    func isLikedSong(_ songId: String) -> Bool {
+        likedSongIds.contains(songId)
+    }
+
+    /// Likes/unlikes a song everywhere it appears. The optional `share`
+    /// is the contextual share the card was opened from (a chat message,
+    /// a feed row); when it's a song someone sent ME, liking also fires
+    /// the per-share social signal so the sender sees my avatar + heart and
+    /// gets notified (and unliking clears it).
+    func toggleLikeSong(_ song: Song, share: SongShare? = nil) {
+        if likedSongIds.contains(song.id) {
+            likedSongIds.remove(song.id)
+            likedSongs.removeAll { $0.id == song.id }
+            Task { await FirebaseService.shared.removeLikedSong(songId: song.id) }
+            for shareId in shareIdsForSocialSignal(songId: song.id, contextShare: share)
+            where likedShareIds.contains(shareId) {
+                likedShareIds.remove(shareId)
+                Task { await FirebaseService.shared.removeLike(shareId: shareId) }
+            }
+        } else {
+            likedSongIds.insert(song.id)
+            likedSongs.insert(song, at: 0)
+            Task { await FirebaseService.shared.saveLikedSong(song) }
+            for shareId in shareIdsForSocialSignal(songId: song.id, contextShare: share)
+            where !likedShareIds.contains(shareId) {
+                likedShareIds.insert(shareId)
+                Task { await FirebaseService.shared.saveLike(shareId: shareId) }
+            }
+        }
+    }
+
+    /// The set of share ids whose sender should be notified that I liked
+    /// their send. Only shares where I am the recipient qualify (you don't
+    /// signal a like on a song you sent). Prefers the contextual share when
+    /// it is one I received; otherwise every received share of this song.
+    private func shareIdsForSocialSignal(songId: String, contextShare: SongShare?) -> [String] {
+        let myId = currentUser?.id
+        if let share = contextShare, share.recipient.id == myId {
+            return [share.id]
+        }
+        return receivedShares.filter { $0.song.id == songId }.map(\.id)
+    }
+
+    /// Folds legacy per-share likes into the song-level store once, so users
+    /// who liked songs before song-level likes existed keep their Liked list.
+    private func migrateLegacyLikesIntoSongStore() {
+        guard !likedShareIds.isEmpty else { return }
+        let legacy = (receivedShares + sentShares).filter { likedShareIds.contains($0.id) }
+        var added: [Song] = []
+        for share in legacy where !likedSongIds.contains(share.song.id) {
+            likedSongIds.insert(share.song.id)
+            added.append(share.song)
+        }
+        guard !added.isEmpty else { return }
+        likedSongs.insert(contentsOf: added, at: 0)
+        for song in added {
+            Task { await FirebaseService.shared.saveLikedSong(song) }
+        }
+    }
+
     func logout() {
         incomingRequestsListener?.remove()
         incomingRequestsListener = nil
@@ -1686,6 +1870,8 @@ class AppState {
         receivedAlbumShares = []
         sentAlbumShares = []
         likedShareIds = []
+        likedSongIds = []
+        likedSongs = []
         conversations = []
         saveService.clear()
         mixtapeStore.clear()
@@ -1710,6 +1896,7 @@ class AppState {
         UserDefaults.standard.removeObject(forKey: "currentUserPhone")
         UserDefaults.standard.removeObject(forKey: "currentUserAvatarURL")
         UserDefaults.standard.removeObject(forKey: "likedShareIds")
+        UserDefaults.standard.removeObject(forKey: "likedSongIds")
         UserDefaults.standard.removeObject(forKey: "preferredMusicService")
         clearWidgetSharedState()
     }
@@ -1757,6 +1944,12 @@ class AppState {
         let serverLikes = await firebase.loadLikedShareIds()
         if !serverLikes.isEmpty {
             likedShareIds = serverLikes
+        }
+
+        let serverLikedSongs = await firebase.loadLikedSongs()
+        if !serverLikedSongs.isEmpty {
+            likedSongs = serverLikedSongs
+            likedSongIds = Set(serverLikedSongs.map(\.id))
         }
 
         // Refresh saves + mixtapes alongside shares so the Mixtapes screen

@@ -3,16 +3,19 @@ import SwiftUI
 /// Slim list row for `Song`-only search results in `MixtapesView` (e.g.
 /// a song saved into a mixtape that doesn't have an associated
 /// `SongShare`). Mirrors `ProfileSongRow`'s art / title / caption layout
-/// so the unified search list reads as one consistent list — but drops
-/// the heart button (no share id to like against) and the trailing
-/// timestamp (no share metadata).
+/// so the unified search list reads as one consistent list. The heart is
+/// bound to the song-level like store so any song can be liked/unliked
+/// here, even without a share.
 struct MixtapesSearchRow: View {
     let song: Song
     /// Caller-provided context label rendered under the song title —
     /// e.g. "From mixtape: Workout". Kept generic so the row doesn't
     /// need to know about mixtape vs. share semantics.
     let contextLabel: String
+    let appState: AppState
     let onTap: () -> Void
+
+    private var isLiked: Bool { appState.isLikedSong(song.id) }
 
     private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
 
@@ -74,6 +77,15 @@ struct MixtapesSearchRow: View {
             }
 
             Spacer()
+
+            Button {
+                appState.toggleLikeSong(song)
+            } label: {
+                Image(systemName: isLiked ? "heart.fill" : "heart")
+                    .font(.system(size: 16))
+                    .foregroundStyle(isLiked ? AnyShapeStyle(AppAccentGradient.button) : AnyShapeStyle(Color.white.opacity(0.25)))
+            }
+            .sensoryFeedback(.impact(weight: .light), trigger: isLiked)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)

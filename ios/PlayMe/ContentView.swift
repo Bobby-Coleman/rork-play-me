@@ -50,6 +50,13 @@ struct ContentView: View {
     @State private var sendSheetIntent: SendSheetIntent?
     @State private var showAddFriends = false
     @State private var selectedTab: Int = MainTab.discovery.rawValue
+    /// Which inner page the Library (Mixtapes) tab is showing. Owned here so
+    /// the global swipe gesture only lets a swipe escape to Search from the
+    /// Mixtapes page (the Songs calendar keeps its swipes for paging).
+    @State private var librarySegment: MixtapesSegment = .songs
+    /// Inner Library page captured at the start of a drag, so a settled
+    /// inner page-swipe can't race the gesture's `.onEnded` read.
+    @State private var dragStartLibrarySegment: MixtapesSegment?
     @State private var messagesNavigationResetToken: Int = 0
     @State private var miniPlayerSong: Song?
     /// Tracks whether the Discovery tab is currently showing its hero page
@@ -282,6 +289,22 @@ struct ContentView: View {
         appState.discoveryScrollToTopCounter &+= 1
     }
 
+    /// Swipe handling while on the Library tab. The inner pager owns
+    /// Songs <-> Mixtapes paging; the only swipe that escapes Library is a
+    /// left-swipe from the Mixtapes page, which advances to Search. This
+    /// keeps the calendar's swipes for paging and prevents the accidental
+    /// jump-to-Search the old global gesture caused.
+    private func handleLibrarySwipe(translationWidth: CGFloat, startSegment: MixtapesSegment) {
+        // Strip: Search | Songs | Mixtapes. From the Songs page a back-swipe
+        // (finger right) escapes to Search; a forward-swipe (finger left) is
+        // owned by the inner pager and pages to Mixtapes. From Mixtapes the
+        // inner pager owns paging back to Songs and nothing escapes.
+        guard startSegment == .songs, translationWidth > 60 else { return }
+        withAnimation(.easeInOut(duration: 0.28)) {
+            selectTab(MainTab.discovery.rawValue)
+        }
+    }
+
     private func navigateTabBySwipe(translationWidth: CGFloat) {
         let horizontal = translationWidth
         let ordered = Self.swipeableTabs
@@ -337,7 +360,11 @@ struct ContentView: View {
             }
 
             Tab(value: MainTab.mixtapes.rawValue) {
-                MixtapesView(appState: appState)
+                MixtapesView(
+                    appState: appState,
+                    selectedSegment: $librarySegment,
+                    onSendSong: { sendSheetIntent = .search }
+                )
             } label: {
                 Image(systemName: "rectangle.stack.fill")
             }
@@ -346,11 +373,22 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .simultaneousGesture(
             DragGesture(minimumDistance: 50)
+                .onChanged { _ in
+                    if dragStartLibrarySegment == nil {
+                        dragStartLibrarySegment = librarySegment
+                    }
+                }
                 .onEnded { value in
+                    let startSegment = dragStartLibrarySegment
+                    dragStartLibrarySegment = nil
                     let h = value.translation.width
                     let v = value.translation.height
                     guard abs(h) > max(72, abs(v) * 1.25) else { return }
-                    navigateTabBySwipe(translationWidth: h)
+                    if selectedTab == MainTab.mixtapes.rawValue {
+                        handleLibrarySwipe(translationWidth: h, startSegment: startSegment ?? librarySegment)
+                    } else {
+                        navigateTabBySwipe(translationWidth: h)
+                    }
                 }
         )
         .onChange(of: selectedTab) { _, newValue in

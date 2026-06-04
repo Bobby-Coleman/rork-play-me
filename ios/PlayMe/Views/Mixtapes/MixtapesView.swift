@@ -1,13 +1,11 @@
 import SwiftUI
 
-/// Top-level segments of the Mixtapes tab. Order matches the spec:
-/// Songs | Mixtapes (default) | Sent | Received | Liked.
+/// Top-level tabs of the library screen. Two swipeable pages: a
+/// Locket-style Songs calendar (default landing) and your Mixtapes.
+/// Declaration order is the left-to-right page / chip order.
 enum MixtapesSegment: String, CaseIterable, Identifiable {
     case songs = "Songs"
     case mixtapes = "Mixtapes"
-    case sent = "Sent"
-    case received = "Received"
-    case liked = "Liked"
 
     var id: String { rawValue }
 }
@@ -31,31 +29,33 @@ enum MixtapesViewMode: String { case grid, list }
 struct MixtapesView: View {
     @Bindable var appState: AppState
 
-    @State private var selectedSegment: MixtapesSegment = .mixtapes
+    /// Owned by `ContentView` so the parent swipe gesture can tell which
+    /// inner page is showing (it only lets a swipe escape to Search from
+    /// the Mixtapes page).
+    @Binding var selectedSegment: MixtapesSegment
+    /// Opens the search/send sheet (tapping the calendar's "+" on today).
+    var onSendSong: () -> Void
     @State private var searchText: String = ""
     @State private var showSettings: Bool = false
     @State private var showProfileDetails: Bool = false
+    /// Drives the search overlay that replaces the tab content while active.
+    @State private var showSearch: Bool = false
     @State private var fullscreenSeed: FullscreenSeed?
     @State private var detailMixtape: Mixtape?
     /// Inbound mixtape share to push into the read-only detail view.
     @State private var detailReceivedMixtape: MixtapeShare?
     /// Inbound album share to push into the read-only detail view.
     @State private var detailReceivedAlbum: AlbumShare?
-    /// Focus binding for the "Search your songs" field. Drives both
-    /// Return-key dismissal (via `onSubmit`) and any future programmatic
-    /// dismiss points (e.g. tapping a result row) without round-tripping
-    /// through `UIApplication.shared.endEditing`.
+    /// Focus binding for the search field. Drives Return-key dismissal and
+    /// programmatic focus when the search overlay opens.
     @FocusState private var isSearchFocused: Bool
 
-    // Per-segment grid/list mode preferences. Defaults match the spec:
-    // Songs and Mixtapes start in grid; Sent / Received / Liked start
-    // in list. Each segment's toggle writes to its own key so a user
-    // who flips one tab to grid doesn't disturb the others.
-    @AppStorage("mixtapes.viewMode.songs")    private var songsModeRaw    = MixtapesViewMode.grid.rawValue
+    // Grid/list preference for the Mixtapes page.
     @AppStorage("mixtapes.viewMode.mixtapes") private var mixtapesModeRaw = MixtapesViewMode.grid.rawValue
-    @AppStorage("mixtapes.viewMode.sent")     private var sentModeRaw     = MixtapesViewMode.list.rawValue
-    @AppStorage("mixtapes.viewMode.received") private var receivedModeRaw = MixtapesViewMode.list.rawValue
-    @AppStorage("mixtapes.viewMode.liked")    private var likedModeRaw    = MixtapesViewMode.list.rawValue
+
+    private var mixtapesMode: MixtapesViewMode {
+        MixtapesViewMode(rawValue: mixtapesModeRaw) ?? .grid
+    }
 
     private var user: AppUser? { appState.currentUser }
 
@@ -64,32 +64,29 @@ struct MixtapesView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    searchBar
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                        .padding(.bottom, 12)
+                if showSearch {
+                    searchOverlay
+                } else {
+                    VStack(spacing: 0) {
+                        topSegmentControl
+                            .padding(.horizontal, 20)
+                            .padding(.top, 8)
+                            .padding(.bottom, 10)
 
-                    segmentPicker
-                        .padding(.bottom, 4)
+                        TabView(selection: $selectedSegment) {
+                            SongCalendarView(
+                                appState: appState,
+                                onOpenSeed: { seed in fullscreenSeed = seed },
+                                onSendSong: onSendSong
+                            )
+                            .tag(MixtapesSegment.songs)
 
-                    // Section header sits between the segment chips and
-                    // the content. It owns the grid/list toggle so the
-                    // toggle has proper breathing room — the segment
-                    // strip used to host it inline, which got crowded
-                    // once five chips needed to scroll horizontally.
-                    sectionHeaderBar
-                        .padding(.horizontal, 20)
-                        .padding(.top, 8)
-                        .padding(.bottom, 6)
-
-                    contentForSegment
+                            mixtapesPage
+                                .tag(MixtapesSegment.mixtapes)
+                        }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
+                    }
                 }
-                // Propagates to every descendant `ScrollView` (segment
-                // grids, segment lists, search-results list, share
-                // feeds), so dragging any list down past its content
-                // edge interactively dismisses the search keyboard.
-                .scrollDismissesKeyboard(.interactively)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -102,14 +99,26 @@ struct MixtapesView: View {
                     .accessibilityLabel("Profile")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                            .font(.system(size: 17))
-                            .foregroundStyle(.white.opacity(0.8))
+                    HStack(spacing: 16) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) { showSearch = true }
+                            isSearchFocused = true
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                        .accessibilityLabel("Search")
+
+                        Button {
+                            showSettings = true
+                        } label: {
+                            Image(systemName: "gearshape.fill")
+                                .font(.system(size: 17))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                        .accessibilityLabel("Settings")
                     }
-                    .accessibilityLabel("Settings")
                 }
             }
             .toolbarColorScheme(.dark, for: .navigationBar)
@@ -191,49 +200,39 @@ struct MixtapesView: View {
         .clipShape(.capsule)
     }
 
-    // MARK: - Segment picker
+    // MARK: - Top tab control
 
-    /// Horizontally-scrolling segment chip strip. Used to host the
-    /// list/grid toggle inline with the chips, which got cramped once
-    /// all five chips needed to scroll. The toggle has been moved into
-    /// `sectionHeaderBar` directly below this row.
-    private var segmentPicker: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 0) {
-                ForEach(MixtapesSegment.allCases) { seg in
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            selectedSegment = seg
+    /// Two-chip segmented control kept in sync with the swipeable TabView.
+    private var topSegmentControl: some View {
+        HStack(spacing: 0) {
+            ForEach(MixtapesSegment.allCases) { seg in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { selectedSegment = seg }
+                } label: {
+                    Text(seg.rawValue)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(selectedSegment == seg ? .black : .white.opacity(0.6))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background {
+                            if selectedSegment == seg {
+                                Capsule().fill(.white)
+                            }
                         }
-                    } label: {
-                        VStack(spacing: 6) {
-                            Text(seg.rawValue)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(selectedSegment == seg ? .white : .white.opacity(0.35))
-
-                            Rectangle()
-                                .fill(selectedSegment == seg ? Color.white : Color.clear)
-                                .frame(height: 2)
-                        }
-                        .padding(.horizontal, 16)
-                    }
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 8)
         }
-        .scrollIndicators(.hidden)
+        .padding(4)
+        .background(Color.white.opacity(0.08), in: Capsule())
     }
 
-    /// Section header that sits below the segment chip strip. Shows a
-    /// contextual title for the active segment on the leading edge and
-    /// the grid/list toggle on the trailing edge. Hidden entirely
-    /// while a search query is active (search results replace the
-    /// segment view, so a per-segment toggle would be misleading).
-    @ViewBuilder
-    private var sectionHeaderBar: some View {
-        if !isSearching {
+    // MARK: - Mixtapes page
+
+    private var mixtapesPage: some View {
+        VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text(sectionTitle)
+                Text("Your mixtapes")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.55))
                     .textCase(.uppercase)
@@ -243,24 +242,23 @@ struct MixtapesView: View {
 
                 viewModeToggle
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+
+            if mixtapesMode == .grid {
+                MixtapesGridView(appState: appState, searchText: "") { mixtape in
+                    detailMixtape = mixtape
+                }
+            } else {
+                MixtapesListView(appState: appState) { mixtape in
+                    detailMixtape = mixtape
+                }
+            }
         }
     }
 
-    /// Title shown on the leading edge of `sectionHeaderBar`. Mirrors
-    /// the active segment label so the toggle has obvious context
-    /// without resorting to the segment chips above it.
-    private var sectionTitle: String {
-        switch selectedSegment {
-        case .songs:    return "All songs"
-        case .mixtapes: return "Your mixtapes"
-        case .sent:     return "Sent"
-        case .received: return "Received"
-        case .liked:    return "Liked"
-        }
-    }
-
-    /// Two-icon (grid / list) toggle that flips the active segment's
-    /// `@AppStorage` mode.
+    /// Two-icon (grid / list) toggle for the Mixtapes page.
     private var viewModeToggle: some View {
         HStack(spacing: 2) {
             modeButton(target: .grid, icon: "square.grid.2x2.fill")
@@ -271,9 +269,9 @@ struct MixtapesView: View {
     }
 
     private func modeButton(target: MixtapesViewMode, icon: String) -> some View {
-        let active = currentMode == target
+        let active = mixtapesMode == target
         return Button {
-            setMode(target)
+            mixtapesModeRaw = target.rawValue
         } label: {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .semibold))
@@ -285,98 +283,48 @@ struct MixtapesView: View {
         .accessibilityLabel(target == .grid ? "Grid view" : "List view")
     }
 
-    private var currentMode: MixtapesViewMode {
-        switch selectedSegment {
-        case .songs:    return MixtapesViewMode(rawValue: songsModeRaw) ?? .grid
-        case .mixtapes: return MixtapesViewMode(rawValue: mixtapesModeRaw) ?? .grid
-        case .sent:     return MixtapesViewMode(rawValue: sentModeRaw) ?? .list
-        case .received: return MixtapesViewMode(rawValue: receivedModeRaw) ?? .list
-        case .liked:    return MixtapesViewMode(rawValue: likedModeRaw) ?? .list
-        }
-    }
+    // MARK: - Search overlay
 
-    private func setMode(_ mode: MixtapesViewMode) {
-        switch selectedSegment {
-        case .songs:    songsModeRaw = mode.rawValue
-        case .mixtapes: mixtapesModeRaw = mode.rawValue
-        case .sent:     sentModeRaw = mode.rawValue
-        case .received: receivedModeRaw = mode.rawValue
-        case .liked:    likedModeRaw = mode.rawValue
-        }
-    }
-
-    // MARK: - Segment content
-
-    /// True when the search field has any non-whitespace text. Used to
-    /// switch the entire content area from the active segment view to a
-    /// flat unified results list across all categories.
+    /// True when the search field has any non-whitespace text.
     private var isSearching: Bool {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    @ViewBuilder
-    private var contentForSegment: some View {
-        if isSearching {
-            searchResultsList
-        } else {
-            switch selectedSegment {
-            case .songs:
-                if currentMode == .grid {
-                    SongsGridView(
-                        appState: appState,
-                        searchText: searchText,
-                        onTap: { songs, idx in
-                            // Pre-warm AVPlayer so the preview download
-                            // overlaps the present transition. Coordinator
-                            // is idempotent for already-playing songs.
-                            if songs.indices.contains(idx) {
-                                AudioPlayerService.shared.play(song: songs[idx])
-                            }
-                            fullscreenSeed = FullscreenSeed(songs: songs, startIndex: idx)
-                        }
-                    )
-                } else {
-                    SongsListView(appState: appState) { songs, idx in
-                        if songs.indices.contains(idx) {
-                            AudioPlayerService.shared.play(song: songs[idx])
-                        }
-                        fullscreenSeed = FullscreenSeed(songs: songs, startIndex: idx)
-                    }
+    /// Replaces the tab content while the search affordance is open. Reuses
+    /// the unified `searchResultsList` so songs + mixtapes stay searchable.
+    private var searchOverlay: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                searchBar
+                Button("Cancel") {
+                    withAnimation(.easeInOut(duration: 0.2)) { showSearch = false }
+                    searchText = ""
+                    isSearchFocused = false
                 }
-            case .mixtapes:
-                if currentMode == .grid {
-                    MixtapesGridView(
-                        appState: appState,
-                        searchText: searchText,
-                        onTap: { mixtape in
-                            detailMixtape = mixtape
-                        }
-                    )
-                } else {
-                    MixtapesListView(appState: appState) { mixtape in
-                        detailMixtape = mixtape
-                    }
+                .font(.system(size: 15))
+                .foregroundStyle(.white.opacity(0.8))
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+
+            if isSearching {
+                searchResultsList
+            } else {
+                VStack(spacing: 8) {
+                    Spacer()
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.white.opacity(0.15))
+                    Text("Search your songs and mixtapes")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white.opacity(0.3))
+                    Spacer()
                 }
-            case .sent:
-                if currentMode == .list {
-                    mergedShareFeed(direction: .sent)
-                } else {
-                    songShareGrid(songs: appState.sentShares)
-                }
-            case .received:
-                if currentMode == .list {
-                    mergedShareFeed(direction: .received)
-                } else {
-                    songShareGrid(songs: appState.receivedShares)
-                }
-            case .liked:
-                if currentMode == .list {
-                    shareList(appState.likedShares)
-                } else {
-                    songShareGrid(songs: appState.likedShares)
-                }
+                .frame(maxWidth: .infinity)
             }
         }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     /// Grid layout for the song-share segments (Sent / Received /
@@ -444,64 +392,6 @@ struct MixtapesView: View {
             }
             .scrollIndicators(.hidden)
             .refreshable { await appState.refreshShares() }
-        }
-    }
-
-    private func shareList(_ shares: [SongShare]) -> some View {
-        // First-wins dedupe by `song.id`. The same song can legitimately
-        // appear multiple times in Sent (one share per recipient),
-        // Received (one per sender), or Liked (cross-sender duplicates),
-        // and `Dictionary(uniqueKeysWithValues:)` would `fatalError` on
-        // those duplicates and crash the tab.
-        let lookupMap: [String: SongShare] = Dictionary(
-            shares.map { ($0.song.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        return ScrollView {
-            LazyVStack(spacing: 0) {
-                if shares.isEmpty {
-                    emptyShareState
-                } else {
-                    ForEach(Array(shares.enumerated()), id: \.element.id) { idx, share in
-                        ProfileSongRow(
-                            share: share,
-                            personLabel: personLabel(for: share),
-                            isLiked: appState.isLiked(shareId: share.id),
-                            onToggleLike: { appState.toggleLike(shareId: share.id) },
-                            onTap: {
-                                AudioPlayerService.shared.play(song: share.song)
-                                fullscreenSeed = FullscreenSeed(
-                                    songs: shares.map(\.song),
-                                    startIndex: idx,
-                                    shareLookup: { id in lookupMap[id] }
-                                )
-                            }
-                        )
-                        if share.id != shares.last?.id {
-                            Divider()
-                                .background(Color.white.opacity(0.06))
-                                .padding(.horizontal, 20)
-                        }
-                    }
-                }
-                Color.clear.frame(height: 40)
-            }
-        }
-        .scrollIndicators(.hidden)
-        .refreshable { await appState.refreshShares() }
-    }
-
-    private func personLabel(for share: SongShare) -> String {
-        switch selectedSegment {
-        case .sent: return share.recipient.firstName
-        case .received: return share.sender.firstName
-        case .liked:
-            if share.sender.id == appState.currentUser?.id {
-                return "To \(share.recipient.firstName)"
-            } else {
-                return "From \(share.sender.firstName)"
-            }
-        default: return share.sender.firstName
         }
     }
 
@@ -591,8 +481,8 @@ struct MixtapesView: View {
                             ProfileSongRow(
                                 share: share,
                                 personLabel: personLabel(for: share, direction: direction),
-                                isLiked: appState.isLiked(shareId: share.id),
-                                onToggleLike: { appState.toggleLike(shareId: share.id) },
+                                isLiked: appState.isLikedSong(share.song.id),
+                                onToggleLike: { appState.toggleLikeSong(share.song, share: share) },
                                 onTap: {
                                     if let idx = songOnly.firstIndex(where: { $0.id == share.id }) {
                                         AudioPlayerService.shared.play(song: share.song)
@@ -841,8 +731,8 @@ struct MixtapesView: View {
                             ProfileSongRow(
                                 share: share,
                                 personLabel: label,
-                                isLiked: appState.isLiked(shareId: share.id),
-                                onToggleLike: { appState.toggleLike(shareId: share.id) },
+                                isLiked: appState.isLikedSong(share.song.id),
+                                onToggleLike: { appState.toggleLikeSong(share.song, share: share) },
                                 onTap: {
                                     AudioPlayerService.shared.play(song: share.song)
                                     fullscreenSeed = FullscreenSeed(
@@ -856,6 +746,7 @@ struct MixtapesView: View {
                             MixtapesSearchRow(
                                 song: song,
                                 contextLabel: label,
+                                appState: appState,
                                 onTap: {
                                     AudioPlayerService.shared.play(song: song)
                                     fullscreenSeed = FullscreenSeed(
@@ -1007,12 +898,15 @@ private struct MixtapesGridView: View {
         }
     }
 
-    /// True before the user has created any mixtape of their own. The
-    /// synthetic Liked tile is intentionally hidden in this state so the
-    /// "save your first song" empty state reads as a clean, premium start
-    /// screen rather than competing with an empty Liked card.
+    /// True only before the user has ANY mixtape content — no mixtapes of
+    /// their own AND no liked songs. The synthetic Liked tile surfaces as
+    /// soon as the user likes their first song, so liking now visibly
+    /// builds the auto "Liked" mixtape instead of staying hidden behind
+    /// the "save your first song" empty state.
     private var showFirstMixtapeState: Bool {
         appState.mixtapeStore.userMixtapes.isEmpty
+            && appState.likedSongs.isEmpty
+            && appState.likedShareIds.isEmpty
             && searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -1218,6 +1112,9 @@ private struct SongsListView: View {
 /// triggers preview playback without opening the fullscreen feed.
 private struct SongListRow: View {
     let song: Song
+    /// When provided, a song-level like heart is shown so any song can be
+    /// liked/unliked straight from the list (e.g. the Liked mixtape).
+    var appState: AppState? = nil
     let onTap: () -> Void
 
     private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
@@ -1269,6 +1166,16 @@ private struct SongListRow: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.25))
             }
+            if let appState {
+                Button {
+                    appState.toggleLikeSong(song)
+                } label: {
+                    Image(systemName: appState.isLikedSong(song.id) ? "heart.fill" : "heart")
+                        .font(.system(size: 16))
+                        .foregroundStyle(appState.isLikedSong(song.id) ? AnyShapeStyle(AppAccentGradient.button) : AnyShapeStyle(Color.white.opacity(0.25)))
+                }
+                .sensoryFeedback(.impact(weight: .light), trigger: appState.isLikedSong(song.id))
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
@@ -1288,11 +1195,13 @@ private struct MixtapesListView: View {
 
     private var mixtapes: [Mixtape] { appState.mixtapeStore.allMixtapes }
 
-    /// Mirrors `MixtapesGridView`: hide the synthetic Liked tile and show
-    /// the "save your first song" empty state until the user creates a
-    /// mixtape of their own.
+    /// Mirrors `MixtapesGridView`: only show the "save your first song"
+    /// empty state until the user has any content — the Liked tile appears
+    /// as soon as they like a song.
     private var showFirstMixtapeState: Bool {
         appState.mixtapeStore.userMixtapes.isEmpty
+            && appState.likedSongs.isEmpty
+            && appState.likedShareIds.isEmpty
     }
 
     var body: some View {
@@ -1492,7 +1401,7 @@ struct MixtapeDetailView: View {
                                 } else {
                                     LazyVStack(spacing: 0) {
                                         ForEach(Array(liveMixtape.songs.enumerated()), id: \.element.id) { idx, song in
-                                            SongListRow(song: song) {
+                                            SongListRow(song: song, appState: appState) {
                                                 AudioPlayerService.shared.play(song: song)
                                                 fullscreenSeed = FullscreenSeed(
                                                     songs: liveMixtape.songs,
