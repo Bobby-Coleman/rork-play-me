@@ -29,18 +29,24 @@ enum MixtapesViewMode: String { case grid, list }
 struct MixtapesView: View {
     @Bindable var appState: AppState
 
-    /// Owned by `ContentView` so the parent swipe gesture can tell which
-    /// inner page is showing (it only lets a swipe escape to Search from
-    /// the Mixtapes page).
+    /// Drives the top segment control and stays in sync with the inner
+    /// `LibraryPager`. `ContentView` observes it but no longer drives swipe
+    /// escape — the pager owns Songs<->Mixtapes paging and the Songs->Search
+    /// hand-off directly.
     @Binding var selectedSegment: MixtapesSegment
     /// Opens the search/send sheet (tapping the calendar's "+" on today).
     var onSendSong: () -> Void
+    /// Called when the user swipes right off the Songs page — escapes to the
+    /// main Search tab with no rubber-band bounce.
+    var onSwipeToSearch: () -> Void
     @State private var searchText: String = ""
     @State private var showSettings: Bool = false
     @State private var showProfileDetails: Bool = false
     /// Drives the search overlay that replaces the tab content while active.
     @State private var showSearch: Bool = false
     @State private var fullscreenSeed: FullscreenSeed?
+    /// A tapped calendar day's songs, presented in the Locket-style carousel.
+    @State private var dayCarouselSeed: DayCarouselSeed?
     @State private var detailMixtape: Mixtape?
     /// Inbound mixtape share to push into the read-only detail view.
     @State private var detailReceivedMixtape: MixtapeShare?
@@ -73,18 +79,20 @@ struct MixtapesView: View {
                             .padding(.top, 8)
                             .padding(.bottom, 10)
 
-                        TabView(selection: $selectedSegment) {
-                            SongCalendarView(
-                                appState: appState,
-                                onOpenSeed: { seed in fullscreenSeed = seed },
-                                onSendSong: onSendSong
-                            )
-                            .tag(MixtapesSegment.songs)
-
-                            mixtapesPage
-                                .tag(MixtapesSegment.mixtapes)
-                        }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
+                        LibraryPager(
+                            segment: $selectedSegment,
+                            onSwipeRightFromSongs: onSwipeToSearch,
+                            songs: {
+                                SongCalendarView(
+                                    appState: appState,
+                                    onOpenDay: { shares in
+                                        dayCarouselSeed = DayCarouselSeed(shares: shares)
+                                    },
+                                    onSendSong: onSendSong
+                                )
+                            },
+                            mixtapes: { mixtapesPage }
+                        )
                     }
                 }
             }
@@ -145,6 +153,9 @@ struct MixtapesView: View {
                 appState: appState,
                 shareLookup: seed.shareLookup
             )
+        }
+        .fullScreenCover(item: $dayCarouselSeed) { seed in
+            DayCarouselView(shares: seed.shares, appState: appState)
         }
         .sheet(item: $detailMixtape) { mixtape in
             MixtapeDetailView(mixtape: mixtape, appState: appState)
@@ -2196,6 +2207,108 @@ struct ProfileDetailsView: View {
                 .presentationDragIndicator(.visible)
         }
     }
+}
+
+// MARK: - Library pager
+
+/// Two-page horizontal pager for the Library tab (Songs <-> Mixtapes) that
+/// replaces a page-style `TabView`. It owns the swipe so a right-swipe off
+/// the Songs page hands straight to the main Search tab with no rubber-band
+/// bounce (the old `TabView` edge-bounced the leftmost page while the global
+/// gesture switched tabs, which read as clunky). Only predominantly
+/// horizontal drags page; vertical drags fall through to the inner scroll.
+private struct LibraryPager<SongsContent: View, MixtapesContent: View>: View {
+    @Binding var segment: MixtapesSegment
+    var onSwipeRightFromSongs: () -> Void
+    @ViewBuilder var songs: () -> SongsContent
+    @ViewBuilder var mixtapes: () -> MixtapesContent
+
+    @State private var dragOffset: CGFloat = 0
+    /// nil = axis undecided, true = horizontal (we drive paging), false =
+    /// vertical (ignore so the inner scroll view keeps the gesture).
+    @State private var horizontalLock: Bool?
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            let base: CGFloat = segment == .songs ? 0 : -width
+
+            HStack(spacing: 0) {
+                songs().frame(width: width)
+                mixtapes().frame(width: width)
+            }
+            .frame(width: width * 2, alignment: .leading)
+            .offset(x: base + dragOffset)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 10)
+                    .onChanged { value in
+                        let h = value.translation.width
+                        let v = value.translation.height
+                        if horizontalLock == nil {
+                            if abs(h) > 12 || abs(v) > 12 {
+                                horizontalLock = abs(h) > abs(v)
+                            }
+                        }
+                        guard horizontalLock == true else { return }
+                        dragOffset = resisted(h, width: width)
+                    }
+                    .onEnded { value in
+                        defer { horizontalLock = nil }
+                        guard horizontalLock == true else { return }
+                        let h = value.translation.width
+                        let predicted = value.predictedEndTranslation.width
+                        let threshold = max(60, width * 0.22)
+
+                        if segment == .songs {
+                            if h < -threshold || predicted < -threshold {
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) {
+                                    segment = .mixtapes
+                                    dragOffset = 0
+                                }
+                            } else if h > threshold || predicted > threshold {
+                                onSwipeRightFromSongs()
+                                dragOffset = 0
+                            } else {
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) {
+                                    dragOffset = 0
+                                }
+                            }
+                        } else {
+                            if h > threshold || predicted > threshold {
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) {
+                                    segment = .songs
+                                    dragOffset = 0
+                                }
+                            } else {
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) {
+                                    dragOffset = 0
+                                }
+                            }
+                        }
+                    }
+            )
+        }
+        .clipped()
+    }
+
+    /// Full tracking toward an existing neighbor page; strong resistance when
+    /// dragging past an edge (Songs->right escape, Mixtapes->left dead end)
+    /// so there is a small hint without the elastic spring-back.
+    private func resisted(_ h: CGFloat, width: CGFloat) -> CGFloat {
+        let pastEdge = (segment == .songs && h > 0) || (segment == .mixtapes && h < 0)
+        guard pastEdge else {
+            return max(-width, min(width, h))
+        }
+        return h * 0.18
+    }
+}
+
+// MARK: - Day carousel seed
+
+/// Identifiable payload for the Locket-style day carousel `.fullScreenCover`.
+struct DayCarouselSeed: Identifiable {
+    let id = UUID()
+    let shares: [SongShare]
 }
 
 // MARK: - Fullscreen seed payload

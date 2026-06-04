@@ -13,8 +13,9 @@ import SwiftUI
 ///     appear, mirroring Locket.
 struct SongCalendarView: View {
     @Bindable var appState: AppState
-    /// Parent owns the single `.fullScreenCover`, so day taps hand a seed up.
-    var onOpenSeed: (FullscreenSeed) -> Void
+    /// Parent owns the day carousel presentation, so a day tap hands the
+    /// day's shares up (sender + note travel with each song).
+    var onOpenDay: ([SongShare]) -> Void
     /// Opens the search/send sheet when the user taps the "+" on today.
     var onSendSong: () -> Void
 
@@ -89,8 +90,11 @@ struct SongCalendarView: View {
             }
             // Keep the label at its intrinsic width so the name never gets
             // momentarily compressed/clipped while the tab/selection
-            // re-lays out around it.
+            // re-lays out around it. Suppress the implicit resize animation
+            // too, otherwise the title visibly clips mid-resize when the
+            // selected person changes, then snaps to the correct width.
             .fixedSize(horizontal: true, vertical: false)
+            .transaction { $0.animation = nil }
             .padding(.horizontal, 18)
             .padding(.vertical, 9)
             .background(
@@ -323,10 +327,12 @@ struct SongCalendarView: View {
         }
     }
 
-    /// The current day in the "You" scope gets a glowing "+" to send a song
-    /// right now. (Friend scopes show their sends only, so no send affordance.)
+    /// An empty current day in the "You" scope gets a glowing "+" to send a
+    /// song right now. Once a song has landed today the "+" disappears and
+    /// the cell behaves like any other day (artwork opens the carousel).
+    /// (Friend scopes show their sends only, so no send affordance.)
     private func showsSendButton(_ day: DayCell) -> Bool {
-        selectedFriendId == nil && day.dayString == todayString
+        selectedFriendId == nil && day.dayString == todayString && day.songs.isEmpty
     }
 
     @ViewBuilder
@@ -373,12 +379,12 @@ struct SongCalendarView: View {
                     )
                     if day.songs.count > 1 {
                         Text("\(day.songs.count)")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(size: 11, weight: .heavy))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 5)
+                            .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Capsule().fill(Color.black.opacity(0.55)))
-                            .padding(3)
+                            .background(Capsule().fill(Color.black.opacity(0.6)))
+                            .padding(4)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                     }
                 }
@@ -387,77 +393,29 @@ struct SongCalendarView: View {
         }
     }
 
-    /// Today's cell in "You" scope: a glowing gradient "+" to send a song
-    /// now. If songs already landed today, the artwork stays tappable to
-    /// open the carousel and the "+" tucks into the corner.
-    @ViewBuilder
+    /// Today's empty cell in "You" scope: a glowing gradient "+" to send a
+    /// song now. Only used while today has no songs (see `showsSendButton`).
     private func todaySendCell(_ day: DayCell) -> some View {
-        if day.songs.isEmpty {
-            Button {
-                onSendSong()
-            } label: {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.white.opacity(0.06))
-                    GlowingPlusBadge(size: 26, glow: 12)
-                }
-                .aspectRatio(1, contentMode: .fit)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Send a song today")
-        } else {
+        Button {
+            onSendSong()
+        } label: {
             ZStack {
-                Button {
-                    openDay(day)
-                } label: {
-                    ZStack {
-                        if day.songs.count > 1 {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.white.opacity(0.18))
-                                .aspectRatio(1, contentMode: .fit)
-                                .scaleEffect(0.93)
-                                .offset(x: 3, y: -3)
-                        }
-                        AlbumArtSquare(
-                            url: day.songs.first?.song.albumArtURL,
-                            cornerRadius: 8,
-                            showsPlaceholderProgress: false,
-                            showsShadow: false,
-                            targetDecodeSide: 60
-                        )
-                    }
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    onSendSong()
-                } label: {
-                    GlowingPlusBadge(size: 20, glow: 7)
-                        .padding(3)
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                .accessibilityLabel("Send another song today")
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.white.opacity(0.06))
+                GlowingPlusBadge(size: 26, glow: 12)
             }
             .aspectRatio(1, contentMode: .fit)
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Send a song today")
     }
 
     private func openDay(_ day: DayCell) {
-        let songs = day.songs.map(\.song)
-        guard !songs.isEmpty else { return }
-        let lookup: [String: SongShare] = Dictionary(
-            day.songs.map { ($0.song.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        if let first = songs.first {
+        guard !day.songs.isEmpty else { return }
+        if let first = day.songs.first?.song {
             AudioPlayerService.shared.play(song: first)
         }
-        onOpenSeed(FullscreenSeed(
-            songs: songs,
-            startIndex: 0,
-            shareLookup: { lookup[$0] }
-        ))
+        onOpenDay(day.songs)
     }
 
     // MARK: - Formatters

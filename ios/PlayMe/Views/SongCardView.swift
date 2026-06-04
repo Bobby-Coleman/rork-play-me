@@ -219,11 +219,16 @@ struct SongCardView: View {
 
     private var header: some View {
         VStack(spacing: 4) {
-            Text(headerLabel)
-                .font(.system(size: 12, weight: .bold))
-                .tracking(1.5)
-                .foregroundStyle(.white.opacity(0.5))
-                .lineLimit(1)
+            HStack(spacing: 7) {
+                if !viewerIsSender && sentHistory == nil {
+                    AppUserAvatar(user: share.sender, size: 22, background: Color.white.opacity(0.15))
+                }
+                Text(headerLabel)
+                    .font(.system(size: 12, weight: .bold))
+                    .tracking(1.5)
+                    .foregroundStyle(.white.opacity(0.5))
+                    .lineLimit(1)
+            }
 
             HStack(spacing: 0) {
                 Button {
