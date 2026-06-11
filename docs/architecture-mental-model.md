@@ -319,7 +319,7 @@ Each of these is a few hundred lines of work at most. None require schema migrat
 **Built for:**
 
 - Sharing songs 1-to-1 with friends
-- A small, real-time social graph (max 8 friends per user today)
+- A small, real-time social graph (max 20 friends per user today)
 - Editorial discovery that one person curates (you)
 - Phone-based identity, no email/password
 - Apple Music as the source of truth, Spotify as the handoff

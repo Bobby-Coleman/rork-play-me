@@ -1082,7 +1082,7 @@ class FirebaseService {
     /// Snapshot of the current user's friend-cap state. `count` and `limit`
     /// are both maintained server-side: count by the `onFriendCreated` /
     /// `onFriendDeleted` Cloud Function triggers, limit by an admin
-    /// write (default 8, elevated per-account for premium tiers).
+    /// write (default 20, elevated per-account for premium tiers).
     struct FriendCapStatus {
         let count: Int
         let limit: Int

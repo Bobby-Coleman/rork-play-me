@@ -5,7 +5,7 @@
 // Why this exists:
 //   The May 2026 security hardening introduced a per-user friend cap.
 //   The cap is enforced in rules by reading `users/{uid}.friendCount`
-//   and comparing against `friendLimit` (default 8). Going forward,
+//   and comparing against `friendLimit` (default 20). Going forward,
 //   the `onFriendCreated` / `onFriendDeleted` Cloud Function triggers
 //   maintain the count automatically.
 //

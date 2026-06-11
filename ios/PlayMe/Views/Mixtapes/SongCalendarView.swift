@@ -14,8 +14,9 @@ import SwiftUI
 struct SongCalendarView: View {
     @Bindable var appState: AppState
     /// Parent owns the day carousel presentation, so a day tap hands the
-    /// day's shares up (sender + note travel with each song).
-    var onOpenDay: ([SongShare]) -> Void
+    /// day's song groups up (sender, note, and recipients travel with
+    /// each song).
+    var onOpenDay: ([DaySongGroup]) -> Void
     /// Opens the search/send sheet when the user taps the "+" on today.
     var onSendSong: () -> Void
 
@@ -45,7 +46,7 @@ struct SongCalendarView: View {
 
     // MARK: - Derived data
 
-    private var songsByDay: [String: [SongShare]] {
+    private var songsByDay: [String: [DaySongGroup]] {
         appState.calendarSongsByDay(friendId: selectedFriendId)
     }
 
@@ -63,7 +64,7 @@ struct SongCalendarView: View {
     /// Earliest day (in the active scope) that has a song, used as the
     /// first month of the calendar.
     private var earliestDate: Date? {
-        let dates = songsByDay.values.flatMap { $0 }.map(\.timestamp)
+        let dates = songsByDay.values.flatMap { $0 }.flatMap(\.shares).map(\.timestamp)
         return dates.min()
     }
 
@@ -256,7 +257,9 @@ struct SongCalendarView: View {
     private struct DayCell: Identifiable {
         let dayNumber: Int
         let dayString: String
-        let songs: [SongShare]
+        /// Unique songs that day (each group may carry multiple shares
+        /// when the same song went to several people).
+        let songs: [DaySongGroup]
         var id: String { dayString }
     }
 
@@ -388,6 +391,11 @@ struct SongCalendarView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                     }
                 }
+                // AlbumArtSquare is a `Color.clear` with a
+                // non-hit-testable image overlay, so a single-song day
+                // (no stacked backing rectangles) has no tappable pixels
+                // without an explicit content shape.
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }

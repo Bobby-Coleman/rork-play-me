@@ -18,7 +18,7 @@ that way.
 | 6 | Cost hygiene | ✅ Landed | Daily scheduled `cleanupPushDedupe` sweeper; `requestPendingSharesClaim` no-ops within a session; `loadBlockedUsers` switched from N+1 to bounded-concurrency fan-out. |
 | 7 | Privacy compliance | ✅ Landed | `PrivacyInfo.xcprivacy` added; `NSPrivacyPolicyURL` + `NSTermsOfServiceURL` point at Firebase-hosted policy pages. |
 | 8 | Crashlytics / structured logging | ✅ Code landed | `FirebaseCrashlytics` package is wired and high-risk Functions emit structured Cloud Logging events. Firebase Console alert setup still required. |
-| – | Friend cap (8 per user, configurable) | ✅ Landed | Default 8 in `Config.DEFAULT_FRIEND_LIMIT`, `firestore.rules`, and `functions/index.js`. Per-account override via `users/{uid}.friendLimit`. Enforced at rules level (soft) + Cloud Function trigger (hard). UI surfaces "{n} of {limit} friends" + disables Accept button at cap. |
+| – | Friend cap (20 per user, configurable) | ✅ Landed | Default 20 in `Config.DEFAULT_FRIEND_LIMIT`, `firestore.rules`, and `functions/index.js`. Per-account override via `users/{uid}.friendLimit`. Enforced at rules level (soft) + Cloud Function trigger (hard). UI surfaces "{n} of {limit} friends" + disables Accept button at cap. |
 | – | OTP resend cooldown + countdown | ✅ Landed | Both OTP entry views (`OTPVerifyView` and `OTPVerificationView`) show "Resend code in m:ss" with a `monospacedDigit` countdown. Cooldown escalates per session (30s → 60s → 120s, capped); session resend cap = 5 (`Config.OTP_RESEND_SESSION_MAX`). |
 
 ## What changed, in code
@@ -80,7 +80,7 @@ that way.
 - **`Config.swift` + `Config.plist` (gitignored).** ChottuLink API key
   is now read at runtime from `Config.plist` or the environment.
   `Config.plist.template` documents the keys for new devs.
-- **`Config.DEFAULT_FRIEND_LIMIT = 8`** is the canonical client-side
+- **`Config.DEFAULT_FRIEND_LIMIT = 20`** is the canonical client-side
   value. Mirror of the rules and Cloud Function defaults.
 - **`Config.otpResendCooldown(forAttempt:)`** computes the OTP resend
   cooldown. Escalates 30s → 60s → 120s (capped).

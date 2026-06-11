@@ -6,24 +6,31 @@ import SwiftUI
 /// user jump between them. Each card is a full player: artwork, the sender's
 /// avatar + the message they sent (no quotes), and a play / like / open /
 /// send action row.
+///
+/// Songs arrive deduped: one `DaySongGroup` per unique song that day. A
+/// group carries every share of that song (same song sent to N friends),
+/// and sent-scope cards render a "Sent to …" recipient summary that
+/// expands into the full list when it's long.
 struct DayCarouselView: View {
-    let shares: [SongShare]
+    let groups: [DaySongGroup]
     let appState: AppState
     var startIndex: Int = 0
 
     @Environment(\.dismiss) private var dismiss
-    @State private var currentShareId: String?
+    @State private var currentGroupId: String?
     @State private var sendShare: SongShare?
+    /// Group ids whose long recipient list is expanded.
+    @State private var expandedRecipientGroupIds: Set<String> = []
 
     private var audioPlayer: AudioPlayerService { AudioPlayerService.shared }
 
-    init(shares: [SongShare], appState: AppState, startIndex: Int = 0) {
-        self.shares = shares
+    init(groups: [DaySongGroup], appState: AppState, startIndex: Int = 0) {
+        self.groups = groups
         self.appState = appState
         self.startIndex = startIndex
-        let safe = min(max(0, startIndex), max(0, shares.count - 1))
-        let seed = shares.indices.contains(safe) ? shares[safe].id : nil
-        _currentShareId = State(initialValue: seed)
+        let safe = min(max(0, startIndex), max(0, groups.count - 1))
+        let seed = groups.indices.contains(safe) ? groups[safe].id : nil
+        _currentGroupId = State(initialValue: seed)
     }
 
     var body: some View {
@@ -52,7 +59,7 @@ struct DayCarouselView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear { playCurrent() }
-        .onChange(of: currentShareId) { _, _ in playCurrent() }
+        .onChange(of: currentGroupId) { _, _ in playCurrent() }
         .sheet(item: $sendShare) { share in
             SongActionSheet(song: share.song, appState: appState, share: share)
                 .presentationDetents([.large])
@@ -64,7 +71,7 @@ struct DayCarouselView: View {
 
     private var header: some View {
         VStack(spacing: 2) {
-            if let date = shares.first?.timestamp {
+            if let date = groups.first?.timestamp {
                 Text(Self.yearFormatter.string(from: date))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.45))
@@ -74,6 +81,9 @@ struct DayCarouselView: View {
             }
         }
         .frame(maxWidth: .infinity)
+        // Keep the centered date clear of the 36pt close button (plus its
+        // 16pt leading inset) that overlays the same top edge.
+        .padding(.horizontal, 60)
     }
 
     private var closeButton: some View {
@@ -95,23 +105,24 @@ struct DayCarouselView: View {
     private func pager(cardWidth: CGFloat) -> some View {
         ScrollView(.horizontal) {
             LazyHStack(spacing: 16) {
-                ForEach(shares) { share in
-                    card(share, width: cardWidth)
+                ForEach(groups) { group in
+                    card(group, width: cardWidth)
                         .frame(width: cardWidth)
-                        .id(share.id)
+                        .id(group.id)
                 }
             }
             .scrollTargetLayout()
         }
         .scrollTargetBehavior(.viewAligned)
-        .scrollPosition(id: $currentShareId)
+        .scrollPosition(id: $currentGroupId)
         .scrollIndicators(.hidden)
         .contentMargins(.horizontal, 40, for: .scrollContent)
     }
 
     @ViewBuilder
-    private func card(_ share: SongShare, width: CGFloat) -> some View {
-        let song = share.song
+    private func card(_ group: DaySongGroup, width: CGFloat) -> some View {
+        let share = group.primary
+        let song = group.song
         let trimmedNote = share.note?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         VStack(spacing: 14) {
@@ -150,8 +161,97 @@ struct DayCarouselView: View {
                     .lineLimit(1)
             }
 
+            recipientRow(for: group)
+
             actionRow(song: song, share: share)
         }
+    }
+
+    // MARK: - Recipients
+
+    /// "Sent to …" summary on a sent card. 1–3 recipients render inline;
+    /// longer lists collapse to "A, B +N" and expand on tap into the full
+    /// avatar + name list.
+    @ViewBuilder
+    private func recipientRow(for group: DaySongGroup) -> some View {
+        if group.primary.sender.id == appState.currentUser?.id, !group.recipients.isEmpty {
+            if group.recipients.count <= 3 {
+                Text("Sent to \(inlineNames(group.recipients))")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+            } else {
+                let expanded = expandedRecipientGroupIds.contains(group.id)
+                VStack(spacing: 8) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if expanded {
+                                expandedRecipientGroupIds.remove(group.id)
+                            } else {
+                                expandedRecipientGroupIds.insert(group.id)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(expanded
+                                 ? "Sent to \(group.recipients.count) people"
+                                 : "Sent to \(collapsedNames(group.recipients))")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.5))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.4))
+                                .rotationEffect(.degrees(expanded ? 180 : 0))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(expanded ? "Hide recipients" : "Show all recipients")
+
+                    if expanded {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(group.shares) { share in
+                                    HStack(spacing: 8) {
+                                        AppUserAvatar(user: share.recipient, size: 22, background: Color.white.opacity(0.16))
+                                        Text(displayName(share.recipient))
+                                            .font(.system(size: 13, weight: .medium))
+                                            .foregroundStyle(.white.opacity(0.85))
+                                        Spacer(minLength: 0)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                        }
+                        .frame(maxHeight: 132)
+                        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                        .padding(.horizontal, 8)
+                    }
+                }
+            }
+        }
+    }
+
+    private func displayName(_ user: AppUser) -> String {
+        user.firstName.isEmpty ? "@\(user.username)" : user.firstName
+    }
+
+    /// "Alice", "Alice & Bob", "Alice, Bob & Cara".
+    private func inlineNames(_ users: [AppUser]) -> String {
+        let names = users.map(displayName)
+        switch names.count {
+        case 1: return names[0]
+        case 2: return "\(names[0]) & \(names[1])"
+        default: return "\(names.dropLast().joined(separator: ", ")) & \(names[names.count - 1])"
+        }
+    }
+
+    /// "Alice, Bob +3" for collapsed long lists.
+    private func collapsedNames(_ users: [AppUser]) -> String {
+        let shown = users.prefix(2).map(displayName)
+        return "\(shown.joined(separator: ", ")) +\(users.count - shown.count)"
     }
 
     // MARK: - Actions
@@ -213,15 +313,15 @@ struct DayCarouselView: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
-                    ForEach(shares) { share in
-                        let isCurrent = share.id == currentShareId
+                    ForEach(groups) { group in
+                        let isCurrent = group.id == currentGroupId
                         Button {
                             withAnimation(.easeInOut(duration: 0.25)) {
-                                currentShareId = share.id
+                                currentGroupId = group.id
                             }
                         } label: {
                             AlbumArtSquare(
-                                url: share.song.albumArtURL,
+                                url: group.song.albumArtURL,
                                 cornerRadius: 8,
                                 showsPlaceholderProgress: false,
                                 showsShadow: false,
@@ -233,15 +333,16 @@ struct DayCarouselView: View {
                                     .stroke(AppAccentGradient.button, lineWidth: isCurrent ? 2.5 : 0)
                             )
                             .opacity(isCurrent ? 1 : 0.5)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .id("thumb-\(share.id)")
+                        .id("thumb-\(group.id)")
                     }
                 }
                 .padding(.horizontal, 20)
             }
             .scrollIndicators(.hidden)
-            .onChange(of: currentShareId) { _, newValue in
+            .onChange(of: currentGroupId) { _, newValue in
                 guard let newValue else { return }
                 withAnimation(.easeInOut(duration: 0.25)) {
                     proxy.scrollTo("thumb-\(newValue)", anchor: .center)
@@ -257,12 +358,12 @@ struct DayCarouselView: View {
     }
 
     private func playCurrent() {
-        guard let id = currentShareId,
-              let share = shares.first(where: { $0.id == id }) else { return }
-        if audioPlayer.currentSongId != share.song.id {
-            audioPlayer.play(song: share.song)
+        guard let id = currentGroupId,
+              let group = groups.first(where: { $0.id == id }) else { return }
+        if audioPlayer.currentSongId != group.song.id {
+            audioPlayer.play(song: group.song)
         }
-        recordListenIfReceived(share, source: "preview")
+        recordListenIfReceived(group.primary, source: "preview")
     }
 
     private func recordListenIfReceived(_ share: SongShare, source: String) {

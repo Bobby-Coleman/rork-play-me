@@ -65,7 +65,7 @@ Run these in staging after every rules/functions change:
 - New user can create profile and username.
 - User can send a song to a friend.
 - Recipient receives the share and the related DM.
-- Friend request accept respects the 8-friend cap.
+- Friend request accept respects the 20-friend cap.
 - Blocked user cannot write into the blocker's inbox.
 - Account deletion removes private profile data and anonymizes history.
 - `resolveSpotifyTrack` returns a result or a graceful no-match response.

@@ -79,6 +79,25 @@ nonisolated struct SentSongHistoryItem: Identifiable, Hashable, Sendable {
     }
 }
 
+/// One unique song within a single calendar day, carrying every share of
+/// that song from that day (newest first). Sending one song to five friends
+/// creates five `SongShare` docs but a single `DaySongGroup`, so calendar
+/// surfaces show the song once with a recipient list.
+nonisolated struct DaySongGroup: Identifiable, Hashable, Sendable {
+    let song: Song
+    /// Newest-first. Never empty.
+    let shares: [SongShare]
+
+    /// Unique within a day because grouping is by song.
+    var id: String { song.id }
+    /// The newest share, used for card-level context (note, timestamp,
+    /// like state, send action).
+    var primary: SongShare { shares[0] }
+    var timestamp: Date { primary.timestamp }
+    /// Every person this song went to that day, newest send first.
+    var recipients: [AppUser] { shares.map(\.recipient) }
+}
+
 nonisolated enum DiscoveryFeedItem: Identifiable, Hashable, Sendable {
     case received(SongShare)
     case sent(SentSongHistoryItem)

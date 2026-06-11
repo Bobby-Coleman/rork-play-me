@@ -177,7 +177,7 @@ struct OnboardingInviteView: View {
                     .padding(.top, 24)
                     .padding(.bottom, 6)
 
-                Text("You can have up to \(Config.DEFAULT_FRIEND_LIMIT) friends. Invites and requests only count when someone accepts.")
+                Text("Invites and requests only count when someone accepts.")
                     .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.55))
                     .multilineTextAlignment(.center)

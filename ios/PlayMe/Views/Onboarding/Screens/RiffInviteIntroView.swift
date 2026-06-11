@@ -1,6 +1,10 @@
 import SwiftUI
 
-/// Screen 11 — Invite intro (cinematic 8-dot reveal + premium teaser).
+/// Screen 11 — Invite intro (cinematic dot reveal + premium teaser).
+///
+/// Onboarding asks for `Config.ONBOARDING_INVITE_ASK` invites (5 today),
+/// not the full account friend cap. The Premium offer uses the same count
+/// so the dot animation stays legible and the ask feels attainable.
 ///
 /// The premium copy ("first month of Premium is on us") is marketing-only;
 /// no backend redemption is wired up here. It's safe to drop the line
@@ -34,11 +38,14 @@ private struct Offer10Reveal: View {
     @State private var phase: Int = 0          // 0 nothing → 4 sweep
     @State private var dotsFilled: Int = 0
 
+    /// Invites onboarding asks for (intro headline, dots, Premium offer).
+    private let premiumOfferInvites = Config.ONBOARDING_INVITE_ASK
+
     @Environment(\.riffTheme) private var theme
 
     var body: some View {
         VStack(spacing: 26) {
-            Text("Invite up to 8 friends right now.")
+            Text("Invite five of your friends")
                 .font(.system(size: 22, weight: .medium))
                 .tracking(-0.48)
                 .multilineTextAlignment(.center)
@@ -51,7 +58,7 @@ private struct Offer10Reveal: View {
                 .animation(.spring(response: 0.7, dampingFraction: 0.7), value: phase)
 
             HStack(spacing: 10) {
-                ForEach(0..<8, id: \.self) { i in
+                ForEach(0..<premiumOfferInvites, id: \.self) { i in
                     let filled = i < dotsFilled
                     Circle()
                         .fill(filled ? theme.fg : Color.clear)
@@ -65,7 +72,7 @@ private struct Offer10Reveal: View {
 
             ZStack {
                 let copy = Group {
-                    Text("Send all 8 and your first month of Premium ")
+                    Text("Send \(premiumOfferInvites) and your first month of Premium ")
                         .font(.system(size: 26, weight: .bold))
                         .tracking(-0.65)
                     +
@@ -90,7 +97,7 @@ private struct Offer10Reveal: View {
     private func runReveal() async {
         try? await Task.sleep(for: .milliseconds(350));   phase = 1
         try? await Task.sleep(for: .milliseconds(1350));  phase = 2
-        for i in 0..<8 {
+        for i in 0..<premiumOfferInvites {
             try? await Task.sleep(for: .milliseconds(170))
             dotsFilled = i + 1
         }

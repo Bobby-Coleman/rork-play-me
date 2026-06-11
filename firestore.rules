@@ -47,7 +47,7 @@ service cloud.firestore {
       ];
     }
 
-    // Per-user friend cap. Default 8 — can be elevated for a single
+    // Per-user friend cap. Default 20 — can be elevated for a single
     // account (e.g. premium subscription) by setting `friendLimit` on
     // their `users/{uid}` doc via the Admin SDK / Cloud Function.
     //
@@ -59,7 +59,7 @@ service cloud.firestore {
     // through a Cloud Function callable.
     function isUnderFriendCap(userId) {
       let userDoc = get(/databases/$(database)/documents/users/$(userId)).data;
-      return userDoc.get('friendCount', 0) < userDoc.get('friendLimit', 8);
+      return userDoc.get('friendCount', 0) < userDoc.get('friendLimit', 20);
     }
 
     match /users/{userId} {

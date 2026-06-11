@@ -85,8 +85,8 @@ struct MixtapesView: View {
                             songs: {
                                 SongCalendarView(
                                     appState: appState,
-                                    onOpenDay: { shares in
-                                        dayCarouselSeed = DayCarouselSeed(shares: shares)
+                                    onOpenDay: { groups in
+                                        dayCarouselSeed = DayCarouselSeed(groups: groups)
                                     },
                                     onSendSong: onSendSong
                                 )
@@ -155,7 +155,7 @@ struct MixtapesView: View {
             )
         }
         .fullScreenCover(item: $dayCarouselSeed) { seed in
-            DayCarouselView(shares: seed.shares, appState: appState)
+            DayCarouselView(groups: seed.groups, appState: appState)
         }
         .sheet(item: $detailMixtape) { mixtape in
             MixtapeDetailView(mixtape: mixtape, appState: appState)
@@ -2308,7 +2308,7 @@ private struct LibraryPager<SongsContent: View, MixtapesContent: View>: View {
 /// Identifiable payload for the Locket-style day carousel `.fullScreenCover`.
 struct DayCarouselSeed: Identifiable {
     let id = UUID()
-    let shares: [SongShare]
+    let groups: [DaySongGroup]
 }
 
 // MARK: - Fullscreen seed payload

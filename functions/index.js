@@ -710,18 +710,18 @@ exports.onNewFriendRequest = onDocumentCreated(
 //
 //  2) Hard cap (this function): a brief race window exists where two
 //     near-simultaneous accept-friend-request writes could each see
-//     `friendCount = 7` and pass the rule, landing the user at 9.
+//     `friendCount = 19` and pass the rule, landing the user at 21.
 //     `onFriendCreated` is the safety net: after the write lands it
 //     re-reads the current count, and if it's > limit it removes the
 //     most recently-added friend doc from both sides. The rule's
 //     soft cap means this is exceptionally rare; the safety net
 //     guarantees the invariant always converges to <= limit.
 //
-// `friendLimit` defaults to 8 and is stored on the user's `users/{uid}`
+// `friendLimit` defaults to 20 and is stored on the user's `users/{uid}`
 // doc. Premium subscribers (or other elevated tiers) get a higher
 // limit by setting this field server-side via the Admin SDK.
 
-const DEFAULT_FRIEND_LIMIT = 8;
+const DEFAULT_FRIEND_LIMIT = 20;
 
 exports.onFriendCreated = onDocumentCreated(
   "users/{userId}/friends/{friendId}",

@@ -6,7 +6,7 @@ import UIKit
 
 /// Screen 12 — Pick friends to invite via SMS.
 ///
-/// 8-slot meter + counter + search + paginated list. Each row has **+ Add**
+/// 5-slot meter + counter + search + paginated list. Each row has **+ Add**
 /// (opens `MFMessageComposeViewController`); after a successful send the row
 /// shows **Invited**. Continue stays disabled until at least one invite is sent.
 struct PickFriendsView: View {
@@ -37,9 +37,7 @@ struct PickFriendsView: View {
         "wanna do this? \(DeepLinkService.publicTestFlightInviteURL)"
     }
 
-    private var friendLimit: Int {
-        appState.friendCap?.limit ?? 8
-    }
+    private var onboardingInviteLimit: Int { Config.ONBOARDING_INVITE_ASK }
 
     private var orderedContacts: [SimpleContact] {
         let invitedIds = Set(appState.invitedContacts.map(\.id))
@@ -102,7 +100,7 @@ struct PickFriendsView: View {
         for contact in appState.invitedContacts where seen.insert("contact-\(contact.id)").inserted {
             items.append(.contact(contact, status: "Invited"))
         }
-        return Array(items.prefix(friendLimit))
+        return Array(items.prefix(onboardingInviteLimit))
     }
 
     private var canContinue: Bool {
@@ -129,22 +127,22 @@ struct PickFriendsView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(alignment: .firstTextBaseline) {
                                 GradientWaveText(
-                                    text: "Invite your \(friendLimit) favorite people",
+                                    text: "Invite five of your friends",
                                     font: .system(size: 24, weight: .semibold),
                                     tracking: -0.48,
                                     baseColor: theme.fg
                                 )
                                 Spacer()
-                                Counter(count: slotItems.count, limit: friendLimit)
+                                Counter(count: slotItems.count, limit: onboardingInviteLimit)
                             }
-                            Text("\(max(friendLimit - slotItems.count, 0)) invites left. Add someone now so you can send your first song right away.")
+                            Text("\(max(onboardingInviteLimit - slotItems.count, 0)) invites left. Add someone now so you can send your first song right away.")
                                 .font(.system(size: 13))
                                 .foregroundStyle(theme.sub)
                                 .lineSpacing(2)
                         }
                         .transition(.opacity)
 
-                        InviteSlotRow(items: slotItems, limit: friendLimit)
+                        InviteSlotRow(items: slotItems, limit: onboardingInviteLimit)
                             .transition(.opacity)
                     }
 
@@ -440,7 +438,7 @@ struct PickFriendsView: View {
     }
 
     private func suggestionRow(_ user: AppUser, pinned: Bool) -> some View {
-        let slotFull = slotItems.count >= friendLimit
+        let slotFull = slotItems.count >= onboardingInviteLimit
 
         return HStack(spacing: 12) {
             UserAvatar(user: user, side: 42, inverted: true)
@@ -473,7 +471,7 @@ struct PickFriendsView: View {
     private func userRow(_ user: AppUser) -> some View {
         let alreadyFriend = appState.friends.contains(where: { $0.id == user.id })
         let requested = appState.outgoingRequestUIDs.contains(user.id)
-        let slotFull = !requested && !alreadyFriend && slotItems.count >= friendLimit
+        let slotFull = !requested && !alreadyFriend && slotItems.count >= onboardingInviteLimit
 
         return HStack(spacing: 12) {
             UserAvatar(user: user, side: 38)
@@ -516,7 +514,7 @@ struct PickFriendsView: View {
 
     private func row(for contact: SimpleContact) -> some View {
         let invited = appState.invitedContacts.contains(where: { $0.id == contact.id })
-        let limitReached = !invited && slotItems.count >= friendLimit
+        let limitReached = !invited && slotItems.count >= onboardingInviteLimit
         let isPreparing = preparingInviteID == contact.id
 
         return HStack(spacing: 12) {
@@ -843,7 +841,7 @@ private struct SlotAvatar: View {
 
 private struct Counter: View {
     let count: Int
-    var limit: Int = 8
+    var limit: Int = Config.ONBOARDING_INVITE_ASK
     @State private var bounceKey: Int = 0
     @Environment(\.riffTheme) private var theme
 
@@ -859,7 +857,7 @@ private struct Counter: View {
 
 private struct Meter: View {
     let count: Int
-    var limit: Int = 8
+    var limit: Int = Config.ONBOARDING_INVITE_ASK
     @Environment(\.riffTheme) private var theme
 
     var body: some View {

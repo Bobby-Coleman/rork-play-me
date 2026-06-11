@@ -1122,10 +1122,13 @@ class AppState {
         isLoadingCalendarHistory = false
     }
 
-    /// Songs bucketed by local calendar day for the calendar.
+    /// Songs bucketed by local calendar day for the calendar, deduped by
+    /// song within each day — the same song sent to N friends shows up as
+    /// one `DaySongGroup` carrying all N shares (so the UI can list the
+    /// recipients) instead of N near-identical entries.
     /// - `friendId == nil`: every song YOU sent (to anyone), by day sent.
     /// - `friendId != nil`: every song that friend sent YOU, by day.
-    func calendarSongsByDay(friendId: String?) -> [String: [SongShare]] {
+    func calendarSongsByDay(friendId: String?) -> [String: [DaySongGroup]] {
         let shares: [SongShare]
         if let friendId {
             shares = calendarReceivedShares.filter { $0.sender.id == friendId }
@@ -1136,12 +1139,19 @@ class AppState {
         for share in shares {
             byDay[Self.localDayString(for: share.timestamp), default: []].append(share)
         }
-        // Newest-first within each day so the stacked cell shows the most
-        // recent album art on top.
-        for key in byDay.keys {
-            byDay[key]?.sort { $0.timestamp > $1.timestamp }
+        // Newest-first within each group and across a day's groups so the
+        // stacked cell shows the most recent album art on top.
+        var groupsByDay: [String: [DaySongGroup]] = [:]
+        for (day, dayShares) in byDay {
+            groupsByDay[day] = Dictionary(grouping: dayShares, by: { $0.song.id })
+                .values
+                .map { sameSong -> DaySongGroup in
+                    let sorted = sameSong.sorted { $0.timestamp > $1.timestamp }
+                    return DaySongGroup(song: sorted[0].song, shares: sorted)
+                }
+                .sorted { $0.timestamp > $1.timestamp }
         }
-        return byDay
+        return groupsByDay
     }
 
     /// Date the current user sent their very first song (across all of
@@ -1566,9 +1576,9 @@ class AppState {
     var friendCap: FirebaseService.FriendCapStatus?
 
     /// Current user's friend limit. Sourced from the server `friendLimit`
-    /// field (via `friendCap`), falling back to the default of 8 before the
+    /// field (via `friendCap`), falling back to the default cap before the
     /// first cap refresh lands.
-    var friendLimit: Int { friendCap?.limit ?? 8 }
+    var friendLimit: Int { friendCap?.limit ?? Config.DEFAULT_FRIEND_LIMIT }
 
     /// Live friend count for display and the cap gate. Derived from the
     /// real-time `friends` listener rather than the eventually-consistent
