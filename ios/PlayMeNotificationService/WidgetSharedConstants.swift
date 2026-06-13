@@ -19,6 +19,14 @@ enum WidgetSharedConstants {
         static let senderAvatarURL  = "widgetSenderAvatarURL"
         static let note             = "widgetNote"
         static let shareId          = "widgetShareId"
+        /// Cached song-unread portion of the app-icon badge, written by
+        /// the main app on reconcile and incremented by the notification
+        /// service extension on `new_share` pushes while suspended.
+        static let unreadCount      = "widgetUnreadCount"
+        /// Last app-icon badge total written by the main app. The
+        /// notification extension increments this on `new_share` so it
+        /// can update the badge without reading the live count.
+        static let appIconBadgeTotal = "appIconBadgeTotal"
     }
 
     static let allKeys: [String] = [
@@ -28,6 +36,8 @@ enum WidgetSharedConstants {
         Key.senderAvatarURL,
         Key.note,
         Key.shareId,
+        Key.unreadCount,
+        Key.appIconBadgeTotal,
     ]
 
     static func albumArtFileURL() -> URL? {

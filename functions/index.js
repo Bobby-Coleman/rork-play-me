@@ -817,6 +817,59 @@ exports.onFriendDeleted = onDocumentDeleted(
   }
 );
 
+// --------------- Profile Avatar Fan-Out ---------------
+//
+// Friend docs (`users/{uid}/friends/{friendId}`) snapshot the friend's
+// avatarURL at friendship creation. Profile photo changes only land on
+// `users/{uid}`, so without this trigger every friend keeps rendering the
+// stale (often missing) snapshot — which shows as initials in the Friends
+// inbox even though the user picked a photo. When a user's avatarURL
+// changes, copy it onto `users/{friendId}/friends/{uid}` for every friend.
+//
+// Uses per-doc `update` (not batched `set`) so a missing reciprocal doc
+// can't be accidentally created — that would fire onFriendCreated and
+// corrupt friendCount.
+exports.onUserAvatarChanged = onDocumentUpdated("users/{userId}", async (event) => {
+  const before = event.data.before.data() || {};
+  const after = event.data.after.data() || {};
+  if ((before.avatarURL || null) === (after.avatarURL || null)) return;
+
+  const { userId } = event.params;
+  const db = admin.firestore();
+  try {
+    const friendsSnap = await db
+      .collection("users")
+      .doc(userId)
+      .collection("friends")
+      .select()
+      .get();
+    if (friendsSnap.empty) return;
+
+    const hasURL =
+      typeof after.avatarURL === "string" && after.avatarURL.trim() !== "";
+    const newValue = hasURL ? after.avatarURL : admin.firestore.FieldValue.delete();
+
+    const results = await Promise.allSettled(
+      friendsSnap.docs.map((doc) =>
+        db
+          .collection("users")
+          .doc(doc.id)
+          .collection("friends")
+          .doc(userId)
+          .update({ avatarURL: newValue })
+      )
+    );
+    const failed = results.filter((r) => r.status === "rejected").length;
+    logEvent("avatar_fanout", {
+      uid: hashForLog(userId),
+      friends: friendsSnap.size,
+      failed,
+    });
+  } catch (err) {
+    logError("avatar_fanout_failed", err, { uid: hashForLog(userId) });
+  }
+});
+
 // --------------- Account Deletion (cascade cleanup) ---------------
 
 const DELETED_USER_NAME = "Deleted user";

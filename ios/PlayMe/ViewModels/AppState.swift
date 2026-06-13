@@ -43,6 +43,104 @@ class AppState {
         }
     }
 
+    /// Home-screen widget look (CD case / Classic). Persisted in
+    /// the App Group — not standard defaults — so the widget extension can
+    /// read it; timelines reload on change so the widget updates without
+    /// waiting for the next scheduled refresh. Stored property (rather than
+    /// computed) so SwiftUI's `@Observable` registrar tracks reads and
+    /// re-renders dependent views (Settings picker, onboarding cards) —
+    /// same trap as `appTheme` below. Legacy stored "cdDark" falls back
+    /// to `.cd` via the failable rawValue init.
+    var widgetStyle: WidgetStyle = {
+        let defaults = UserDefaults(suiteName: WidgetSharedConstants.appGroup)
+        let raw = defaults?.string(forKey: WidgetSharedConstants.Key.widgetStyle) ?? ""
+        if raw == "cdDark" { return .cd }
+        return WidgetStyle(rawValue: raw) ?? .cd
+    }() {
+        didSet { persistWidgetStyleAndReload() }
+    }
+
+    /// Writes the current style + bumps the epoch counter, then reloads
+    /// the Play Me widget timeline. Called from `didSet` and from the
+    /// style carousel when re-selecting the already-active style.
+    private func persistWidgetStyleAndReload() {
+        let defaults = UserDefaults(suiteName: WidgetSharedConstants.appGroup)
+        defaults?.set(widgetStyle.rawValue, forKey: WidgetSharedConstants.Key.widgetStyle)
+        let epoch = (defaults?.integer(forKey: WidgetSharedConstants.Key.widgetStyleEpoch) ?? 0) + 1
+        defaults?.set(epoch, forKey: WidgetSharedConstants.Key.widgetStyleEpoch)
+        reloadWidgetTimelines()
+    }
+
+    /// Selects a widget style and always busts the widget timeline cache,
+    /// even when the style is already active (re-tap recovery).
+    func commitWidgetStyle(_ style: WidgetStyle) {
+        if widgetStyle == style {
+            persistWidgetStyleAndReload()
+        } else {
+            widgetStyle = style
+        }
+    }
+
+    private static let widgetKind = "PlayMeWidget"
+
+    /// Forces the home-screen widget to re-read App Group state. Callable
+    /// from the style carousel when re-tapping the current style so a stuck
+    /// widget can recover without changing the stored preference.
+    func reloadWidgetTimelines() {
+        WidgetCenter.shared.reloadTimelines(ofKind: Self.widgetKind)
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    /// One-time migration: bust WidgetKit timelines that cached Classic
+    /// before the CD foreground-layout fix shipped.
+    private func bustStaleWidgetTimelineCacheIfNeeded() {
+        let flag = "widgetTimelineCacheBustV4"
+        guard !UserDefaults.standard.bool(forKey: flag) else { return }
+        UserDefaults.standard.set(true, forKey: flag)
+        let defaults = UserDefaults(suiteName: WidgetSharedConstants.appGroup)
+        let raw = defaults?.string(forKey: WidgetSharedConstants.Key.widgetStyle) ?? ""
+        if raw == "cdDark" {
+            defaults?.set(WidgetStyle.cd.rawValue, forKey: WidgetSharedConstants.Key.widgetStyle)
+        }
+        let epoch = (defaults?.integer(forKey: WidgetSharedConstants.Key.widgetStyleEpoch) ?? 0) + 1
+        defaults?.set(epoch, forKey: WidgetSharedConstants.Key.widgetStyleEpoch)
+        reloadWidgetTimelines()
+    }
+
+    /// Share IDs the user has "checked" — the card appeared in their feed
+    /// or they opened the song from a chat. Local-only (App Group defaults)
+    /// and deliberately separate from the server-side `recipientListenedAt`,
+    /// which means the song was actually played and drives the sender's
+    /// "Listened by" UI. Powers `unreadSongCount`.
+    var seenShareIds: Set<String> = {
+        let defaults = UserDefaults(suiteName: WidgetSharedConstants.appGroup)
+        let stored = defaults?.stringArray(forKey: WidgetSharedConstants.Key.seenShareIds) ?? []
+        return Set(stored)
+    }() {
+        didSet {
+            let defaults = UserDefaults(suiteName: WidgetSharedConstants.appGroup)
+            defaults?.set(Array(seenShareIds), forKey: WidgetSharedConstants.Key.seenShareIds)
+            recomputeBadge()
+        }
+    }
+
+    /// Songs sent to the current user that they haven't checked yet:
+    /// never played (`recipientListenedAt == nil`) and never seen in the
+    /// feed or messages. Included in the app-icon badge count.
+    var unreadSongCount: Int {
+        receivedShares.filter {
+            $0.recipientListenedAt == nil && !seenShareIds.contains($0.id)
+        }.count
+    }
+
+    /// Marks a received share as checked (viewed in the feed or in
+    /// messages) and refreshes widget song data + the app-icon badge.
+    func markShareSeen(_ shareId: String) {
+        guard !seenShareIds.contains(shareId) else { return }
+        seenShareIds.insert(shareId)
+        syncWidgetWithLatestReceivedShare()
+    }
+
     var currentUser: AppUser? {
         didSet {
             if let user = currentUser {
@@ -175,7 +273,9 @@ class AppState {
     /// Convenience for personalization-specific views that may need to surface
     /// a Settings deep-link after the user has denied Apple Music access.
     var isMusicSearchDenied: Bool { musicAuthStatus == .denied }
-    var receivedShares: [SongShare] = []
+    var receivedShares: [SongShare] = [] {
+        didSet { recomputeBadge() }
+    }
     var sentShares: [SongShare] = []
 
     /// Full (uncapped) sent-share history backing the Songs calendar. Loaded
@@ -257,17 +357,18 @@ class AppState {
         conversations.reduce(0) { $0 + $1.unreadCount }
     }
 
-    /// App-icon badge reflects both unread DMs (sum of `unreadCount_<uid>`
-    /// across conversations) and pending incoming friend requests. Reasons:
-    /// - Users expect the badge to represent "things waiting for me", not
-    ///   just messages — friend requests fit that intent.
-    /// - Opening AddFriendsView clears the request portion; opening a
-    ///   thread clears that conversation's portion. Both paths converge
-    ///   through this recompute, so the number never drifts.
+    /// App-icon badge reflects unread DMs, pending friend requests, and
+    /// unchecked received songs. Opening a thread / Add Friends / viewing
+    /// a song in the feed clears the relevant portion via `recomputeBadge`.
     private func recomputeBadge() {
         let convUnread = conversations.reduce(0) { $0 + $1.unreadCount }
         let reqUnread = incomingRequests.count
-        UNUserNotificationCenter.current().setBadgeCount(convUnread + reqUnread)
+        let songUnread = unreadSongCount
+        let total = convUnread + reqUnread + songUnread
+        UNUserNotificationCenter.current().setBadgeCount(total)
+        let defaults = UserDefaults(suiteName: WidgetSharedConstants.appGroup)
+        defaults?.set(songUnread, forKey: WidgetSharedConstants.Key.unreadCount)
+        defaults?.set(total, forKey: WidgetSharedConstants.Key.appIconBadgeTotal)
     }
 
     /// `friends` sorted by how often the current user has sent to them:
@@ -393,6 +494,7 @@ class AppState {
 
     init() {
         loadSavedUser()
+        bustStaleWidgetTimelineCacheIfNeeded()
         likedShareIds = Set(UserDefaults.standard.stringArray(forKey: "likedShareIds") ?? [])
         likedSongIds = Set(UserDefaults.standard.stringArray(forKey: "likedSongIds") ?? [])
         // Wire MixtapeStore ↔ SaveService now (before any async load), and
@@ -2027,6 +2129,12 @@ class AppState {
             WidgetCenter.shared.reloadAllTimelines()
             return
         }
+        // Prune seen ids that fell out of the share list so the set stays small
+        // (only when shares are hydrated — an empty list at cold launch
+        // must not wipe the set and resurrect old badges).
+        let currentIds = Set(receivedShares.map(\.id))
+        let pruned = seenShareIds.intersection(currentIds)
+        if pruned != seenShareIds { seenShareIds = pruned }
         defaults?.set(latest.song.title, forKey: WidgetSharedConstants.Key.songTitle)
         defaults?.set(latest.song.artist, forKey: WidgetSharedConstants.Key.songArtist)
         defaults?.set(latest.sender.firstName, forKey: WidgetSharedConstants.Key.senderFirstName)

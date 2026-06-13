@@ -171,6 +171,13 @@ struct FriendSelectorView: View {
         }
         .animation(.spring(duration: 0.3), value: showSentAnimation)
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        .onAppear {
+            // Opening a received song from chat counts as "checking" it,
+            // clearing it from the unread-songs badge (app tab + widget).
+            if let shareId = recordListenShareId {
+                appState.markShareSeen(shareId)
+            }
+        }
         .task {
             // Resolve once per-appearance so the "Open in Spotify"
             // pill can jump straight into the app. Skipped for

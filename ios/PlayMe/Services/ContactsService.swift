@@ -19,10 +19,11 @@ struct SimpleContact: Identifiable, Hashable {
         [firstName, lastName].filter { !$0.isEmpty }.joined(separator: " ")
     }
 
+    /// Single letter: first letter of the first name (last name as a
+    /// backup for contacts saved without one).
     var initials: String {
         let f = firstName.prefix(1).uppercased()
-        let l = lastName.prefix(1).uppercased()
-        return l.isEmpty ? f : "\(f)\(l)"
+        return f.isEmpty ? lastName.prefix(1).uppercased() : f
     }
 }
 

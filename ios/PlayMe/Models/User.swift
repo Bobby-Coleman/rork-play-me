@@ -17,9 +17,12 @@ nonisolated struct AppUser: Identifiable, Hashable, Sendable {
         self.avatarURL = avatarURL
     }
 
+    /// Single letter shown on avatar fallbacks: first letter of the first
+    /// name (username as a backup for users with no first name).
     var initials: String {
-        let first = firstName.prefix(1).uppercased()
-        let last = lastName.isEmpty ? username.prefix(1).uppercased() : lastName.prefix(1).uppercased()
-        return "\(first)\(last)"
+        let first = firstName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1).uppercased()
+        if !first.isEmpty { return first }
+        let fallback = username.prefix(1).uppercased()
+        return fallback.isEmpty ? "?" : fallback
     }
 }

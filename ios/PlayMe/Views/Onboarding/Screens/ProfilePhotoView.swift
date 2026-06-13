@@ -323,12 +323,13 @@ func makeProfileAvatarOptions() -> [AvatarOption] {
     return arr
 }
 
-/// Two-letter uppercase initials from a first/last name, falling back to "?".
+/// Single uppercase letter from the first name (last name as a backup),
+/// falling back to "?".
 func profileInitials(firstName: String, lastName: String) -> String {
     let first = firstName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1).uppercased()
+    if !first.isEmpty { return first }
     let last = lastName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1).uppercased()
-    let combined = "\(first)\(last)"
-    return combined.isEmpty ? "?" : combined
+    return last.isEmpty ? "?" : last
 }
 
 /// Resolves the currently selected option into the image that should be

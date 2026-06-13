@@ -267,6 +267,7 @@ struct OnboardingView: View {
 
         case .widget:
             RiffWidgetView(
+                appState: appState,
                 stepIdx: progressIndex(for: .widget) ?? 0,
                 totalSteps: totalProgress,
                 onDone: { advance(to: .sendFirstSong) },

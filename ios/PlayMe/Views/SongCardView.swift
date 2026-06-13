@@ -101,6 +101,13 @@ struct SongCardView: View {
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
+            .onAppear {
+                // The card being on screen in the feed counts as "checking"
+                // the song — clears it from the unread badge (tab + widget).
+                if shouldRecordListen {
+                    appState.markShareSeen(share.id)
+                }
+            }
             .task {
                 // View-time prefetch for the "Open in Spotify" pill.
                 // `resolveSpotifyURL` is cache-first (local → Firestore

@@ -35,6 +35,17 @@ struct SettingsView: View {
                 Text("This controls which app Riff opens when you tap a song.")
             }
 
+            Section {
+                WidgetStyleCarousel(appState: appState, tileSize: 150, foreground: .white)
+                    .padding(.vertical, 10)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+            } header: {
+                Text("Widget style")
+            } footer: {
+                Text("Swipe to choose how the home screen widget shows songs sent to you — a CD in its case, or full-screen album art.")
+            }
+
             Section("Notifications") {
                 Toggle(isOn: notificationsBinding) {
                     labelRow(icon: "bell.fill", title: "Allow notifications", tint: .orange)

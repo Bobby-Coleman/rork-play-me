@@ -36,6 +36,7 @@ final class NotificationService: UNNotificationServiceExtension {
         }
 
         persistWidgetFields(from: info)
+        incrementAppIconBadgeForNewShare()
 
         let urlString = (info["widgetAlbumArtURL"] as? String) ?? ""
         let avatarURLString = (info["widgetSenderAvatarURL"] as? String) ?? ""
@@ -84,6 +85,18 @@ final class NotificationService: UNNotificationServiceExtension {
 
         let shareId = (info["shareId"] as? String) ?? (info["id"] as? String) ?? ""
         defaults.set(shareId, forKey: WidgetSharedConstants.Key.shareId)
+    }
+
+    /// Bumps the app-icon badge when a song arrives while the app is
+    /// suspended. The main app reconciles the accurate total on next
+    /// foreground via `AppState.recomputeBadge()`.
+    private func incrementAppIconBadgeForNewShare() {
+        guard let defaults = UserDefaults(suiteName: WidgetSharedConstants.appGroup) else { return }
+        let songUnread = defaults.integer(forKey: WidgetSharedConstants.Key.unreadCount) + 1
+        defaults.set(songUnread, forKey: WidgetSharedConstants.Key.unreadCount)
+        let total = defaults.integer(forKey: WidgetSharedConstants.Key.appIconBadgeTotal) + 1
+        defaults.set(total, forKey: WidgetSharedConstants.Key.appIconBadgeTotal)
+        UNUserNotificationCenter.current().setBadgeCount(total)
     }
 
     private func string(_ info: [AnyHashable: Any], _ key: String) -> String {
